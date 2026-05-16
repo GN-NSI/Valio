@@ -451,13 +451,14 @@ async function fetchPrices(pos){
   const BATCH=4,DELAY=400;
   for(let i=0;i<pos.length;i+=BATCH){
     await Promise.all(pos.slice(i,i+BATCH).map(p=>fetchOneTicker(p)));
-    updateKPIs(pos); // KPIs progressifs
+    updateKPIs(pos);
     if(i+BATCH<pos.length)await new Promise(r=>setTimeout(r,DELAY));
   }
-  // Rendu final avec toutes les données chargées — posTblRows est smart et affiche correctement
+  // NE PAS appeler renderPosBody ici.
+  // fetchOneTicker met à jour les cellules directement dans le DOM — un re-render les écraserait.
+  // Le tri (clickSort) re-render correctement via posTblRows smart.
   S.enrichedPos=[...pos];
   updateKPIs(pos);
-  renderPosBody(sortPos(pos));
   renderDonut();
 }
 
