@@ -5,6 +5,19 @@ module.exports = async (req, res) => {
   const { symbol, type } = req.query;
   if (!symbol) return res.status(400).json({ error: 'symbol requis' });
 
+  // ── MODE PROFILE (secteur, pays, capitalisation) ─────────────────────
+  if (type === 'profile') {
+    const FMP_KEY = 'yrFxAuUHv6XgKGxfXol6sGWVxmEq6tBr';
+    try {
+      const r = await fetch(`https://financialmodelingprep.com/stable/profile?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_KEY}`);
+      const d = r.ok ? await r.json() : null;
+      const p = Array.isArray(d) ? d[0] : d;
+      if (!p || !p.symbol) return res.status(404).json({ error: `Profile introuvable pour ${symbol}` });
+      return res.json({ symbol, sector: p.sector||null, industry: p.industry||null, country: p.country||null, mktCap: p.mktCap||null, isEtf: p.isEtf||false, currency: p.currency||null });
+    } catch(err) { return res.status(500).json({ error: err.message }); }
+  }
+
+
   // ── MODE FUNDAMENTALS ──────────────────────────────────────────────
   if (type === 'fundamentals') {
     const FMP_KEY = 'yrFxAuUHv6XgKGxfXol6sGWVxmEq6tBr';
