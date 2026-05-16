@@ -57,16 +57,28 @@ module.exports = async (req, res) => {
           fcf0=cfData[0]?.freeCashFlow||null; cfo0=cfData[0]?.operatingCashFlow||null; capex0=cfData[0]?.capitalExpenditure||null;
         }
       }
+      const currentPrice = m?.stockPriceTTM || null;
+      const forwardPE = (epsForward && epsForward > 0 && currentPrice) ? currentPrice / epsForward : null;
       return res.json({
-        symbol, trailingPE:r?.priceToEarningsRatioTTM||null, epsForward,
-        currentPriceUSD:m?.stockPriceTTM||null, pegRatio:r?.priceToEarningsGrowthRatioTTM||null,
-        profitMarginPct:r?.netProfitMarginTTM?r.netProfitMarginTTM*100:null,
-        freeCashflow:fcf0, operatingCashFlow:cfo0, capex:capex0?Math.abs(capex0):null,
-        capexToCFO:cfo0&&capex0&&cfo0!==0?(Math.abs(capex0)/cfo0)*100:null,
-        fcfGrowth, pfcf:r?.priceToFreeCashFlowRatioTTM||null, mktCap:m?.marketCap||null,
-        returnOnEquity:m?.returnOnEquityTTM?m.returnOnEquityTTM*100:null,
-        freeCashFlowYield:m?.freeCashFlowYieldTTM?m.freeCashFlowYieldTTM*100:null,
-        timestamp:Date.now()
+        symbol,
+        trailingPE:    r?.priceToEarningsRatioTTM || null,
+        forwardPE,
+        epsForward,
+        pegRatio:      r?.priceToEarningsGrowthRatioTTM || null,
+        profitMarginPct: r?.netProfitMarginTTM ? r.netProfitMarginTTM*100 : null,
+        grossMarginPct:  r?.grossProfitMarginTTM ? r.grossProfitMarginTTM*100 : null,
+        operatingMarginPct: r?.operatingProfitMarginTTM ? r.operatingProfitMarginTTM*100 : null,
+        freeCashflow:  fcf0,
+        operatingCashFlow: cfo0,
+        pfcf:          r?.priceToFreeCashFlowRatioTTM || null,
+        pocf:          r?.priceToOperatingCashFlowsRatioTTM || null,
+        mktCap:        m?.marketCapTTM || m?.marketCap || null,
+        roic:          m?.roicTTM ? m.roicTTM*100 : null,
+        returnOnEquity: m?.returnOnEquityTTM ? m.returnOnEquityTTM*100 : null,
+        netDebtToEBITDA: m?.netDebtToEBITDATTM || null,
+        fcfGrowth,
+        currentPriceUSD: currentPrice,
+        timestamp: Date.now()
       });
     } catch(err) { return res.status(500).json({error:err.message}); }
   }
