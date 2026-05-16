@@ -6,343 +6,148 @@
 <title>Folio</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- NOTE: pas de supabase-js CDN — on utilise fetch() natif directement sur l'API REST -->
 <style>
-/* ══════════════════════════════════════════════════════
-   VARIABLES & RESET
-══════════════════════════════════════════════════════ */
-:root {
-  --bg:      #080811;
-  --bg2:     #0d0d1a;
-  --card:    #111120;
-  --card2:   #18182a;
-  --border:  #1e1e35;
-  --border2: #2a2a45;
-  --text:    #e8e8f5;
-  --muted:   #6b6b8a;
-  --muted2:  #3d3d5c;
-  --blue:    #5b7ef5;
-  --blue2:   #3a5ce4;
-  --green:   #22c55e;
-  --green2:  #16a34a;
-  --red:     #ef4444;
-  --yellow:  #f59e0b;
-  --purple:  #8b5cf6;
-  --font:    'Inter', sans-serif;
-}
-* { margin:0; padding:0; box-sizing:border-box; }
-html, body { height:100%; }
-body { background:var(--bg); color:var(--text); font-family:var(--font); font-size:14px; }
-input, select, button, textarea { font-family:var(--font); }
-a { color:var(--blue); text-decoration:none; }
+:root{--bg:#080811;--bg2:#0d0d1a;--card:#111120;--card2:#18182a;--border:#1e1e35;--border2:#2a2a45;
+  --text:#e8e8f5;--muted:#6b6b8a;--muted2:#3d3d5c;--blue:#5b7ef5;--blue2:#3a5ce4;
+  --green:#22c55e;--red:#ef4444;--yellow:#f59e0b;--purple:#8b5cf6;--font:'Inter',sans-serif}
+*{margin:0;padding:0;box-sizing:border-box}html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px}
+input,select,button{font-family:var(--font)}
 
-/* ══════════════════════════════════════════════════════
-   AUTH SCREEN
-══════════════════════════════════════════════════════ */
-#auth-screen {
-  min-height:100vh; display:flex;
-  align-items:center; justify-content:center;
-  background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(91,126,245,.2) 0%, transparent 60%);
-}
-.auth-box {
-  width:420px; background:var(--card);
-  border:1px solid var(--border2); border-radius:20px; padding:40px;
-}
-.auth-logo { text-align:center; margin-bottom:32px; }
-.auth-logo .mark {
-  width:52px; height:52px;
-  background:linear-gradient(135deg, var(--blue), var(--purple));
-  border-radius:14px; display:inline-flex;
-  align-items:center; justify-content:center;
-  font-size:24px; font-weight:800; color:#fff; margin-bottom:14px;
-  box-shadow:0 8px 30px rgba(91,126,245,.35);
-}
-.auth-logo h1 { font-size:24px; font-weight:700; letter-spacing:-.3px; }
-.auth-logo p  { font-size:13px; color:var(--muted); margin-top:4px; }
+#auth-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(91,126,245,.2) 0%,transparent 60%)}
+.auth-box{width:420px;background:var(--card);border:1px solid var(--border2);border-radius:20px;padding:40px}
+.auth-logo{text-align:center;margin-bottom:32px}
+.auth-logo .mark{width:52px;height:52px;background:linear-gradient(135deg,var(--blue),var(--purple));
+  border-radius:14px;display:inline-flex;align-items:center;justify-content:center;
+  font-size:24px;font-weight:800;color:#fff;margin-bottom:14px;box-shadow:0 8px 30px rgba(91,126,245,.35)}
+.auth-logo h1{font-size:24px;font-weight:700}.auth-logo p{font-size:13px;color:var(--muted);margin-top:4px}
+.auth-tabs{display:flex;margin-bottom:28px;border-bottom:1px solid var(--border)}
+.auth-tab{flex:1;text-align:center;padding:10px 0;cursor:pointer;font-size:14px;font-weight:500;
+  color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .15s}
+.auth-tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+.auth-error{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;
+  padding:10px 14px;font-size:13px;color:var(--red);margin-bottom:16px;display:none}
+.form-group{margin-bottom:16px}
+.form-label{display:block;font-size:12px;font-weight:500;color:var(--muted);margin-bottom:6px}
+.form-input{width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:9px;
+  padding:10px 14px;color:var(--text);font-size:14px;outline:none;transition:border-color .15s;-webkit-appearance:none}
+.form-input:focus{border-color:var(--blue)}.form-input::placeholder{color:var(--muted2)}
+select.form-input{cursor:pointer}.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 18px;
+  border-radius:9px;border:none;cursor:pointer;font-size:14px;font-weight:500;transition:all .15s}
+.btn-primary{background:var(--blue2);color:#fff}.btn-primary:hover{background:var(--blue)}
+.btn-primary:disabled{opacity:.55;cursor:not-allowed}
+.btn-ghost{background:var(--card2);color:var(--text);border:1px solid var(--border)}
+.btn-ghost:hover{border-color:var(--border2);background:var(--card)}
+.btn-danger{background:rgba(239,68,68,.12);color:var(--red);border:1px solid rgba(239,68,68,.25)}
+.btn-danger:hover{background:rgba(239,68,68,.22)}
+.btn-edit{background:rgba(91,126,245,.12);color:var(--blue);border:1px solid rgba(91,126,245,.25)}
+.btn-edit:hover{background:rgba(91,126,245,.22)}
+.btn-full{width:100%}.btn-sm{padding:5px 10px;font-size:12px;border-radius:7px}
 
-.auth-tabs { display:flex; margin-bottom:28px; border-bottom:1px solid var(--border); }
-.auth-tab {
-  flex:1; text-align:center; padding:10px 0; cursor:pointer;
-  font-size:14px; font-weight:500; color:var(--muted);
-  border-bottom:2px solid transparent; margin-bottom:-1px; transition:all .15s;
-}
-.auth-tab.active { color:var(--blue); border-bottom-color:var(--blue); }
+#app-screen{display:none;height:100vh;overflow:hidden}
+.app-layout{display:flex;height:100vh}
+#sidebar{width:224px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;height:100vh}
+.sidebar-logo{padding:20px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:11px}
+.sidebar-logo .mark{width:34px;height:34px;background:linear-gradient(135deg,var(--blue),var(--purple));
+  border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;color:#fff;flex-shrink:0}
+.sidebar-logo .name{font-size:18px;font-weight:700;letter-spacing:-.2px}
+nav{flex:1;padding:10px 8px;overflow-y:auto}
+.nav-section{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--muted2);padding:14px 10px 5px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;cursor:pointer;
+  font-size:13.5px;font-weight:500;color:var(--muted);transition:all .12s;margin-bottom:1px}
+.nav-item:hover:not(.disabled){background:var(--card);color:var(--text)}
+.nav-item.active{background:rgba(91,126,245,.14);color:var(--blue);font-weight:600}
+.nav-item.disabled{opacity:.35;cursor:default}
+.nav-icon{font-size:15px;width:20px;text-align:center;flex-shrink:0}
+.nav-soon{font-size:9px;background:var(--card2);color:var(--muted2);padding:2px 6px;border-radius:4px;margin-left:auto;font-weight:600}
+.sidebar-footer{padding:16px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;cursor:pointer;transition:background .12s}
+.sidebar-footer:hover{background:var(--card)}
+.avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:14px;font-weight:700;flex-shrink:0;background:rgba(91,126,245,.18);color:var(--blue)}
+.sidebar-user .uname{font-size:13px;font-weight:600}.sidebar-user .logout{font-size:11px;color:var(--muted);margin-top:1px}
 
-.auth-error {
-  background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.3);
-  border-radius:8px; padding:10px 14px; font-size:13px; color:var(--red);
-  margin-bottom:16px; display:none;
-}
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+#topbar{height:56px;flex-shrink:0;background:var(--bg2);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;padding:0 28px;gap:12px}
+.topbar-title{font-size:16px;font-weight:700;flex:1}
+#page{flex:1;overflow-y:auto;padding:28px}
 
-/* ══════════════════════════════════════════════════════
-   FORMS & BUTTONS
-══════════════════════════════════════════════════════ */
-.form-group { margin-bottom:16px; }
-.form-label { display:block; font-size:12px; font-weight:500; color:var(--muted); margin-bottom:6px; }
-.form-input {
-  width:100%; background:var(--bg2); border:1px solid var(--border);
-  border-radius:9px; padding:10px 14px; color:var(--text);
-  font-size:14px; outline:none; transition:border-color .15s;
-  -webkit-appearance:none;
-}
-.form-input:focus { border-color:var(--blue); }
-.form-input::placeholder { color:var(--muted2); }
-select.form-input { cursor:pointer; }
-.form-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.card{background:var(--card);border:1px solid var(--border);border-radius:13px}
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}
+.kpi-card{background:var(--card);border:1px solid var(--border);border-radius:13px;padding:22px}
+.kpi-label{font-size:12px;font-weight:500;color:var(--muted);margin-bottom:10px}
+.kpi-value{font-size:26px;font-weight:700;line-height:1.1;margin-bottom:8px}
+.kpi-sub{font-size:12px;color:var(--muted)}
+.badge{display:inline-flex;align-items:center;gap:3px;padding:4px 9px;border-radius:20px;font-size:12px;font-weight:600}
+.badge-green{background:rgba(34,197,94,.14);color:var(--green)}.badge-red{background:rgba(239,68,68,.14);color:var(--red)}
 
-.btn {
-  display:inline-flex; align-items:center; justify-content:center; gap:6px;
-  padding:10px 18px; border-radius:9px; border:none;
-  cursor:pointer; font-size:14px; font-weight:500; transition:all .15s;
-}
-.btn-primary { background:var(--blue2); color:#fff; }
-.btn-primary:hover { background:var(--blue); }
-.btn-primary:disabled { opacity:.55; cursor:not-allowed; }
-.btn-ghost { background:var(--card2); color:var(--text); border:1px solid var(--border); }
-.btn-ghost:hover { border-color:var(--border2); background:var(--card); }
-.btn-danger { background:rgba(239,68,68,.12); color:var(--red); border:1px solid rgba(239,68,68,.25); }
-.btn-danger:hover { background:rgba(239,68,68,.22); }
-.btn-full { width:100%; }
-.btn-sm { padding:5px 12px; font-size:12px; border-radius:7px; }
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead th{padding:10px 14px;text-align:right;font-size:11px;font-weight:600;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);white-space:nowrap}
+thead th:first-child{text-align:left}
+tbody tr{border-bottom:1px solid var(--border);transition:background .08s}
+tbody tr:hover{background:var(--bg2)}tbody tr:last-child{border-bottom:none}
+td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-align:left}
+.ticker-cell{display:flex;align-items:center;gap:11px}
+.ticker-logo{width:34px;height:34px;border-radius:9px;background:var(--card2);border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--muted);flex-shrink:0;overflow:hidden}
+.ticker-logo img{width:100%;height:100%;object-fit:cover;border-radius:8px}
+.ticker-name{font-weight:600;font-size:14px}.ticker-sym{font-size:11px;color:var(--muted);margin-top:1px;font-family:monospace}
+.mono{font-family:'Courier New',monospace}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.chart-wrap{position:relative;height:210px}
+.section-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.section-hd h3{font-size:15px;font-weight:600}
 
-/* ══════════════════════════════════════════════════════
-   APP LAYOUT
-══════════════════════════════════════════════════════ */
-#app-screen { display:none; height:100vh; overflow:hidden; }
-.app-layout { display:flex; height:100vh; }
+.account-card{background:var(--card);border:1px solid var(--border);border-radius:13px;margin-bottom:16px;overflow:hidden}
+.account-header{display:flex;align-items:center;gap:12px;padding:18px 20px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:8px}
+.account-icon{width:40px;height:40px;border-radius:10px;background:rgba(91,126,245,.14);color:var(--blue);
+  display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.type-badge{padding:3px 8px;border-radius:5px;font-size:11px;font-weight:700;background:var(--card2);color:var(--muted)}
+.acct-tag{display:inline-flex;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:600;
+  font-family:monospace;background:rgba(91,126,245,.12);color:var(--blue);margin:1px}
 
-/* SIDEBAR */
-#sidebar {
-  width:224px; flex-shrink:0;
-  background:var(--bg2); border-right:1px solid var(--border);
-  display:flex; flex-direction:column; height:100vh;
-}
-.sidebar-logo {
-  padding:20px 18px;
-  border-bottom:1px solid var(--border);
-  display:flex; align-items:center; gap:11px;
-}
-.sidebar-logo .mark {
-  width:34px; height:34px;
-  background:linear-gradient(135deg, var(--blue), var(--purple));
-  border-radius:9px;
-  display:flex; align-items:center; justify-content:center;
-  font-size:16px; font-weight:800; color:#fff; flex-shrink:0;
-}
-.sidebar-logo .name { font-size:18px; font-weight:700; letter-spacing:-.2px; }
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;display:none;
+  align-items:center;justify-content:center;backdrop-filter:blur(2px)}
+.modal-overlay.open{display:flex}
+.modal{background:var(--card);border:1px solid var(--border2);border-radius:18px;padding:28px;
+  width:520px;max-width:95vw;max-height:90vh;overflow-y:auto}
+.modal-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+.modal-hd h2{font-size:17px;font-weight:700}
+.modal-close{background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;padding:2px 6px;border-radius:4px}
+.modal-close:hover{background:var(--card2)}.modal-footer{display:flex;gap:10px;justify-content:flex-end;margin-top:8px}
+.tx-total-box{background:var(--bg2);border:1px solid var(--border);border-radius:9px;
+  padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--muted)}
+.tx-total-box strong{color:var(--text)}
 
-nav { flex:1; padding:10px 8px; overflow-y:auto; }
-.nav-section {
-  font-size:10px; font-weight:600; text-transform:uppercase;
-  letter-spacing:.1em; color:var(--muted2); padding:14px 10px 5px;
-}
-.nav-item {
-  display:flex; align-items:center; gap:10px;
-  padding:9px 10px; border-radius:9px; cursor:pointer;
-  font-size:13.5px; font-weight:500; color:var(--muted);
-  transition:all .12s; margin-bottom:1px; position:relative;
-}
-.nav-item:hover:not(.disabled) { background:var(--card); color:var(--text); }
-.nav-item.active { background:rgba(91,126,245,.14); color:var(--blue); font-weight:600; }
-.nav-item.disabled { opacity:.35; cursor:default; }
-.nav-icon { font-size:15px; width:20px; text-align:center; flex-shrink:0; }
-.nav-soon {
-  font-size:9px; background:var(--card2); color:var(--muted2);
-  padding:2px 6px; border-radius:4px; margin-left:auto; font-weight:600;
-}
-
-.sidebar-footer {
-  padding:16px; border-top:1px solid var(--border);
-  display:flex; align-items:center; gap:10px; cursor:pointer;
-  transition:background .12s;
-}
-.sidebar-footer:hover { background:var(--card); }
-.avatar {
-  width:34px; height:34px; border-radius:50%;
-  display:flex; align-items:center; justify-content:center;
-  font-size:14px; font-weight:700; flex-shrink:0;
-  background:rgba(91,126,245,.18); color:var(--blue);
-}
-.sidebar-user .uname { font-size:13px; font-weight:600; }
-.sidebar-user .logout { font-size:11px; color:var(--muted); margin-top:1px; }
-
-/* MAIN */
-#main { flex:1; display:flex; flex-direction:column; overflow:hidden; min-width:0; }
-#topbar {
-  height:56px; flex-shrink:0; background:var(--bg2);
-  border-bottom:1px solid var(--border);
-  display:flex; align-items:center; padding:0 28px; gap:12px;
-}
-.topbar-title { font-size:16px; font-weight:700; flex:1; }
-#page { flex:1; overflow-y:auto; padding:28px; }
-
-/* ══════════════════════════════════════════════════════
-   COMPONENTS
-══════════════════════════════════════════════════════ */
-.card { background:var(--card); border:1px solid var(--border); border-radius:13px; }
-
-/* KPI GRID */
-.kpi-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; margin-bottom:22px; }
-.kpi-card { background:var(--card); border:1px solid var(--border); border-radius:13px; padding:22px; }
-.kpi-label { font-size:12px; font-weight:500; color:var(--muted); margin-bottom:10px; }
-.kpi-value { font-size:26px; font-weight:700; line-height:1.1; margin-bottom:8px; }
-.kpi-sub { font-size:12px; color:var(--muted); }
-
-.badge {
-  display:inline-flex; align-items:center; gap:3px;
-  padding:4px 9px; border-radius:20px; font-size:12px; font-weight:600;
-}
-.badge-green  { background:rgba(34,197,94,.14); color:var(--green); }
-.badge-red    { background:rgba(239,68,68,.14);  color:var(--red);   }
-.badge-blue   { background:rgba(91,126,245,.14); color:var(--blue);  }
-.badge-muted  { background:var(--card2); color:var(--muted); }
-
-/* TABLE */
-.tbl-wrap { overflow-x:auto; }
-table { width:100%; border-collapse:collapse; font-size:13px; }
-thead th {
-  padding:10px 16px; text-align:right;
-  font-size:11px; font-weight:600; color:var(--muted);
-  text-transform:uppercase; letter-spacing:.06em;
-  border-bottom:1px solid var(--border); white-space:nowrap;
-}
-thead th:first-child { text-align:left; }
-tbody tr { border-bottom:1px solid var(--border); transition:background .08s; }
-tbody tr:hover { background:var(--bg2); }
-tbody tr:last-child { border-bottom:none; }
-td { padding:13px 16px; text-align:right; vertical-align:middle; }
-td:first-child { text-align:left; }
-
-.ticker-cell { display:flex; align-items:center; gap:11px; }
-.ticker-logo {
-  width:34px; height:34px; border-radius:9px;
-  background:var(--card2); border:1px solid var(--border);
-  display:flex; align-items:center; justify-content:center;
-  font-size:10px; font-weight:700; color:var(--muted);
-  flex-shrink:0; overflow:hidden;
-}
-.ticker-logo img { width:100%; height:100%; object-fit:cover; border-radius:8px; }
-.ticker-name { font-weight:600; font-size:14px; }
-.ticker-sym  { font-size:11px; color:var(--muted); margin-top:1px; font-family:monospace; }
-.mono { font-family:'JetBrains Mono','Fira Code',monospace; }
-
-/* 2-col grid */
-.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
-.chart-wrap { position:relative; height:210px; }
-
-/* SECTION HEADER */
-.section-hd {
-  display:flex; align-items:center; justify-content:space-between;
-  margin-bottom:16px;
-}
-.section-hd h3 { font-size:15px; font-weight:600; }
-
-/* ACCOUNT CARD */
-.account-card {
-  background:var(--card); border:1px solid var(--border);
-  border-radius:13px; margin-bottom:16px; overflow:hidden;
-}
-.account-header {
-  display:flex; align-items:center; gap:12px;
-  padding:18px 20px; border-bottom:1px solid var(--border);
-}
-.account-icon {
-  width:40px; height:40px; border-radius:10px;
-  background:rgba(91,126,245,.14); color:var(--blue);
-  display:flex; align-items:center; justify-content:center;
-  font-size:18px; flex-shrink:0;
-}
-.type-badge {
-  padding:3px 8px; border-radius:5px; font-size:11px; font-weight:700;
-  background:var(--card2); color:var(--muted); letter-spacing:.05em;
-}
-
-/* MODAL */
-.modal-overlay {
-  position:fixed; inset:0; background:rgba(0,0,0,.75);
-  z-index:200; display:none; align-items:center; justify-content:center;
-  backdrop-filter:blur(2px);
-}
-.modal-overlay.open { display:flex; }
-.modal {
-  background:var(--card); border:1px solid var(--border2);
-  border-radius:18px; padding:28px;
-  width:520px; max-width:95vw; max-height:90vh; overflow-y:auto;
-}
-.modal-hd { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
-.modal-hd h2 { font-size:17px; font-weight:700; }
-.modal-close { background:none; border:none; color:var(--muted); font-size:18px; cursor:pointer; padding:2px 6px; border-radius:4px; }
-.modal-close:hover { background:var(--card2); }
-.modal-footer { display:flex; gap:10px; justify-content:flex-end; margin-top:8px; }
-
-/* TX TOTAL BOX */
-.tx-total-box {
-  background:var(--bg2); border:1px solid var(--border);
-  border-radius:9px; padding:12px 16px; margin-bottom:16px;
-  font-size:13px; color:var(--muted);
-}
-.tx-total-box strong { color:var(--text); }
-
-/* ACCT TAG */
-.acct-tag {
-  display:inline-flex; padding:2px 7px; border-radius:4px;
-  font-size:10px; font-weight:600; font-family:monospace;
-  background:rgba(91,126,245,.12); color:var(--blue);
-  margin:1px;
-}
-
-/* EMPTY STATE */
-.empty-state { text-align:center; padding:70px 20px; }
-.empty-state .icon { font-size:52px; margin-bottom:16px; }
-.empty-state h3 { font-size:18px; font-weight:700; margin-bottom:8px; }
-.empty-state p { font-size:14px; color:var(--muted); margin-bottom:24px; }
-
-/* LOADING */
-.shimmer {
-  background:linear-gradient(90deg, var(--card) 25%, var(--card2) 50%, var(--card) 75%);
-  background-size:200% 100%;
-  animation:shimmer 1.5s infinite; border-radius:5px; display:inline-block;
-}
-@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
-.spinner {
-  width:18px; height:18px; border:2px solid var(--border);
-  border-top-color:var(--blue); border-radius:50%;
-  animation:spin .7s linear infinite; display:inline-block;
-}
-@keyframes spin { to{transform:rotate(360deg)} }
-
-/* TOAST */
-.toast {
-  position:fixed; bottom:24px; right:24px;
-  background:var(--card2); border:1px solid var(--border2);
-  border-radius:10px; padding:12px 18px; font-size:13px; font-weight:500;
-  z-index:999; animation:slideUp .25s ease;
-  display:flex; align-items:center; gap:8px; max-width:340px;
-  box-shadow:0 8px 30px rgba(0,0,0,.4);
-}
-@keyframes slideUp { from{transform:translateY(12px);opacity:0} to{transform:translateY(0);opacity:1} }
-
-/* REFRESH BTN */
-.refresh-btn { color:var(--muted); background:none; border:1px solid var(--border); }
-.refresh-btn:hover { color:var(--text); background:var(--card); }
-
-/* COLORS */
-.c-green { color:var(--green) !important; }
-.c-red   { color:var(--red) !important; }
-.c-muted { color:var(--muted) !important; }
+.empty-state{text-align:center;padding:70px 20px}
+.empty-state .icon{font-size:52px;margin-bottom:16px}
+.empty-state h3{font-size:18px;font-weight:700;margin-bottom:8px}
+.empty-state p{font-size:14px;color:var(--muted);margin-bottom:24px}
+.shimmer{background:linear-gradient(90deg,var(--card) 25%,var(--card2) 50%,var(--card) 75%);
+  background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:5px;display:inline-block}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.spinner{width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--blue);
+  border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+.toast{position:fixed;bottom:24px;right:24px;background:var(--card2);border:1px solid var(--border2);
+  border-radius:10px;padding:12px 18px;font-size:13px;font-weight:500;z-index:999;
+  animation:slideUp .25s ease;display:flex;align-items:center;gap:8px;max-width:340px;box-shadow:0 8px 30px rgba(0,0,0,.4)}
+@keyframes slideUp{from{transform:translateY(12px);opacity:0}to{transform:translateY(0);opacity:1}}
+.c-green{color:var(--green)!important}.c-red{color:var(--red)!important}.c-muted{color:var(--muted)!important}
 </style>
 </head>
 <body>
 
-<!-- ══════════════════════════════════════════════════════
-     AUTH SCREEN
-══════════════════════════════════════════════════════ -->
 <div id="auth-screen">
   <div class="auth-box">
     <div class="auth-logo">
-      <div class="mark">F</div>
-      <h1>Folio</h1>
-      <p>Suivi de portefeuille personnel</p>
+      <div class="mark">F</div><h1>Folio</h1><p>Suivi de portefeuille personnel</p>
     </div>
     <div class="auth-tabs">
       <div class="auth-tab active" id="tab-login" onclick="switchTab('login')">Connexion</div>
@@ -351,56 +156,35 @@ td:first-child { text-align:left; }
     <div id="auth-error" class="auth-error"></div>
     <div class="form-group">
       <label class="form-label">Email</label>
-      <input type="email" id="auth-email" class="form-input" placeholder="vous@email.com"
-             onkeydown="if(event.key==='Enter') handleAuth()">
+      <input type="email" id="auth-email" class="form-input" placeholder="vous@email.com" onkeydown="if(event.key==='Enter')handleAuth()">
     </div>
     <div id="signup-name-group" class="form-group" style="display:none">
       <label class="form-label">Nom d'affichage</label>
-      <input type="text" id="auth-displayname" class="form-input" placeholder="ex: Nathan"
-             onkeydown="if(event.key==='Enter') handleAuth()">
+      <input type="text" id="auth-displayname" class="form-input" placeholder="ex: Nathan" onkeydown="if(event.key==='Enter')handleAuth()">
     </div>
     <div class="form-group">
       <label class="form-label">Mot de passe</label>
-      <input type="password" id="auth-password" class="form-input" placeholder="••••••••"
-             onkeydown="if(event.key==='Enter') handleAuth()">
+      <input type="password" id="auth-password" class="form-input" placeholder="••••••••" onkeydown="if(event.key==='Enter')handleAuth()">
     </div>
     <button class="btn btn-primary btn-full" id="auth-btn" onclick="handleAuth()">Se connecter</button>
   </div>
 </div>
 
-<!-- ══════════════════════════════════════════════════════
-     APP
-══════════════════════════════════════════════════════ -->
 <div id="app-screen">
   <div class="app-layout">
-
-    <!-- SIDEBAR -->
     <aside id="sidebar">
-      <div class="sidebar-logo">
-        <div class="mark">F</div>
-        <span class="name">Folio</span>
-      </div>
+      <div class="sidebar-logo"><div class="mark">F</div><span class="name">Folio</span></div>
       <nav>
         <div class="nav-item active" id="nav-portfolio" onclick="navigate('portfolio')">
-          <span class="nav-icon">📊</span><span>Portefeuille</span>
-        </div>
+          <span class="nav-icon">📊</span><span>Portefeuille</span></div>
         <div class="nav-item" id="nav-accounts" onclick="navigate('accounts')">
-          <span class="nav-icon">💳</span><span>Comptes</span>
-        </div>
+          <span class="nav-icon">💳</span><span>Comptes</span></div>
         <div class="nav-section">Analyse</div>
-        <div class="nav-item disabled">
-          <span class="nav-icon">🔍</span><span>Screener</span><span class="nav-soon">BIENTÔT</span>
-        </div>
-        <div class="nav-item disabled">
-          <span class="nav-icon">⭐</span><span>Watchlist</span><span class="nav-soon">BIENTÔT</span>
-        </div>
-        <div class="nav-item disabled">
-          <span class="nav-icon">📓</span><span>Journal</span><span class="nav-soon">BIENTÔT</span>
-        </div>
+        <div class="nav-item disabled"><span class="nav-icon">🔍</span><span>Screener</span><span class="nav-soon">BIENTÔT</span></div>
+        <div class="nav-item disabled"><span class="nav-icon">⭐</span><span>Watchlist</span><span class="nav-soon">BIENTÔT</span></div>
+        <div class="nav-item disabled"><span class="nav-icon">📓</span><span>Journal</span><span class="nav-soon">BIENTÔT</span></div>
         <div class="nav-section">Social</div>
-        <div class="nav-item disabled">
-          <span class="nav-icon">👥</span><span>Amis</span><span class="nav-soon">BIENTÔT</span>
-        </div>
+        <div class="nav-item disabled"><span class="nav-icon">👥</span><span>Amis</span><span class="nav-soon">BIENTÔT</span></div>
       </nav>
       <div class="sidebar-footer" onclick="logout()">
         <div class="avatar" id="sidebar-avatar">?</div>
@@ -410,832 +194,413 @@ td:first-child { text-align:left; }
         </div>
       </div>
     </aside>
-
-    <!-- MAIN -->
     <div id="main">
       <div id="topbar">
         <span class="topbar-title" id="page-title">Portefeuille</span>
         <span id="eurusd-rate" style="font-size:12px;color:var(--muted)"></span>
-        <button class="btn btn-ghost btn-sm refresh-btn" onclick="refreshData()" title="Actualiser les prix">↻ Actualiser</button>
+        <button class="btn btn-ghost btn-sm" onclick="refreshData()" style="color:var(--muted)">↻ Actualiser</button>
       </div>
       <div id="page"></div>
     </div>
-
   </div>
 </div>
 
-<!-- MODAL -->
 <div id="modal-overlay" class="modal-overlay" onclick="closeModalOutside(event)">
   <div class="modal" id="modal-content"></div>
 </div>
 
-<!-- ══════════════════════════════════════════════════════
-     JAVASCRIPT
-══════════════════════════════════════════════════════ -->
 <script>
-// ── CONFIG ───────────────────────────────────────────────────
-const SUPABASE_URL = 'https://dnmibojfzquicbhtactx.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_Wn3itCQXPfm-Onwey7h7Uw_pa2foE-f';
-const API          = '/api/quote';
+// ═══════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════
+const SUPA_URL = 'https://dnmibojfzquicbhtactx.supabase.co';
+const SUPA_KEY = 'sb_publishable_Wn3itCQXPfm-Onwey7h7Uw_pa2foE-f';
+const API      = '/api/quote';
 
-const { createClient } = window.supabase;
-const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+// ═══════════════════════════════════════════════════
+// SESSION (localStorage, sans SDK)
+// ═══════════════════════════════════════════════════
+let _sess = null;
 
-// ── STATE ────────────────────────────────────────────────────
-const S = {
-  user:         null,
-  profile:      null,
-  accounts:     [],
-  transactions: [],
-  prices:       {},
-  eurUsd:       1.08,   // 1 EUR = X USD
-  page:         'portfolio',
-  chart:        null,
-  loading:      false
-};
+function loadSession()  { try { _sess = JSON.parse(localStorage.getItem('folio_sess')||'null'); } catch{_sess=null;} }
+function saveSession(s) { _sess=s; try{ s ? localStorage.setItem('folio_sess',JSON.stringify(s)) : localStorage.removeItem('folio_sess'); }catch{} }
+function getUser()      { return _sess?.user||null; }
+function getToken()     { return _sess?.access_token||null; }
 
-// ── AUTH ─────────────────────────────────────────────────────
-let authMode = 'login';
-
-function switchTab(mode) {
-  authMode = mode;
-  document.getElementById('tab-login').classList.toggle('active', mode === 'login');
-  document.getElementById('tab-signup').classList.toggle('active', mode === 'signup');
-  document.getElementById('signup-name-group').style.display = mode === 'signup' ? 'block' : 'none';
-  document.getElementById('auth-btn').textContent = mode === 'login' ? 'Se connecter' : "S'inscrire";
-  hideAuthError();
+// ═══════════════════════════════════════════════════
+// SUPABASE REST (fetch natif — immunisé aux extensions)
+// ═══════════════════════════════════════════════════
+function hdrs(extra={}) {
+  const h={'apikey':SUPA_KEY,'Content-Type':'application/json',...extra};
+  const t=getToken(); if(t) h['Authorization']='Bearer '+t;
+  return h;
+}
+async function rest(path,opts={}) {
+  const r=await fetch(SUPA_URL+path,{...opts,headers:{...hdrs(),...(opts.headers||{})}});
+  if(r.status===204) return null;
+  const d=await r.json();
+  if(!r.ok) throw new Error(d?.message||d?.error_description||d?.error||JSON.stringify(d));
+  return d;
+}
+async function authPost(path,body) {
+  const r=await fetch(SUPA_URL+path,{method:'POST',headers:{apikey:SUPA_KEY,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d=await r.json(); if(d.error||d.error_description) throw new Error(d.error_description||d.error); return d;
+}
+async function dbGet(table,q='')   { return rest('/rest/v1/'+table+(q?'?'+q:''),{headers:{Prefer:'return=representation'}}); }
+async function dbPost(table,data)  { const d=await rest('/rest/v1/'+table,{method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify(data)}); return Array.isArray(d)?d[0]:d; }
+async function dbPatch(table,q,data){ const d=await rest('/rest/v1/'+table+'?'+q,{method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify(data)}); return Array.isArray(d)?d[0]:d; }
+async function dbDel(table,q)      { await rest('/rest/v1/'+table+'?'+q,{method:'DELETE'}); }
+async function dbUpsert(table,data,conflict) {
+  await rest('/rest/v1/'+table+(conflict?'?on_conflict='+conflict:''),
+    {method:'POST',headers:{Prefer:'resolution=ignore-duplicates,return=representation'},body:JSON.stringify(data)});
 }
 
-async function handleAuth() {
-  const email    = document.getElementById('auth-email').value.trim();
-  const password = document.getElementById('auth-password').value;
-  const btn      = document.getElementById('auth-btn');
-  if (!email || !password) return showAuthError('Remplis tous les champs');
+// ═══════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════
+const S={accounts:[],transactions:[],prices:{},eurUsd:1.08,page:'portfolio',chart:null};
 
-  btn.disabled = true;
-  btn.innerHTML = '<div class="spinner"></div>';
-  hideAuthError();
+// ═══════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════
+window.addEventListener('load',async()=>{
+  loadSession();
+  if(getUser()){ showApp(); await bootstrap(); navigate('portfolio'); }
+  else showAuthScreen();
+});
+function showApp()       { document.getElementById('auth-screen').style.display='none'; document.getElementById('app-screen').style.display='flex'; }
+function showAuthScreen(){ document.getElementById('auth-screen').style.display='flex'; document.getElementById('app-screen').style.display='none'; }
 
+async function bootstrap() {
+  const u=getUser(); if(!u) return;
+  try { await dbUpsert('profiles',{id:u.id,username:u.email.split('@')[0],display_name:u.email.split('@')[0]},'id'); } catch{}
   try {
-    if (authMode === 'signup') {
-      const displayName = document.getElementById('auth-displayname').value.trim();
-      const { error } = await db.auth.signUp({ email, password });
-      if (error) throw error;
-      // Update display name after short delay (trigger needs time)
-      if (displayName) {
-        await new Promise(r => setTimeout(r, 1200));
-        await db.from('profiles').update({ display_name: displayName }).eq('id', (await db.auth.getUser()).data.user?.id);
-      }
-    } else {
-      const { error } = await db.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-    }
-  } catch(err) {
-    showAuthError(authErr(err.message));
-    btn.disabled = false;
-    btn.textContent = authMode === 'login' ? 'Se connecter' : "S'inscrire";
+    const p=(await dbGet('profiles','id=eq.'+u.id))?.[0];
+    if(p){ const n=p.display_name||p.username||u.email.split('@')[0];
+      document.getElementById('sidebar-username').textContent=n;
+      document.getElementById('sidebar-avatar').textContent=n[0].toUpperCase(); }
+  } catch{}
+  const accts=await dbGet('accounts','user_id=eq.'+u.id+'&order=created_at'); S.accounts=accts||[];
+  if(S.accounts.length>0){
+    const ids=S.accounts.map(a=>a.id).join(',');
+    S.transactions=await dbGet('transactions','account_id=in.('+ids+')&order=transaction_date.desc&select=*,accounts(name,type)')||[];
+  } else S.transactions=[];
+  try{ const r=await fetch(API+'?symbol=EURUSD%3DX'); const d=await r.json();
+    if(d.price){ S.eurUsd=d.price; document.getElementById('eurusd-rate').textContent='1 EUR = '+d.price.toFixed(4)+' USD'; }
+  }catch{}
+}
+async function refreshData(){ showToast('🔄 Actualisation…'); S.prices={}; await bootstrap(); navigate(S.page); }
+
+// ═══════════════════════════════════════════════════
+// AUTH
+// ═══════════════════════════════════════════════════
+let authMode='login';
+function switchTab(m){
+  authMode=m;
+  document.getElementById('tab-login').classList.toggle('active',m==='login');
+  document.getElementById('tab-signup').classList.toggle('active',m==='signup');
+  document.getElementById('signup-name-group').style.display=m==='signup'?'block':'none';
+  document.getElementById('auth-btn').textContent=m==='login'?'Se connecter':"S'inscrire";
+  document.getElementById('auth-error').style.display='none';
+}
+async function handleAuth(){
+  const email=document.getElementById('auth-email').value.trim();
+  const pwd=document.getElementById('auth-password').value;
+  const btn=document.getElementById('auth-btn');
+  if(!email||!pwd) return showErr('Remplis tous les champs');
+  btn.disabled=true; btn.innerHTML='<div class="spinner"></div>';
+  document.getElementById('auth-error').style.display='none';
+  try{
+    let sess;
+    if(authMode==='signup') sess=await authPost('/auth/v1/signup',{email,password:pwd});
+    else sess=await authPost('/auth/v1/token?grant_type=password',{email,password:pwd});
+    if(!sess?.access_token) throw new Error('Session invalide — vérifie la confirmation email');
+    saveSession(sess); showApp(); await bootstrap(); navigate('portfolio');
+  }catch(e){
+    showErr(xlErr(e.message));
+    btn.disabled=false; btn.textContent=authMode==='login'?'Se connecter':"S'inscrire";
   }
 }
-
-function authErr(m) {
-  if (m.includes('Invalid login'))       return 'Email ou mot de passe incorrect';
-  if (m.includes('Email not confirmed')) return 'Confirme ton email avant de te connecter';
-  if (m.includes('already registered'))  return 'Cet email est déjà utilisé';
-  if (m.includes('Password'))            return 'Mot de passe trop court (min. 6 caractères)';
+function showErr(m){ const e=document.getElementById('auth-error'); e.textContent=m; e.style.display='block'; }
+function xlErr(m){
+  if(m.includes('Invalid login')) return 'Email ou mot de passe incorrect';
+  if(m.includes('Email not confirmed')) return 'Confirme ton email avant de te connecter';
+  if(m.includes('already registered')) return 'Cet email est déjà utilisé';
+  if(m.includes('Password')) return 'Mot de passe trop court (min. 6 caractères)';
   return m;
 }
+async function logout(){ try{await fetch(SUPA_URL+'/auth/v1/logout',{method:'POST',headers:hdrs()});}catch{}
+  saveSession(null); S.accounts=[]; S.transactions=[]; S.prices={}; showAuthScreen(); }
 
-function showAuthError(msg) {
-  const el = document.getElementById('auth-error');
-  el.textContent = msg; el.style.display = 'block';
-}
-function hideAuthError() { document.getElementById('auth-error').style.display = 'none'; }
-
-async function logout() {
-  await db.auth.signOut();
-}
-
-// ── AUTH STATE LISTENER ──────────────────────────────────────
-db.auth.onAuthStateChange(async (_event, session) => {
-  if (session?.user) {
-    S.user = session.user;
-    document.getElementById('auth-screen').style.display = 'none';
-    document.getElementById('app-screen').style.display = 'flex';
-    await bootstrap();
-    navigate('portfolio');
-  } else {
-    S.user = null;
-    document.getElementById('auth-screen').style.display = 'flex';
-    document.getElementById('app-screen').style.display = 'none';
-  }
-});
-
-// ── BOOTSTRAP ────────────────────────────────────────────────
-async function bootstrap() {
-  // Profile
-  const { data: p } = await db.from('profiles').select('*').eq('id', S.user.id).single();
-  S.profile = p;
-  if (p) {
-    const name = p.display_name || p.username || S.user.email.split('@')[0];
-    document.getElementById('sidebar-username').textContent = name;
-    document.getElementById('sidebar-avatar').textContent   = name[0].toUpperCase();
-  }
-
-  // Accounts
-  const { data: accts } = await db.from('accounts')
-    .select('*').eq('user_id', S.user.id).order('created_at');
-  S.accounts = accts || [];
-
-  // Transactions (avec le nom du compte)
-  if (S.accounts.length > 0) {
-    const ids = S.accounts.map(a => a.id);
-    const { data: txs } = await db.from('transactions')
-      .select('*, accounts(name, type)')
-      .in('account_id', ids)
-      .order('transaction_date', { ascending: false });
-    S.transactions = txs || [];
-  } else {
-    S.transactions = [];
-  }
-
-  // EUR/USD rate
-  await fetchEurUsd();
+// ═══════════════════════════════════════════════════
+// NAVIGATION
+// ═══════════════════════════════════════════════════
+function navigate(page){
+  S.page=page;
+  document.querySelectorAll('.nav-item:not(.disabled)').forEach(e=>e.classList.remove('active'));
+  document.getElementById('nav-'+page)?.classList.add('active');
+  document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes'}[page]||page;
+  if(page==='portfolio') renderPortfolio();
+  else if(page==='accounts') renderAccounts();
 }
 
-async function refreshData() {
-  showToast('🔄 Actualisation en cours…');
-  S.prices = {};
-  await bootstrap();
-  navigate(S.page);
+// ═══════════════════════════════════════════════════
+// POSITIONS (méthode CMP)
+// ═══════════════════════════════════════════════════
+function computePositions(){
+  const map={};
+  [...S.transactions].sort((a,b)=>new Date(a.transaction_date)-new Date(b.transaction_date)).forEach(tx=>{
+    const k=tx.ticker;
+    if(!map[k]) map[k]={ticker:tx.ticker,name:tx.name,asset_type:tx.asset_type,quantity:0,totalCostEur:0,accounts:[],currency:tx.currency};
+    const p=map[k]; const toE=v=>tx.currency==='USD'?v/S.eurUsd:v;
+    const an=tx.accounts?.name||'—'; if(!p.accounts.includes(an)) p.accounts.push(an);
+    if(tx.transaction_type==='buy'){ p.totalCostEur+=tx.quantity*toE(tx.price)+toE(tx.fees||0); p.quantity+=tx.quantity; }
+    else{ const pru=p.quantity>0?p.totalCostEur/p.quantity:0; p.totalCostEur-=tx.quantity*pru; p.quantity-=tx.quantity; }
+  });
+  return Object.values(map).filter(p=>p.quantity>0.000001).map(p=>({...p,pruEur:p.totalCostEur/p.quantity}));
 }
 
-async function fetchEurUsd() {
-  try {
-    const r = await fetch(`${API}?symbol=EURUSD%3DX`);
-    const d = await r.json();
-    if (d.price) {
-      S.eurUsd = d.price;
-      document.getElementById('eurusd-rate').textContent = `1 EUR = ${d.price.toFixed(4)} USD`;
-    }
-  } catch {}
-}
-
-// ── NAVIGATION ───────────────────────────────────────────────
-function navigate(page) {
-  S.page = page;
-  document.querySelectorAll('.nav-item:not(.disabled)').forEach(el => el.classList.remove('active'));
-  const navEl = document.getElementById(`nav-${page}`);
-  if (navEl) navEl.classList.add('active');
-  const titles = { portfolio:'Portefeuille', accounts:'Comptes' };
-  document.getElementById('page-title').textContent = titles[page] || page;
-  if (page === 'portfolio') renderPortfolio();
-  else if (page === 'accounts') renderAccounts();
-}
-
-// ── POSITION CALCULATION ─────────────────────────────────────
-// Méthode du coût moyen pondéré (CMP) — même méthode qu'AMF/FIFO simplifié
-function computePositions() {
-  const map = {};
-
-  // Traiter dans l'ordre chronologique pour le CMP
-  const sorted = [...S.transactions].sort(
-    (a, b) => new Date(a.transaction_date) - new Date(b.transaction_date)
-  );
-
-  for (const tx of sorted) {
-    const k = tx.ticker;
-    if (!map[k]) map[k] = {
-      ticker:      tx.ticker,
-      name:        tx.name,
-      asset_type:  tx.asset_type,
-      quantity:    0,
-      totalCostEur: 0,   // coût total en EUR
-      accounts:    [],
-      currency:    tx.currency  // devise "naturelle" de l'actif
-    };
-
-    const p     = map[k];
-    const toEur = (v) => tx.currency === 'USD' ? v / S.eurUsd : v;
-    const acctName = tx.accounts?.name || '—';
-    if (!p.accounts.includes(acctName)) p.accounts.push(acctName);
-
-    if (tx.transaction_type === 'buy') {
-      p.totalCostEur += tx.quantity * toEur(tx.price) + toEur(tx.fees || 0);
-      p.quantity     += tx.quantity;
-    } else {
-      // Vente : réduire le coût proportionnellement (CMP)
-      const pruEur    = p.quantity > 0 ? p.totalCostEur / p.quantity : 0;
-      p.totalCostEur -= tx.quantity * pruEur;
-      p.quantity     -= tx.quantity;
-    }
-  }
-
-  return Object.values(map)
-    .filter(p => p.quantity > 0.000001)
-    .map(p => ({ ...p, pruEur: p.totalCostEur / p.quantity }));
-}
-
-// ── PORTFOLIO PAGE ───────────────────────────────────────────
-async function renderPortfolio() {
-  const page = document.getElementById('page');
-
-  if (S.accounts.length === 0) {
-    page.innerHTML = `<div class="empty-state">
-      <div class="icon">💼</div>
-      <h3>Aucun compte configuré</h3>
-      <p>Crée tes comptes (PEA, CTO…) pour commencer à tracker ton portfolio</p>
-      <button class="btn btn-primary" style="width:auto" onclick="navigate('accounts')">Gérer mes comptes →</button>
-    </div>`; return;
-  }
-
-  if (S.transactions.length === 0) {
-    page.innerHTML = `<div class="empty-state">
-      <div class="icon">📋</div>
-      <h3>Aucune transaction</h3>
-      <p>Ajoute tes achats pour voir ton portefeuille en temps réel</p>
-      <button class="btn btn-primary" style="width:auto" onclick="navigate('accounts')">Ajouter des transactions →</button>
-    </div>`; return;
-  }
-
-  const positions = computePositions();
-
-  // Render skeleton
-  page.innerHTML = `
+// ═══════════════════════════════════════════════════
+// PORTFOLIO PAGE
+// ═══════════════════════════════════════════════════
+async function renderPortfolio(){
+  const pg=document.getElementById('page');
+  if(!S.accounts.length){ pg.innerHTML=`<div class="empty-state"><div class="icon">💼</div><h3>Aucun compte configuré</h3><p>Crée tes comptes (PEA, CTO…) pour commencer</p><button class="btn btn-primary" style="width:auto" onclick="navigate('accounts')">Gérer mes comptes →</button></div>`; return; }
+  if(!S.transactions.length){ pg.innerHTML=`<div class="empty-state"><div class="icon">📋</div><h3>Aucune transaction</h3><p>Ajoute tes achats pour voir ton portefeuille en temps réel</p><button class="btn btn-primary" style="width:auto" onclick="navigate('accounts')">Ajouter des transactions →</button></div>`; return; }
+  const pos=computePositions();
+  pg.innerHTML=`
     <div class="kpi-grid" id="kpi-grid">
-      ${['Valeur totale','Montant investi','Plus-value latente','Performance'].map(l => `
-        <div class="kpi-card">
-          <div class="kpi-label">${l}</div>
-          <div class="shimmer" style="width:130px;height:28px;margin-bottom:10px"></div>
-          <div class="shimmer" style="width:90px;height:16px"></div>
-        </div>`).join('')}
+      ${['Valeur totale','Montant investi','Plus-value latente','Performance'].map(l=>`<div class="kpi-card"><div class="kpi-label">${l}</div><div class="shimmer" style="width:130px;height:28px;margin-bottom:10px"></div><div class="shimmer" style="width:90px;height:16px"></div></div>`).join('')}
     </div>
-
     <div class="grid-2">
-      <div class="card" style="padding:22px">
-        <div class="section-hd"><h3>Répartition</h3></div>
-        <div class="chart-wrap"><canvas id="donut-chart"></canvas></div>
-      </div>
-      <div class="card" style="padding:22px">
-        <div class="section-hd"><h3>Mes comptes</h3></div>
-        <div id="accts-breakdown"></div>
-      </div>
+      <div class="card" style="padding:22px"><div class="section-hd"><h3>Répartition</h3></div><div class="chart-wrap"><canvas id="donut-chart"></canvas></div></div>
+      <div class="card" style="padding:22px"><div class="section-hd"><h3>Mes comptes</h3></div><div id="accts-bd"></div></div>
     </div>
-
     <div class="card" style="margin-top:16px">
-      <div style="padding:20px 20px 0">
-        <div class="section-hd">
-          <h3>Positions · ${positions.length} titre${positions.length > 1 ? 's' : ''}</h3>
-          <span style="font-size:12px;color:var(--muted)">Prix convertis en EUR · méthode CMP</span>
-        </div>
-      </div>
-      <div class="tbl-wrap">
-        <table>
-          <thead><tr>
-            <th style="text-align:left;padding-left:20px;min-width:180px">Titre</th>
-            <th>Quantité</th>
-            <th>PRU (€)</th>
-            <th>Cours</th>
-            <th>Valeur (€)</th>
-            <th>P&amp;L (€)</th>
-            <th>P&amp;L %</th>
-            <th style="min-width:100px">Comptes</th>
-          </tr></thead>
-          <tbody>
-            ${positions.map(p => `
-              <tr>
-                <td style="text-align:left;padding-left:20px">
-                  <div class="ticker-cell">
-                    <div class="ticker-logo" id="logo-${p.ticker}">
-                      <img src="https://assets.parqet.com/logos/symbol/${p.ticker}?format=png"
-                           onload="this.style.display='block'"
-                           onerror="this.parentNode.innerHTML='<span>${p.ticker.slice(0,3)}</span>'"
-                           style="display:none">
-                    </div>
-                    <div>
-                      <div class="ticker-name">${p.name}</div>
-                      <div class="ticker-sym">${p.ticker}</div>
-                    </div>
-                  </div>
-                </td>
-                <td class="mono">${fmtQty(p.quantity)}</td>
-                <td class="mono">${fmtNum(p.pruEur)} €</td>
-                <td id="price-${p.ticker}">
-                  <div class="shimmer" style="width:55px;height:14px"></div>
-                </td>
-                <td class="mono" id="value-${p.ticker}">—</td>
-                <td id="pnl-${p.ticker}">—</td>
-                <td id="pnlp-${p.ticker}">—</td>
-                <td id="acct-${p.ticker}">
-                  ${p.accounts.map(a => `<span class="acct-tag">${shortAcct(a)}</span>`).join('')}
-                </td>
-              </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>
+      <div style="padding:20px 20px 0"><div class="section-hd"><h3>Positions · ${pos.length} titre${pos.length>1?'s':''}</h3><span style="font-size:12px;color:var(--muted)">Prix en EUR · méthode CMP</span></div></div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th style="text-align:left;padding-left:20px;min-width:180px">Titre</th><th>Quantité</th><th>PRU (€)</th><th>Cours</th><th>Valeur (€)</th><th>P&amp;L (€)</th><th>P&amp;L %</th><th>Comptes</th></tr></thead>
+        <tbody>${pos.map(p=>`<tr>
+          <td style="text-align:left;padding-left:20px"><div class="ticker-cell">
+            <div class="ticker-logo"><img src="https://assets.parqet.com/logos/symbol/${p.ticker}?format=png" onload="this.style.display='block'" onerror="this.parentNode.innerHTML='<span>${p.ticker.slice(0,3)}</span>'" style="display:none"></div>
+            <div><div class="ticker-name">${p.name}</div><div class="ticker-sym">${p.ticker}</div></div></div></td>
+          <td class="mono">${fQ(p.quantity)}</td><td class="mono">${fN(p.pruEur)} €</td>
+          <td id="px-${p.ticker}"><div class="shimmer" style="width:55px;height:14px"></div></td>
+          <td class="mono" id="vl-${p.ticker}">—</td><td id="pl-${p.ticker}">—</td><td id="pp-${p.ticker}">—</td>
+          <td>${p.accounts.map(a=>`<span class="acct-tag">${sA(a)}</span>`).join('')}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>
     </div>`;
-
-  renderAccountsBreakdown();
-
-  // Fetch prices in parallel → update cells live
-  await fetchAndDisplay(positions);
+  renderAcctBD(); await fetchPrices(pos);
 }
 
-async function fetchAndDisplay(positions) {
-  const pricePromises = positions.map(async (p) => {
-    try {
-      // Use cached price if recent (< 60s)
-      let d = S.prices[p.ticker];
-      if (!d || (Date.now() - (d._ts || 0)) > 60000) {
-        const r = await fetch(`${API}?symbol=${encodeURIComponent(p.ticker)}`);
-        d = await r.json();
-        d._ts = Date.now();
-        S.prices[p.ticker] = d;
-      }
-      if (!d.price) return;
-
-      const isUsd   = (d.currency || 'USD') === 'USD';
-      const priceEur = isUsd ? d.price / S.eurUsd : d.price;
-      const valueEur = priceEur * p.quantity;
-      const pnlEur   = valueEur - p.totalCostEur;
-      const pnlPct   = p.totalCostEur > 0 ? (pnlEur / p.totalCostEur) * 100 : 0;
-      const chgPct   = d.changePct ?? 0;
-
-      // Store for KPI + chart
-      p.priceEur = priceEur;
-      p.valueEur = valueEur;
-      p.pnlEur   = pnlEur;
-      p.pnlPct   = pnlPct;
-
-      // Price cell
-      const priceEl = document.getElementById(`price-${p.ticker}`);
-      if (priceEl) priceEl.innerHTML = `
-        <span class="mono">${isUsd ? '$' : '€'}${fmtNum(d.price)}</span>
-        <div style="font-size:11px;color:${chgPct >= 0 ? 'var(--green)' : 'var(--red)'};margin-top:2px">
-          ${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%
-        </div>`;
-
-      // Value
-      const valEl = document.getElementById(`value-${p.ticker}`);
-      if (valEl) valEl.innerHTML = `<span class="mono">${fmtEur(valueEur)}</span>`;
-
-      // P&L €
-      const pnlEl = document.getElementById(`pnl-${p.ticker}`);
-      if (pnlEl) pnlEl.innerHTML = `
-        <span class="mono ${pnlEur >= 0 ? 'c-green' : 'c-red'}">
-          ${pnlEur >= 0 ? '+' : ''}${fmtEur(pnlEur)}
-        </span>`;
-
-      // P&L %
-      const pnlpEl = document.getElementById(`pnlp-${p.ticker}`);
-      if (pnlpEl) pnlpEl.innerHTML = `
-        <span class="mono ${pnlPct >= 0 ? 'c-green' : 'c-red'}">
-          ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%
-        </span>`;
-
-    } catch {}
-  });
-
-  await Promise.all(pricePromises);
-  updateKPIs(positions);
-  renderDonut(positions);
+async function fetchPrices(pos){
+  await Promise.all(pos.map(async p=>{
+    try{
+      let d=S.prices[p.ticker];
+      if(!d||Date.now()-(d._t||0)>60000){ const r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker)); d=await r.json(); d._t=Date.now(); S.prices[p.ticker]=d; }
+      if(!d.price) return;
+      const usd=(d.currency||'USD')==='USD'; const pe=usd?d.price/S.eurUsd:d.price;
+      const ve=pe*p.quantity; const pnl=ve-p.totalCostEur; const pct=p.totalCostEur>0?(pnl/p.totalCostEur)*100:0;
+      const chg=d.changePct??0; p.priceEur=pe; p.valueEur=ve; p.pnlEur=pnl; p.pnlPct=pct;
+      const $=id=>document.getElementById(id);
+      if($('px-'+p.ticker)) $('px-'+p.ticker).innerHTML=`<span class="mono">${usd?'$':'€'}${fN(d.price)}</span><div style="font-size:11px;color:${chg>=0?'var(--green)':'var(--red)'};margin-top:2px">${chg>=0?'+':''}${chg.toFixed(2)}%</div>`;
+      if($('vl-'+p.ticker)) $('vl-'+p.ticker).innerHTML=`<span class="mono">${fE(ve)}</span>`;
+      if($('pl-'+p.ticker)) $('pl-'+p.ticker).innerHTML=`<span class="mono ${pnl>=0?'c-green':'c-red'}">${pnl>=0?'+':''}${fE(pnl)}</span>`;
+      if($('pp-'+p.ticker)) $('pp-'+p.ticker).innerHTML=`<span class="mono ${pct>=0?'c-green':'c-red'}">${pct>=0?'+':''}${pct.toFixed(2)}%</span>`;
+    }catch{}
+  }));
+  updateKPIs(pos); renderDonut(pos);
 }
 
-function updateKPIs(positions) {
-  const loaded   = positions.filter(p => p.valueEur != null);
-  const totVal   = loaded.reduce((s, p) => s + p.valueEur, 0);
-  const totCost  = positions.reduce((s, p) => s + p.totalCostEur, 0);
-  const totPnl   = totVal - totCost;
-  const totPnlPct = totCost > 0 ? (totPnl / totCost) * 100 : 0;
-  const sign     = v => v >= 0 ? '+' : '';
-
-  document.getElementById('kpi-grid').innerHTML = [
-    {
-      label: 'Valeur totale',
-      value: fmtEur(totVal),
-      sub:   `sur ${fmtEur(totCost)} investis`
-    },
-    {
-      label: 'Montant investi',
-      value: fmtEur(totCost),
-      sub:   `${positions.length} position${positions.length > 1 ? 's' : ''}`
-    },
-    {
-      label: 'Plus-value latente',
-      value: `<span class="${totPnl >= 0 ? 'c-green' : 'c-red'}">${sign(totPnl)}${fmtEur(totPnl)}</span>`,
-      sub:   `<span class="badge ${totPnl >= 0 ? 'badge-green' : 'badge-red'}">${sign(totPnlPct)}${totPnlPct.toFixed(2)}%</span>`
-    },
-    {
-      label: 'Performance (simple)',
-      value: `<span class="${totPnlPct >= 0 ? 'c-green' : 'c-red'}" style="font-size:28px">${sign(totPnlPct)}${totPnlPct.toFixed(2)}%</span>`,
-      sub:   loaded.length < positions.length
-               ? `<span style="color:var(--yellow)">⚠ ${positions.length - loaded.length} prix manquant${positions.length - loaded.length > 1 ? 's' : ''}</span>`
-               : 'vs prix de revient moyen'
-    }
-  ].map(k => `
-    <div class="kpi-card">
-      <div class="kpi-label">${k.label}</div>
-      <div class="kpi-value">${k.value}</div>
-      <div class="kpi-sub">${k.sub}</div>
-    </div>`).join('');
+function updateKPIs(pos){
+  const ld=pos.filter(p=>p.valueEur!=null);
+  const tv=ld.reduce((s,p)=>s+p.valueEur,0),tc=pos.reduce((s,p)=>s+p.totalCostEur,0),pnl=tv-tc,pct=tc>0?(pnl/tc)*100:0;
+  const sg=v=>v>=0?'+':'';
+  document.getElementById('kpi-grid').innerHTML=[
+    {l:'Valeur totale',v:fE(tv),s:`sur ${fE(tc)} investis`},
+    {l:'Montant investi',v:fE(tc),s:`${pos.length} position${pos.length>1?'s':''}`},
+    {l:'Plus-value latente',v:`<span class="${pnl>=0?'c-green':'c-red'}">${sg(pnl)}${fE(pnl)}</span>`,s:`<span class="badge ${pnl>=0?'badge-green':'badge-red'}">${sg(pct)}${pct.toFixed(2)}%</span>`},
+    {l:'Performance',v:`<span class="${pct>=0?'c-green':'c-red'}" style="font-size:28px">${sg(pct)}${pct.toFixed(2)}%</span>`,s:ld.length<pos.length?`<span style="color:var(--yellow)">⚠ ${pos.length-ld.length} prix manquant(s)</span>`:'vs prix de revient moyen'}
+  ].map(k=>`<div class="kpi-card"><div class="kpi-label">${k.l}</div><div class="kpi-value">${k.v}</div><div class="kpi-sub">${k.s}</div></div>`).join('');
 }
 
-function renderDonut(positions) {
-  const canvas = document.getElementById('donut-chart');
-  if (!canvas) return;
-  const pos = positions.filter(p => (p.valueEur || 0) > 0);
-  const total = pos.reduce((s, p) => s + p.valueEur, 0);
-  if (!total) return;
-  if (S.chart) { S.chart.destroy(); S.chart = null; }
-  const COLORS = ['#5b7ef5','#8b5cf6','#22c55e','#f59e0b','#ef4444','#06b6d4','#ec4899','#f97316','#10b981','#a78bfa'];
-  S.chart = new Chart(canvas, {
-    type: 'doughnut',
-    data: {
-      labels: pos.map(p => p.ticker),
-      datasets: [{
-        data:            pos.map(p => p.valueEur),
-        backgroundColor: pos.map((_, i) => COLORS[i % COLORS.length]),
-        borderWidth:     0, hoverOffset: 6
-      }]
-    },
-    options: {
-      cutout: '70%',
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: ctx => {
-              const pct = ((ctx.raw / total) * 100).toFixed(1);
-              return ` ${ctx.label}  ${fmtEur(ctx.raw)}  (${pct}%)`;
-            }
-          }
-        }
-      }
-    }
-  });
+function renderDonut(pos){
+  const cv=document.getElementById('donut-chart'); if(!cv) return;
+  const p=pos.filter(x=>(x.valueEur||0)>0),tot=p.reduce((s,x)=>s+x.valueEur,0); if(!tot) return;
+  if(S.chart){S.chart.destroy();S.chart=null;}
+  const C=['#5b7ef5','#8b5cf6','#22c55e','#f59e0b','#ef4444','#06b6d4','#ec4899','#f97316','#10b981','#a78bfa'];
+  S.chart=new Chart(cv,{type:'doughnut',data:{labels:p.map(x=>x.ticker),datasets:[{data:p.map(x=>x.valueEur),backgroundColor:p.map((_,i)=>C[i%C.length]),borderWidth:0,hoverOffset:6}]},
+    options:{cutout:'70%',plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const pc=((ctx.raw/tot)*100).toFixed(1);return ` ${ctx.label}  ${fE(ctx.raw)}  (${pc}%)`;}}}}}});
 }
 
-function renderAccountsBreakdown() {
-  const el = document.getElementById('accts-breakdown');
-  if (!el) return;
-  const icons = { PEA:'🏦', CTO:'💼', PER:'🔒', AV:'📋', AUTRE:'💳' };
-  el.innerHTML = S.accounts.map(a => {
-    const txCount = S.transactions.filter(t => t.account_id === a.id).length;
-    return `<div style="display:flex;align-items:center;padding:11px 0;border-bottom:1px solid var(--border)">
-      <span style="font-size:20px;margin-right:12px">${icons[a.type] || '💳'}</span>
-      <div style="flex:1">
-        <div style="font-weight:600;font-size:14px">${a.name}</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:1px">${txCount} transaction${txCount !== 1 ? 's' : ''}</div>
-      </div>
-      <span class="type-badge">${a.type}</span>
-    </div>`;
-  }).join('') || '<div style="color:var(--muted);font-size:13px;padding-top:8px">Aucun compte</div>';
+function renderAcctBD(){
+  const el=document.getElementById('accts-bd'); if(!el) return;
+  const ic={PEA:'🏦',CTO:'💼',PER:'🔒',AV:'📋',AUTRE:'💳'};
+  el.innerHTML=S.accounts.map(a=>{const n=S.transactions.filter(t=>t.account_id===a.id).length;
+    return `<div style="display:flex;align-items:center;padding:11px 0;border-bottom:1px solid var(--border)"><span style="font-size:20px;margin-right:12px">${ic[a.type]||'💳'}</span><div style="flex:1"><div style="font-weight:600;font-size:14px">${a.name}</div><div style="font-size:12px;color:var(--muted);margin-top:1px">${n} transaction${n!==1?'s':''}</div></div><span class="type-badge">${a.type}</span></div>`;
+  }).join('')||'<div style="color:var(--muted);font-size:13px;padding-top:8px">Aucun compte</div>';
 }
 
-// ── ACCOUNTS PAGE ────────────────────────────────────────────
-function renderAccounts() {
-  const page = document.getElementById('page');
-
-  if (S.accounts.length === 0) {
-    page.innerHTML = `<div class="empty-state">
-      <div class="icon">💳</div>
-      <h3>Aucun compte</h3>
-      <p>Crée tes comptes pour commencer à enregistrer tes transactions</p>
-      <button class="btn btn-primary" style="width:auto" onclick="openAddAccount()">+ Créer un compte</button>
-    </div>`; return;
-  }
-
-  page.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:22px">
-      <div>
-        <h2 style="font-size:18px;font-weight:700">Mes comptes</h2>
-        <p style="color:var(--muted);font-size:13px;margin-top:3px">
-          ${S.accounts.length} compte${S.accounts.length > 1 ? 's' : ''} · ${S.transactions.length} transaction${S.transactions.length !== 1 ? 's' : ''}
-        </p>
-      </div>
-      <div style="display:flex;gap:10px">
-        <button class="btn btn-ghost" onclick="openAddTransaction()">+ Transaction</button>
-        <button class="btn btn-primary" onclick="openAddAccount()">+ Compte</button>
-      </div>
-    </div>
-    ${S.accounts.map(a => renderAccountCard(a)).join('')}`;
+// ═══════════════════════════════════════════════════
+// ACCOUNTS PAGE
+// ═══════════════════════════════════════════════════
+function renderAccounts(){
+  const pg=document.getElementById('page');
+  if(!S.accounts.length){ pg.innerHTML=`<div class="empty-state"><div class="icon">💳</div><h3>Aucun compte</h3><p>Crée tes comptes pour commencer à enregistrer tes transactions</p><button class="btn btn-primary" style="width:auto" onclick="openAddAccount()">+ Créer un compte</button></div>`; return; }
+  pg.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;flex-wrap:wrap;gap:10px">
+    <div><h2 style="font-size:18px;font-weight:700">Mes comptes</h2><p style="color:var(--muted);font-size:13px;margin-top:3px">${S.accounts.length} compte${S.accounts.length>1?'s':''} · ${S.transactions.length} transaction${S.transactions.length!==1?'s':''}</p></div>
+    <div style="display:flex;gap:10px"><button class="btn btn-ghost" onclick="openAddTransaction()">+ Transaction</button><button class="btn btn-primary" onclick="openAddAccount()">+ Compte</button></div>
+  </div>
+  ${S.accounts.map(a=>renderAcctCard(a)).join('')}`;
 }
 
-function renderAccountCard(acct) {
-  const txs = S.transactions
-    .filter(t => t.account_id === acct.id)
-    .sort((a, b) => new Date(b.transaction_date) - new Date(a.transaction_date));
-  const icons = { PEA:'🏦', CTO:'💼', PER:'🔒', AV:'📋', AUTRE:'💳' };
-
+function renderAcctCard(a){
+  const txs=S.transactions.filter(t=>t.account_id===a.id).sort((x,y)=>new Date(y.transaction_date)-new Date(x.transaction_date));
+  const ic={PEA:'🏦',CTO:'💼',PER:'🔒',AV:'📋',AUTRE:'💳'};
   return `<div class="account-card">
     <div class="account-header">
-      <div class="account-icon">${icons[acct.type] || '💳'}</div>
-      <div style="flex:1">
-        <div style="font-size:16px;font-weight:700">${acct.name}</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px">
-          ${txs.length} transaction${txs.length !== 1 ? 's' : ''} · ${acct.currency}
-        </div>
-      </div>
-      <span class="type-badge" style="margin-right:8px">${acct.type}</span>
-      <button class="btn btn-ghost btn-sm" onclick="openAddTransaction('${acct.id}')">+ Transaction</button>
-      <button class="btn btn-danger btn-sm" style="margin-left:8px" onclick="deleteAccount('${acct.id}','${acct.name}')">Supprimer</button>
+      <div class="account-icon">${ic[a.type]||'💳'}</div>
+      <div style="flex:1;min-width:100px"><div style="font-size:16px;font-weight:700">${a.name}</div><div style="font-size:12px;color:var(--muted);margin-top:2px">${txs.length} transaction${txs.length!==1?'s':''} · ${a.currency}</div></div>
+      <span class="type-badge">${a.type}</span>
+      <button class="btn btn-ghost btn-sm" onclick="openAddTransaction('${a.id}')">+ Transaction</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteAccount('${a.id}','${a.name}')">Supprimer</button>
     </div>
-
-    ${txs.length === 0
-      ? `<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">
-          Aucune transaction ·
-          <span style="color:var(--blue);cursor:pointer" onclick="openAddTransaction('${acct.id}')">Ajouter la première</span>
-         </div>`
-      : `<div class="tbl-wrap">
-          <table>
-            <thead><tr>
-              <th style="text-align:left">Titre</th>
-              <th>Date</th>
-              <th>Type</th>
-              <th>Quantité</th>
-              <th>Prix unit.</th>
-              <th>Frais</th>
-              <th>Montant total</th>
-              <th></th>
-            </tr></thead>
-            <tbody>
-              ${txs.map(tx => `<tr>
-                <td style="text-align:left">
-                  <div class="ticker-name">${tx.name}</div>
-                  <div class="ticker-sym">${tx.ticker}</div>
-                </td>
-                <td class="mono c-muted" style="font-size:12px">${fmtDate(tx.transaction_date)}</td>
-                <td><span class="badge ${tx.transaction_type === 'buy' ? 'badge-green' : 'badge-red'}">
-                  ${tx.transaction_type === 'buy' ? '▲ Achat' : '▼ Vente'}
-                </span></td>
-                <td class="mono">${fmtQty(tx.quantity)}</td>
-                <td class="mono">${fmtNum(tx.price)} ${currSym(tx.currency)}</td>
-                <td class="mono c-muted">${tx.fees > 0 ? fmtNum(tx.fees) + ' ' + currSym(tx.currency) : '—'}</td>
-                <td class="mono"><strong>${fmtNum(tx.quantity * tx.price + (tx.fees||0))} ${currSym(tx.currency)}</strong></td>
-                <td><button class="btn btn-danger btn-sm" onclick="deleteTransaction('${tx.id}')">✕</button></td>
-              </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>`}
+    ${txs.length===0?`<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">Aucune transaction · <span style="color:var(--blue);cursor:pointer" onclick="openAddTransaction('${a.id}')">Ajouter la première</span></div>`:
+    `<div class="tbl-wrap"><table>
+      <thead><tr><th style="text-align:left">Titre</th><th>Date</th><th>Type</th><th>Qté</th><th>Prix unit.</th><th>Frais</th><th>Total</th><th>Actions</th></tr></thead>
+      <tbody>${txs.map(tx=>`<tr>
+        <td style="text-align:left"><div class="ticker-name">${tx.name}</div><div class="ticker-sym">${tx.ticker}</div></td>
+        <td class="mono c-muted" style="font-size:12px">${fD(tx.transaction_date)}</td>
+        <td><span class="badge ${tx.transaction_type==='buy'?'badge-green':'badge-red'}">${tx.transaction_type==='buy'?'▲ Achat':'▼ Vente'}</span></td>
+        <td class="mono">${fQ(tx.quantity)}</td>
+        <td class="mono">${fN(tx.price)} ${cS(tx.currency)}</td>
+        <td class="mono c-muted">${(tx.fees||0)>0?fN(tx.fees)+' '+cS(tx.currency):'—'}</td>
+        <td class="mono"><strong>${fN(tx.quantity*tx.price+(tx.fees||0))} ${cS(tx.currency)}</strong></td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-edit btn-sm" style="margin-right:4px" onclick="openEditTx('${tx.id}')">✏️</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteTx('${tx.id}')">✕</button>
+        </td>
+      </tr>`).join('')}</tbody>
+    </table></div>`}
   </div>`;
 }
 
-// ── MODALS ───────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════
+// MODALS
+// ═══════════════════════════════════════════════════
+function showModal(h){ document.getElementById('modal-content').innerHTML=h; document.getElementById('modal-overlay').classList.add('open'); }
+function closeModal(){ document.getElementById('modal-overlay').classList.remove('open'); }
+function closeModalOutside(e){ if(e.target===document.getElementById('modal-overlay')) closeModal(); }
 
-function openAddAccount() {
-  showModal(`
-    <div class="modal-hd">
-      <h2>Créer un compte</h2>
-      <button class="modal-close" onclick="closeModal()">✕</button>
+function openAddAccount(){
+  showModal(`<div class="modal-hd"><h2>Créer un compte</h2><button class="modal-close" onclick="closeModal()">✕</button></div>
+    <div class="form-group"><label class="form-label">Nom du compte *</label><input type="text" id="m-name" class="form-input" placeholder="ex: PEA BoursoBank"></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Type *</label><select id="m-type" class="form-input"><option value="PEA">PEA</option><option value="CTO">CTO</option><option value="PER">PER</option><option value="AV">Assurance-vie</option><option value="AUTRE">Autre</option></select></div>
+      <div class="form-group"><label class="form-label">Devise</label><select id="m-curr" class="form-input"><option value="EUR">EUR €</option><option value="USD">USD $</option></select></div>
     </div>
-    <div class="form-group">
-      <label class="form-label">Nom du compte *</label>
-      <input type="text" id="m-name" class="form-input" placeholder="ex: PEA BoursoBank">
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveAccount()">Créer le compte</button></div>`);
+}
+async function saveAccount(){
+  const name=document.getElementById('m-name').value.trim(),type=document.getElementById('m-type').value,currency=document.getElementById('m-curr').value;
+  if(!name) return showToast('❌ Donne un nom au compte');
+  try{ const d=await dbPost('accounts',{user_id:getUser().id,name,type,currency}); S.accounts.push(d); closeModal(); showToast('✅ Compte créé'); renderAccounts(); }
+  catch(e){ showToast('❌ '+e.message); }
+}
+async function deleteAccount(id,name){
+  if(!confirm(`Supprimer "${name}" et toutes ses transactions ?`)) return;
+  try{ await dbDel('accounts','id=eq.'+id); S.accounts=S.accounts.filter(a=>a.id!==id); S.transactions=S.transactions.filter(t=>t.account_id!==id); showToast('✅ Compte supprimé'); renderAccounts(); }
+  catch(e){ showToast('❌ '+e.message); }
+}
+
+function txForm(pre=null,tx=null){
+  const ie=!!tx;
+  return `<div class="modal-hd"><h2>${ie?'Modifier la transaction':'Ajouter une transaction'}</h2><button class="modal-close" onclick="closeModal()">✕</button></div>
+    <div class="form-group"><label class="form-label">Compte *</label><select id="m-acct" class="form-input">${S.accounts.map(a=>`<option value="${a.id}" ${a.id===(tx?.account_id||pre)?'selected':''}>${a.name} (${a.type})</option>`).join('')}</select></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Ticker *</label><input type="text" id="m-ticker" class="form-input" placeholder="ex: NVDA" value="${tx?.ticker||''}" oninput="this.value=this.value.toUpperCase()"></div>
+      <div class="form-group"><label class="form-label">Nom *</label><input type="text" id="m-aname" class="form-input" placeholder="ex: Nvidia" value="${tx?.name||''}"></div>
     </div>
     <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Type *</label>
-        <select id="m-type" class="form-input">
-          <option value="PEA">PEA</option>
-          <option value="CTO">CTO</option>
-          <option value="PER">PER</option>
-          <option value="AV">Assurance-vie</option>
-          <option value="AUTRE">Autre</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Devise principale</label>
-        <select id="m-curr" class="form-input">
-          <option value="EUR">EUR €</option>
-          <option value="USD">USD $</option>
-        </select>
-      </div>
+      <div class="form-group"><label class="form-label">Type d'actif</label><select id="m-asset" class="form-input"><option value="stock" ${tx?.asset_type==='stock'||!tx?'selected':''}>Action</option><option value="etf" ${tx?.asset_type==='etf'?'selected':''}>ETF</option><option value="crypto" ${tx?.asset_type==='crypto'?'selected':''}>Crypto</option></select></div>
+      <div class="form-group"><label class="form-label">Transaction</label><select id="m-txtype" class="form-input"><option value="buy" ${tx?.transaction_type!=='sell'?'selected':''}>Achat ▲</option><option value="sell" ${tx?.transaction_type==='sell'?'selected':''}>Vente ▼</option></select></div>
     </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal()">Annuler</button>
-      <button class="btn btn-primary" onclick="saveAccount()">Créer le compte</button>
-    </div>`);
-}
-
-async function saveAccount() {
-  const name = document.getElementById('m-name').value.trim();
-  const type = document.getElementById('m-type').value;
-  const currency = document.getElementById('m-curr').value;
-  if (!name) return showToast('❌ Donne un nom au compte');
-  const { data, error } = await db.from('accounts')
-    .insert({ user_id: S.user.id, name, type, currency }).select().single();
-  if (error) return showToast('❌ ' + error.message);
-  S.accounts.push(data);
-  closeModal();
-  showToast('✅ Compte créé');
-  renderAccounts();
-}
-
-async function deleteAccount(id, name) {
-  if (!confirm(`Supprimer "${name}" et toutes ses transactions ? Cette action est irréversible.`)) return;
-  const { error } = await db.from('accounts').delete().eq('id', id);
-  if (error) return showToast('❌ ' + error.message);
-  S.accounts = S.accounts.filter(a => a.id !== id);
-  S.transactions = S.transactions.filter(t => t.account_id !== id);
-  showToast('✅ Compte supprimé');
-  renderAccounts();
-}
-
-function openAddTransaction(preselect = null) {
-  if (S.accounts.length === 0) return showToast('❌ Crée d\'abord un compte');
-
-  showModal(`
-    <div class="modal-hd">
-      <h2>Ajouter une transaction</h2>
-      <button class="modal-close" onclick="closeModal()">✕</button>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label">Compte *</label>
-      <select id="m-acct" class="form-input">
-        ${S.accounts.map(a => `<option value="${a.id}" ${a.id === preselect ? 'selected' : ''}>${a.name} (${a.type})</option>`).join('')}
-      </select>
-    </div>
-
     <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Ticker (symbole) *</label>
-        <input type="text" id="m-ticker" class="form-input" placeholder="ex: NVDA"
-               oninput="this.value=this.value.toUpperCase()">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Nom de l'actif *</label>
-        <input type="text" id="m-aname" class="form-input" placeholder="ex: Nvidia">
-      </div>
+      <div class="form-group"><label class="form-label">Quantité *</label><input type="number" id="m-qty" class="form-input" placeholder="ex: 10" value="${tx?.quantity||''}" min="0.000001" step="any" oninput="updTotal()"></div>
+      <div class="form-group"><label class="form-label">Prix unitaire *</label><input type="number" id="m-price" class="form-input" placeholder="ex: 120.50" value="${tx?.price||''}" min="0.000001" step="any" oninput="updTotal()"></div>
     </div>
-
     <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Type d'actif</label>
-        <select id="m-asset" class="form-input">
-          <option value="stock">Action</option>
-          <option value="etf">ETF</option>
-          <option value="crypto">Crypto</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Transaction</label>
-        <select id="m-txtype" class="form-input">
-          <option value="buy">Achat ▲</option>
-          <option value="sell">Vente ▼</option>
-        </select>
-      </div>
+      <div class="form-group"><label class="form-label">Devise *</label><select id="m-currency" class="form-input" onchange="updTotal()"><option value="EUR" ${tx?.currency==='EUR'||!tx?'selected':''}>EUR €</option><option value="USD" ${tx?.currency==='USD'?'selected':''}>USD $</option><option value="GBP" ${tx?.currency==='GBP'?'selected':''}>GBP £</option><option value="JPY" ${tx?.currency==='JPY'?'selected':''}>JPY ¥</option><option value="HKD" ${tx?.currency==='HKD'?'selected':''}>HKD</option></select></div>
+      <div class="form-group"><label class="form-label">Frais</label><input type="number" id="m-fees" class="form-input" placeholder="0" value="${tx?.fees||0}" min="0" step="any" oninput="updTotal()"></div>
     </div>
-
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Quantité *</label>
-        <input type="number" id="m-qty" class="form-input" placeholder="ex: 10"
-               min="0.000001" step="any" oninput="updateTxTotal()">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Prix unitaire *</label>
-        <input type="number" id="m-price" class="form-input" placeholder="ex: 120.50"
-               min="0.000001" step="any" oninput="updateTxTotal()">
-      </div>
-    </div>
-
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Devise *</label>
-        <select id="m-currency" class="form-input" onchange="updateTxTotal()">
-          <option value="EUR">EUR €</option>
-          <option value="USD">USD $</option>
-          <option value="GBP">GBP £</option>
-          <option value="JPY">JPY ¥</option>
-          <option value="HKD">HKD</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Frais de courtage</label>
-        <input type="number" id="m-fees" class="form-input" placeholder="0"
-               min="0" step="any" oninput="updateTxTotal()">
-      </div>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label">Date *</label>
-      <input type="date" id="m-date" class="form-input" value="${new Date().toISOString().split('T')[0]}">
-    </div>
-
-    <div class="form-group">
-      <label class="form-label">Notes (optionnel)</label>
-      <input type="text" id="m-notes" class="form-input" placeholder="ex: DCA mensuel, conviction long terme…">
-    </div>
-
-    <div class="tx-total-box" id="tx-total">
-      Remplis la quantité et le prix pour voir le montant total.
-    </div>
-
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal()">Annuler</button>
-      <button class="btn btn-primary" onclick="saveTransaction()">Enregistrer</button>
-    </div>`);
+    <div class="form-group"><label class="form-label">Date *</label><input type="date" id="m-date" class="form-input" value="${tx?.transaction_date||new Date().toISOString().split('T')[0]}"></div>
+    <div class="form-group"><label class="form-label">Notes (optionnel)</label><input type="text" id="m-notes" class="form-input" placeholder="ex: DCA mensuel…" value="${tx?.notes||''}"></div>
+    <div class="tx-total-box" id="tx-total">Remplis la quantité et le prix pour voir le montant total.</div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-primary" onclick="${ie?`saveEditTx('${tx.id}')`:'saveTx()'}">${ie?'Enregistrer les modifications':'Enregistrer'}</button></div>`;
 }
 
-function updateTxTotal() {
-  const qty  = parseFloat(document.getElementById('m-qty')?.value) || 0;
-  const price = parseFloat(document.getElementById('m-price')?.value) || 0;
-  const fees  = parseFloat(document.getElementById('m-fees')?.value) || 0;
-  const curr  = document.getElementById('m-currency')?.value || 'EUR';
-  const sym   = currSym(curr);
-  const total = qty * price + fees;
-  const el = document.getElementById('tx-total');
-  if (el && qty > 0 && price > 0) {
-    el.innerHTML = `<strong>Total : ${fmtNum(total)} ${sym}</strong>
-      &nbsp;·&nbsp; ${fmtQty(qty)} × ${fmtNum(price)} ${sym} + ${fmtNum(fees)} ${sym} frais`;
-  }
+function openAddTransaction(pre=null){ if(!S.accounts.length) return showToast("❌ Crée d'abord un compte"); showModal(txForm(pre,null)); }
+function openEditTx(id){ const tx=S.transactions.find(t=>t.id===id); if(!tx) return showToast('❌ Introuvable'); showModal(txForm(null,tx)); }
+
+function updTotal(){
+  const q=parseFloat(document.getElementById('m-qty')?.value)||0,p=parseFloat(document.getElementById('m-price')?.value)||0,f=parseFloat(document.getElementById('m-fees')?.value)||0,c=document.getElementById('m-currency')?.value||'EUR';
+  const el=document.getElementById('tx-total');
+  if(el&&q>0&&p>0) el.innerHTML=`<strong>Total : ${fN(q*p+f)} ${cS(c)}</strong> · ${fQ(q)} × ${fN(p)} + ${fN(f)} frais`;
 }
 
-async function saveTransaction() {
-  const account_id       = document.getElementById('m-acct').value;
-  const ticker           = document.getElementById('m-ticker').value.trim().toUpperCase();
-  const name             = document.getElementById('m-aname').value.trim();
-  const asset_type       = document.getElementById('m-asset').value;
-  const transaction_type = document.getElementById('m-txtype').value;
-  const quantity         = parseFloat(document.getElementById('m-qty').value);
-  const price            = parseFloat(document.getElementById('m-price').value);
-  const fees             = parseFloat(document.getElementById('m-fees').value) || 0;
-  const currency         = document.getElementById('m-currency').value;
-  const transaction_date = document.getElementById('m-date').value;
-  const notes            = document.getElementById('m-notes').value.trim() || null;
+function readForm(){ return {
+  account_id:document.getElementById('m-acct').value,
+  ticker:document.getElementById('m-ticker').value.trim().toUpperCase(),
+  name:document.getElementById('m-aname').value.trim(),
+  asset_type:document.getElementById('m-asset').value,
+  transaction_type:document.getElementById('m-txtype').value,
+  quantity:parseFloat(document.getElementById('m-qty').value),
+  price:parseFloat(document.getElementById('m-price').value),
+  fees:parseFloat(document.getElementById('m-fees').value)||0,
+  currency:document.getElementById('m-currency').value,
+  transaction_date:document.getElementById('m-date').value,
+  notes:document.getElementById('m-notes').value.trim()||null
+};}
 
-  if (!ticker || !name || !quantity || !price || !transaction_date) {
-    return showToast('❌ Remplis les champs obligatoires (*)');
-  }
-
-  const { data, error } = await db.from('transactions')
-    .insert({ account_id, ticker, name, asset_type, transaction_type, quantity, price, fees, currency, transaction_date, notes })
-    .select('*, accounts(name, type)').single();
-
-  if (error) return showToast('❌ ' + error.message);
-  S.transactions.unshift(data);
-  closeModal();
-  showToast('✅ Transaction enregistrée');
-  renderAccounts();
+async function saveTx(){
+  const d=readForm();
+  if(!d.ticker||!d.name||!d.quantity||!d.price||!d.transaction_date) return showToast('❌ Remplis les champs obligatoires (*)');
+  try{
+    const ins=await dbPost('transactions',d);
+    const full=await dbGet('transactions','id=eq.'+ins.id+'&select=*,accounts(name,type)');
+    S.transactions.unshift(full?.[0]||ins); closeModal(); showToast('✅ Transaction enregistrée'); renderAccounts();
+  }catch(e){ showToast('❌ '+e.message); }
 }
 
-async function deleteTransaction(id) {
-  if (!confirm('Supprimer cette transaction ?')) return;
-  const { error } = await db.from('transactions').delete().eq('id', id);
-  if (error) return showToast('❌ ' + error.message);
-  S.transactions = S.transactions.filter(t => t.id !== id);
-  showToast('✅ Transaction supprimée');
-  renderAccounts();
+async function saveEditTx(id){
+  const d=readForm();
+  if(!d.ticker||!d.name||!d.quantity||!d.price||!d.transaction_date) return showToast('❌ Remplis les champs obligatoires (*)');
+  try{
+    await dbPatch('transactions','id=eq.'+id,d);
+    const i=S.transactions.findIndex(t=>t.id===id);
+    if(i>=0){ const a=S.accounts.find(x=>x.id===d.account_id); S.transactions[i]={...S.transactions[i],...d,accounts:{name:a?.name,type:a?.type}}; }
+    closeModal(); showToast('✅ Transaction modifiée'); renderAccounts();
+  }catch(e){ showToast('❌ '+e.message); }
 }
 
-// ── MODAL HELPERS ────────────────────────────────────────────
-function showModal(html) {
-  document.getElementById('modal-content').innerHTML = html;
-  document.getElementById('modal-overlay').classList.add('open');
-}
-function closeModal() {
-  document.getElementById('modal-overlay').classList.remove('open');
-}
-function closeModalOutside(e) {
-  if (e.target === document.getElementById('modal-overlay')) closeModal();
+async function deleteTx(id){
+  if(!confirm('Supprimer cette transaction ?')) return;
+  try{ await dbDel('transactions','id=eq.'+id); S.transactions=S.transactions.filter(t=>t.id!==id); showToast('✅ Supprimée'); renderAccounts(); }
+  catch(e){ showToast('❌ '+e.message); }
 }
 
-// ── FORMAT HELPERS ───────────────────────────────────────────
-function fmtEur(v) {
-  if (v == null || isNaN(v)) return '—';
-  return v.toLocaleString('fr-FR', { minimumFractionDigits:2, maximumFractionDigits:2 }) + ' €';
-}
-function fmtNum(v) {
-  if (v == null || isNaN(v)) return '—';
-  return v.toLocaleString('fr-FR', { minimumFractionDigits:2, maximumFractionDigits:2 });
-}
-function fmtQty(v) {
-  if (v == null) return '—';
-  return Number.isInteger(v) ? v.toString()
-    : v.toLocaleString('fr-FR', { maximumFractionDigits:6, minimumFractionDigits:0 });
-}
-function fmtDate(d) {
-  return new Date(d + 'T00:00:00').toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric' });
-}
-function currSym(c) {
-  return { EUR:'€', USD:'$', GBP:'£', JPY:'¥', HKD:'HK$', CHF:'CHF' }[c] || c;
-}
-function shortAcct(name) {
-  // "CTO Trade Republic" → "CTO TR", "PEA BoursoBank" → "PEA BB"
-  const words = name.split(' ');
-  if (words.length <= 1) return name;
-  return words[0] + ' ' + words.slice(1).map(w => w[0]).join('');
-}
-
-// ── TOAST ────────────────────────────────────────────────────
-function showToast(msg, duration = 3500) {
-  document.querySelector('.toast')?.remove();
-  const t = document.createElement('div');
-  t.className = 'toast';
-  t.textContent = msg;
-  document.body.appendChild(t);
-  setTimeout(() => t.remove(), duration);
-}
+// ═══════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════
+function fE(v){ if(v==null||isNaN(v))return '—'; return v.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €'; }
+function fN(v){ if(v==null||isNaN(v))return '—'; return v.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fQ(v){ if(v==null)return '—'; return Number.isInteger(v)?String(v):v.toLocaleString('fr-FR',{maximumFractionDigits:6}); }
+function fD(d){ return new Date(d+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'}); }
+function cS(c){ return{EUR:'€',USD:'$',GBP:'£',JPY:'¥',HKD:'HK$',CHF:'CHF'}[c]||c; }
+function sA(n){ const w=n.split(' '); return w.length<=1?n:w[0]+' '+w.slice(1).map(x=>x[0]).join(''); }
+function showToast(m,ms=3500){ document.querySelector('.toast')?.remove(); const t=document.createElement('div'); t.className='toast'; t.textContent=m; document.body.appendChild(t); setTimeout(()=>t.remove(),ms); }
 </script>
 </body>
 </html>
