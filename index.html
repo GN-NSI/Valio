@@ -386,22 +386,51 @@ function renderPosBody(sorted){
 }
 
 // ═══ PRICE FETCHING ═══
+// Fetch une position et met à jour la ligne immédiatement
+async function fetchOneTicker(p){
+  const $=id=>document.getElementById(id);
+  try{
+    let d=manualPrices[p.ticker]||S.prices[p.ticker];
+    if(!d||(!d.manual&&Date.now()-(d._t||0)>60000)){
+      const ctrl=new AbortController();
+      const tid=setTimeout(()=>ctrl.abort(),9000); // timeout 9s
+      try{
+        const r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker),{signal:ctrl.signal});
+        d=await r.json();
+      }finally{clearTimeout(tid);}
+      d._t=Date.now();S.prices[p.ticker]=d;
+    }
+    if(!d?.price){
+      if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix</button>`;
+      return;
+    }
+    const usd=(d.currency||'USD')==='USD';const pe=usd?d.price/S.eurUsd:d.price;
+    const ve=pe*p.quantity,pnl=ve-p.totalCostEur,pct=p.totalCostEur>0?(pnl/p.totalCostEur)*100:0,chg=d.changePct??0;
+    p.priceEur=pe;p.valueEur=ve;p.pnlEur=pnl;p.pnlPct=pct;
+    if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<span class="mono">${d.manual?'✎ ':''}`+(usd?'$':'€')+`${fN(d.price)}</span>`+(!d.manual?`<div style="font-size:11px;color:${chg>=0?'var(--green)':'var(--red)'};margin-top:2px">${chg>=0?'+':''}${chg.toFixed(2)}%</div>`:'');
+    if($('vl-'+p.ticker))$('vl-'+p.ticker).innerHTML=`<span class="mono">${fE(ve)}</span>`;
+    if($('pl-'+p.ticker))$('pl-'+p.ticker).innerHTML=`<span class="mono ${pnl>=0?'c-green':'c-red'}">${pnl>=0?'+':''}${fE(pnl)}</span>`;
+    if($('pp-'+p.ticker))$('pp-'+p.ticker).innerHTML=`<span class="mono ${pct>=0?'c-green':'c-red'}">${pct>=0?'+':''}${pct.toFixed(2)}%</span>`;
+  }catch(err){
+    if(err.name!=='AbortError'&&document.getElementById('px-'+p.ticker))
+      document.getElementById('px-'+p.ticker).innerHTML=`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix</button>`;
+  }
+}
+
+// Fetch par lots de 4 avec 400ms entre chaque lot → évite le rate-limit Yahoo Finance
 async function fetchPrices(pos){
-  await Promise.all(pos.map(async p=>{
-    const $=id=>document.getElementById(id);
-    try{
-      let d=manualPrices[p.ticker]||S.prices[p.ticker];
-      if(!d||(!d.manual&&Date.now()-(d._t||0)>60000)){const r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker));d=await r.json();d._t=Date.now();S.prices[p.ticker]=d;}
-      if(!d?.price){if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix</button>`;return;}
-      const usd=(d.currency||'USD')==='USD';const pe=usd?d.price/S.eurUsd:d.price;
-      const ve=pe*p.quantity,pnl=ve-p.totalCostEur,pct=p.totalCostEur>0?(pnl/p.totalCostEur)*100:0,chg=d.changePct??0;
-      p.priceEur=pe;p.valueEur=ve;p.pnlEur=pnl;p.pnlPct=pct;
-      if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<span class="mono">${d.manual?'✎ ':''}`+(usd?'$':'€')+`${fN(d.price)}</span>`+(!d.manual?`<div style="font-size:11px;color:${chg>=0?'var(--green)':'var(--red)'};margin-top:2px">${chg>=0?'+':''}${chg.toFixed(2)}%</div>`:'');
-      if($('vl-'+p.ticker))$('vl-'+p.ticker).innerHTML=`<span class="mono">${fE(ve)}</span>`;
-      if($('pl-'+p.ticker))$('pl-'+p.ticker).innerHTML=`<span class="mono ${pnl>=0?'c-green':'c-red'}">${pnl>=0?'+':''}${fE(pnl)}</span>`;
-      if($('pp-'+p.ticker))$('pp-'+p.ticker).innerHTML=`<span class="mono ${pct>=0?'c-green':'c-red'}">${pct>=0?'+':''}${pct.toFixed(2)}%</span>`;
-    }catch{if(document.getElementById('px-'+p.ticker))document.getElementById('px-'+p.ticker).innerHTML=`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix</button>`;}
-  }));
+  const BATCH=4, DELAY=400;
+  for(let i=0;i<pos.length;i+=BATCH){
+    const batch=pos.slice(i,i+BATCH);
+    await Promise.all(batch.map(p=>fetchOneTicker(p)));
+    // Mise à jour progressive après chaque lot
+    S.enrichedPos=[...pos];
+    updateKPIs(pos);
+    renderPosBody(sortPos(pos));
+    renderDonut();
+    if(i+BATCH<pos.length) await new Promise(r=>setTimeout(r,DELAY));
+  }
+  // Mise à jour finale
   S.enrichedPos=[...pos];
   updateKPIs(pos);
   renderPosBody(sortPos(pos));
