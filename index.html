@@ -216,8 +216,28 @@ const META_OVERRIDE={
   'PAASI.PA':{country:'CN',sector:'ETF'},
   'PAASI'  :{country:'CN',sector:'ETF'},
 };
+
+// ═══ PAYS HARDCODÉS (pas besoin de FMP pour la géo) ═══
+// US stocks — NYSE / NASDAQ
+const TICKER_COUNTRY={
+  NVDA:'US',GOOGL:'US',GOOG:'US',MSFT:'US',AMZN:'US',META:'US',AAPL:'US',
+  TSLA:'US',COIN:'US',RDDT:'US',BKNG:'US',SPGI:'US',VRT:'US',UBER:'US',
+  V:'US',MA:'US',LYFT:'US',NVTS:'US',JPM:'US',BAC:'US',HOOD:'US',
+  // Asie
+  TSM:'TW',TSMC:'TW',ATEYY:'JP',SMNG:'KR','SMSN.L':'KR',
+  // Europe
+  'BESI.AS':'NL',SIV:'SE','2DG':'SE',ASML:'NL','ASML.AS':'NL',SAP:'DE',
+  // ETFs (exposition économique, pas domicile)
+  'ESE.PA':'US',ESE:'US','PAASI.PA':'CN',PAASI:'CN',CW8:'US',
+};
 function getProfile(ticker){
-  return Object.assign({},S.profiles[ticker]||{},META_OVERRIDE[ticker]||{});
+  const base=S.profiles[ticker]||{};
+  const override=META_OVERRIDE[ticker]||{};
+  // Hardcoded country takes priority (no FMP call needed for geo)
+  const country=override.country||TICKER_COUNTRY[ticker]||base.country||null;
+  const sector=override.sector||base.sector||null;
+  const mktCap=base.mktCap||null;
+  return{country,sector,mktCap};
 }
 
 // ═══ GEO ═══
@@ -255,12 +275,23 @@ let chartMode='positions',chartDrill=[];
 let posSort={col:'value',dir:'desc'};
 let ratiosSort={col:null,dir:'desc'};
 
+
+// ═══ CACHE LOCALSTORAGE (réduit drastiquement les appels FMP) ═══
+function saveCache(){
+  try{localStorage.setItem('folio_profiles',JSON.stringify(S.profiles));
+      localStorage.setItem('folio_fundamentals',JSON.stringify(S.fundamentals));}catch{}
+}
+function loadCache(){
+  try{const p=localStorage.getItem('folio_profiles');if(p)S.profiles=JSON.parse(p);}catch{}
+  try{const f=localStorage.getItem('folio_fundamentals');if(f)S.fundamentals=JSON.parse(f);}catch{}
+}
 // ═══ INIT ═══
 window.addEventListener('load',async()=>{loadSess();if(getUser()){showApp();await bootstrap();navigate('portfolio');}else showAuth();});
 function showApp(){document.getElementById('auth-screen').style.display='none';document.getElementById('app-screen').style.display='flex';}
 function showAuth(){document.getElementById('auth-screen').style.display='flex';document.getElementById('app-screen').style.display='none';}
 async function bootstrap(){
   const u=getUser();if(!u)return;
+  loadCache(); // Charge profils et fondamentaux depuis localStorage
   try{await dbUpsert('profiles',{id:u.id,username:u.email.split('@')[0],display_name:u.email.split('@')[0]},'id');}catch{}
   try{const p=(await dbGet('profiles','id=eq.'+u.id))?.[0];if(p){const n=p.display_name||p.username||u.email.split('@')[0];document.getElementById('sidebar-username').textContent=n;document.getElementById('sidebar-avatar').textContent=n[0].toUpperCase();}}catch{}
   const accts=await dbGet('accounts','user_id=eq.'+u.id+'&order=created_at');S.accounts=accts||[];
@@ -558,10 +589,19 @@ async function changeChartMode(mode){
   if(!S.enrichedPos.length){showToast('⏳ Attends que les prix se chargent…');return;}
   if(['secteur','region','pays','capi'].includes(mode)){
     const el=document.getElementById('chart-loading');if(el)el.style.display='inline-flex';
-    await Promise.all(S.enrichedPos.map(async p=>{
-      if(S.profiles[p.ticker])return;
-      try{const r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker)+'&type=profile',{signal:AbortSignal.timeout(5000)});const d=await r.json();if(d&&(d.sector||d.country))S.profiles[p.ticker]=d;}catch{}
-    }));
+    // Fetch seulement les tickers sans profil ET sans pays hardcodé
+    const toFetch=S.enrichedPos.filter(p=>!S.profiles[p.ticker]&&!TICKER_COUNTRY[p.ticker]&&!META_OVERRIDE[p.ticker]);
+    if(toFetch.length){
+      // Batches de 3 avec délai (évite rate limit FMP)
+      for(let i=0;i<toFetch.length;i+=3){
+        await Promise.all(toFetch.slice(i,i+3).map(async p=>{
+          try{const r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker)+'&type=profile',{signal:AbortSignal.timeout(5000)});
+          const d=await r.json();if(d&&(d.sector||d.country))S.profiles[p.ticker]=d;}catch{}
+        }));
+        if(i+3<toFetch.length)await new Promise(r=>setTimeout(r,400));
+      }
+      saveCache(); // Sauvegarde pour la prochaine session
+    }
     const el2=document.getElementById('chart-loading');if(el2)el2.style.display='none';
   }
   renderDonut();
@@ -706,6 +746,7 @@ async function loadAllRatios(){
     }));
     if(i+BATCH<pos.length)await new Promise(r=>setTimeout(r,DELAY));
   }
+  saveCache(); // Sauvegarde les fondamentaux pour la prochaine session
   if(btn){btn.disabled=false;btn.textContent='⟳ Actualiser';}
 }
 
