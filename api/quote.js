@@ -52,10 +52,11 @@ module.exports = async (req, res) => {
   // ── FUNDAMENTALS ──────────────────────────────────────────────────────
   if (type === 'fundamentals') {
     try {
-      const [metricsRaw, ratiosRaw, cfRaw] = await Promise.all([
+      const [metricsRaw, ratiosRaw, cfRaw, isRaw] = await Promise.all([
         fmpFetch(`key-metrics-ttm?symbol=${encodeURIComponent(symbol)}`),
         fmpFetch(`ratios-ttm?symbol=${encodeURIComponent(symbol)}`),
         fmpFetch(`cash-flow-statement?symbol=${encodeURIComponent(symbol)}&limit=2`),
+        fmpFetch(`income-statement?symbol=${encodeURIComponent(symbol)}&period=annual&limit=2`),
       ]);
 
       const m = Array.isArray(metricsRaw) ? metricsRaw[0] : metricsRaw;
@@ -66,8 +67,19 @@ module.exports = async (req, res) => {
         fmpError: true,
       });
 
-      // Forward EPS — non disponible sur FMP free tier (analyst-estimates supprimé pour économiser le quota)
+      // Forward EPS — non disponible free tier
       const epsForward = null;
+      // CA 1A et EPS 1A depuis income-statement annuel (2 dernières années)
+      let revenueGrowthYoY = null, epsGrowth1Y = null;
+      if (Array.isArray(isRaw) && isRaw.length >= 2) {
+        const [curr, prev] = isRaw;
+        if (curr?.revenue && prev?.revenue && prev.revenue !== 0)
+          revenueGrowthYoY = ((curr.revenue - prev.revenue) / Math.abs(prev.revenue)) * 100;
+        const cEps = curr?.eps ?? curr?.epsBasic ?? curr?.epsDiluted ?? null;
+        const pEps = prev?.eps ?? prev?.epsBasic ?? prev?.epsDiluted ?? null;
+        if (cEps != null && pEps != null && pEps !== 0)
+          epsGrowth1Y = ((cEps - pEps) / Math.abs(pEps)) * 100;
+      }
 
       // Cash flow
       let fcfGrowth = null, fcf0 = null, cfo0 = null;
@@ -102,8 +114,8 @@ module.exports = async (req, res) => {
         fcfGrowth,
         mktCap:             m?.marketCapTTM || m?.marketCap || null,
         currentPriceUSD:    currentPrice,
-        revenueGrowthYoY:   null, // nécessite income-statement (appel supprimé pour économiser le quota)
-        epsGrowth1Y:        null,
+        revenueGrowthYoY,
+        epsGrowth1Y,
         timestamp:          Date.now(),
       });
     } catch (err) { return res.status(500).json({ error: err.message }); }
