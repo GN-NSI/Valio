@@ -1,3 +1,37 @@
+// ═══ ROTATION AUTOMATIQUE DES CLÉS FMP ═══
+// Ajoute FMP_KEY, FMP_KEY_2, FMP_KEY_3 dans Vercel → Settings → Environment Variables.
+// Si la clé 1 est épuisée (ex: 542/250), la 2 prend le relais automatiquement.
+// Chaque clé gratuite FMP = 250 appels/jour → 3 clés = 750/jour.
+
+function getFmpKeys() {
+  return [
+    process.env.FMP_KEY,
+    process.env.FMP_KEY_2,
+    process.env.FMP_KEY_3,
+    'yrFxAuUHv6XgKGxfXol6sGWVxmEq6tBr', // clé de secours partagée (dernier recours)
+  ].filter(k => k && k.length > 10);
+}
+
+function isQuotaError(data) {
+  if (!data || Array.isArray(data)) return false;
+  const msg = (data['Error Message'] || data['message'] || data['error'] || '').toLowerCase();
+  return msg.includes('limit') || msg.includes('quota') || msg.includes('upgrade') || msg.includes('reach');
+}
+
+// Appelle un endpoint FMP — essaie chaque clé jusqu'à succès
+async function fmpFetch(path) {
+  for (const [i, key] of getFmpKeys().entries()) {
+    try {
+      const r = await fetch(`https://financialmodelingprep.com/stable/${path}&apikey=${key}`);
+      if (!r.ok) continue;
+      const data = await r.json();
+      if (isQuotaError(data)) { console.log(`FMP key ${i+1} quota exhausted, trying next...`); continue; }
+      return data;
+    } catch { continue; }
+  }
+  return null;
+}
+
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET');
@@ -5,214 +39,120 @@ module.exports = async (req, res) => {
   const { symbol, type } = req.query;
   if (!symbol) return res.status(400).json({ error: 'symbol requis' });
 
-  // ── MODE PROFILE (secteur, pays, capitalisation) ─────────────────────
+  // ── PROFILE ───────────────────────────────────────────────────────────
   if (type === 'profile') {
-    const FMP_KEY = 'yrFxAuUHv6XgKGxfXol6sGWVxmEq6tBr';
     try {
-      const r = await fetch(`https://financialmodelingprep.com/stable/profile?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_KEY}`);
-      const d = r.ok ? await r.json() : null;
+      const d = await fmpFetch(`profile?symbol=${encodeURIComponent(symbol)}`);
       const p = Array.isArray(d) ? d[0] : d;
-      if (!p || !p.symbol) return res.status(404).json({ error: `Profile introuvable pour ${symbol}` });
+      if (!p?.symbol) return res.status(404).json({ error: `Profile introuvable pour ${symbol}` });
       return res.json({ symbol, sector: p.sector||null, industry: p.industry||null, country: p.country||null, mktCap: p.mktCap||null, isEtf: p.isEtf||false, currency: p.currency||null });
-    } catch(err) { return res.status(500).json({ error: err.message }); }
+    } catch (err) { return res.status(500).json({ error: err.message }); }
   }
 
-
-  // ── MODE FUNDAMENTALS ──────────────────────────────────────────────
+  // ── FUNDAMENTALS ──────────────────────────────────────────────────────
   if (type === 'fundamentals') {
-    const FMP_KEY = 'yrFxAuUHv6XgKGxfXol6sGWVxmEq6tBr';
     try {
-      const [rMetrics, rRatios, rCF, rEst, rGrowth] = await Promise.all([
-        fetch(`https://financialmodelingprep.com/stable/key-metrics-ttm?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_KEY}`),
-        fetch(`https://financialmodelingprep.com/stable/ratios-ttm?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_KEY}`),
-        fetch(`https://financialmodelingprep.com/stable/cash-flow-statement?symbol=${encodeURIComponent(symbol)}&limit=2&apikey=${FMP_KEY}`),
-        fetch(`https://financialmodelingprep.com/stable/analyst-estimates?symbol=${encodeURIComponent(symbol)}&period=annual&limit=10&apikey=${FMP_KEY}`),
-        fetch(`https://financialmodelingprep.com/stable/income-statement?symbol=${encodeURIComponent(symbol)}&period=annual&limit=2&apikey=${FMP_KEY}`)
+      const [metricsRaw, ratiosRaw, cfRaw, estRaw] = await Promise.all([
+        fmpFetch(`key-metrics-ttm?symbol=${encodeURIComponent(symbol)}`),
+        fmpFetch(`ratios-ttm?symbol=${encodeURIComponent(symbol)}`),
+        fmpFetch(`cash-flow-statement?symbol=${encodeURIComponent(symbol)}&limit=2`),
+        fmpFetch(`analyst-estimates?symbol=${encodeURIComponent(symbol)}&period=annual&limit=10`),
       ]);
-      const metricsData = rMetrics.ok ? await rMetrics.json() : [];
-      const ratiosData  = rRatios.ok  ? await rRatios.json()  : [];
-      const m = Array.isArray(metricsData) ? metricsData[0] : metricsData;
-      const r = Array.isArray(ratiosData)  ? ratiosData[0]  : ratiosData;
-      if (!m && !r) return res.status(404).json({ error: `Données introuvables pour ${symbol}` });
+
+      const m = Array.isArray(metricsRaw) ? metricsRaw[0] : metricsRaw;
+      const r = Array.isArray(ratiosRaw)  ? ratiosRaw[0]  : ratiosRaw;
+
+      if (!m && !r) return res.status(503).json({
+        error: 'Toutes les clés FMP épuisées. Ajoute FMP_KEY_2 dans Vercel.',
+        fmpError: true,
+      });
+
+      // Forward EPS
       let epsForward = null;
-      if (rEst.ok) {
-        const estData = await rEst.json();
-        if (Array.isArray(estData)) {
-          const today = new Date();
-          const nextEst = estData.filter(e => new Date(e.date) > today && e.epsAvg > 0)
-            .sort((a,b) => new Date(a.date)-new Date(b.date))[0];
-          if (nextEst) epsForward = nextEst.epsAvg;
+      if (Array.isArray(estRaw)) {
+        const today = new Date();
+        const next = estRaw
+          .filter(e => new Date(e.date) > today && (e.epsAvg || e.epsEstimated || 0) > 0)
+          .sort((a, b) => new Date(a.date) - new Date(b.date))[0];
+        if (next) epsForward = next.epsAvg || next.epsEstimated;
+      }
+
+      // Cash flow
+      let fcfGrowth = null, fcf0 = null, cfo0 = null;
+      if (Array.isArray(cfRaw) && cfRaw.length > 0) {
+        fcf0 = cfRaw[0]?.freeCashFlow       || null;
+        cfo0 = cfRaw[0]?.operatingCashFlow  || null;
+        if (cfRaw.length >= 2) {
+          const fcf1 = cfRaw[1]?.freeCashFlow || null;
+          if (fcf0 && fcf1 && fcf1 !== 0) fcfGrowth = ((fcf0 - fcf1) / Math.abs(fcf1)) * 100;
         }
       }
-      let fcfGrowth=null,fcf0=null,cfo0=null,capex0=null;
-      if (rCF.ok) {
-        const cfData = await rCF.json();
-        if (Array.isArray(cfData) && cfData.length >= 2) {
-          fcf0=cfData[0]?.freeCashFlow||null; cfo0=cfData[0]?.operatingCashFlow||null; capex0=cfData[0]?.capitalExpenditure||null;
-          const fcf1=cfData[1]?.freeCashFlow||null;
-          if (fcf0&&fcf1&&fcf1!==0) fcfGrowth=((fcf0-fcf1)/Math.abs(fcf1))*100;
-        } else if (Array.isArray(cfData)&&cfData.length===1) {
-          fcf0=cfData[0]?.freeCashFlow||null; cfo0=cfData[0]?.operatingCashFlow||null; capex0=cfData[0]?.capitalExpenditure||null;
-        }
-      }
-      // Revenue & EPS growth from income statement growth
-      let revenueGrowthYoY = null, epsGrowth1Y = null;
-      if (rGrowth?.ok) {
-        const isData = await rGrowth.json().catch(() => []);
-        if (Array.isArray(isData) && isData.length >= 2) {
-          const curr = isData[0], prev = isData[1];
-          if (curr?.revenue && prev?.revenue && prev.revenue !== 0) {
-            revenueGrowthYoY = ((curr.revenue - prev.revenue) / Math.abs(prev.revenue)) * 100;
-          }
-          const cEps = curr?.eps ?? curr?.epsBasic ?? curr?.epsDiluted ?? null;
-          const pEps = prev?.eps ?? prev?.epsBasic ?? prev?.epsDiluted ?? null;
-          if (cEps != null && pEps != null && pEps !== 0) {
-            epsGrowth1Y = ((cEps - pEps) / Math.abs(pEps)) * 100;
-          }
-        }
-      }
+
       const currentPrice = m?.stockPriceTTM || null;
-      const forwardPE = (epsForward && epsForward > 0 && currentPrice) ? currentPrice / epsForward : null;
+      const forwardPE    = (epsForward > 0 && currentPrice) ? currentPrice / epsForward : null;
+
       return res.json({
         symbol,
-        trailingPE:    r?.priceToEarningsRatioTTM || null,
+        trailingPE:         r?.priceToEarningsRatioTTM          || null,
         forwardPE,
         epsForward,
-        pegRatio:      r?.priceToEarningsGrowthRatioTTM || null,
-        profitMarginPct: r?.netProfitMarginTTM ? r.netProfitMarginTTM*100 : null,
-        grossMarginPct:  r?.grossProfitMarginTTM ? r.grossProfitMarginTTM*100 : null,
-        operatingMarginPct: r?.operatingProfitMarginTTM ? r.operatingProfitMarginTTM*100 : null,
-        freeCashflow:  fcf0,
-        operatingCashFlow: cfo0,
-        pfcf:          r?.priceToFreeCashFlowRatioTTM || null,
-        pocf:          r?.priceToOperatingCashFlowsRatioTTM || m?.pocfRatioTTM || null,
-        mktCap:        m?.marketCapTTM || m?.marketCap || null,
-        roic:          m?.roicTTM ? m.roicTTM*100 : null,
-        returnOnEquity: m?.returnOnEquityTTM ? m.returnOnEquityTTM*100 : null,
-        netDebtToEBITDA: m?.netDebtToEBITDATTM || null,
+        pegRatio:           r?.priceToEarningsGrowthRatioTTM    || null,
+        pfcf:               r?.priceToFreeCashFlowsRatioTTM     || null,
+        pocf:               r?.priceToOperatingCashFlowsRatioTTM || m?.pocfRatioTTM || null,
+        profitMarginPct:    r?.netProfitMarginTTM   ? r.netProfitMarginTTM   * 100 : null,
+        grossMarginPct:     r?.grossProfitMarginTTM ? r.grossProfitMarginTTM * 100 : null,
+        roic:               m?.roicTTM              ? m.roicTTM              * 100 : null,
+        returnOnEquity:     m?.returnOnEquityTTM    ? m.returnOnEquityTTM    * 100 : null,
+        netDebtToEBITDA:    m?.netDebtToEBITDATTM  || null,
+        freeCashflow:       fcf0,
+        operatingCashFlow:  cfo0,
         fcfGrowth,
-        revenueGrowthYoY,
-        epsGrowth1Y,
-        currentPriceUSD: currentPrice,
-        timestamp: Date.now()
+        mktCap:             m?.marketCapTTM || m?.marketCap || null,
+        currentPriceUSD:    currentPrice,
+        revenueGrowthYoY:   null, // nécessite income-statement (appel supprimé pour économiser le quota)
+        epsGrowth1Y:        null,
+        timestamp:          Date.now(),
       });
-    } catch(err) { return res.status(500).json({error:err.message}); }
+    } catch (err) { return res.status(500).json({ error: err.message }); }
   }
 
-  // ── MODE COURS ─────────────────────────────────────────────────────
+  // ── PRIX (Yahoo Finance) ──────────────────────────────────────────────
+  const sym  = encodeURIComponent(symbol);
+  const BASE = 'https://query1.finance.yahoo.com/v8/finance/chart/';
+  const YH   = { headers: { 'User-Agent': 'Mozilla/5.0' } };
   try {
-    const safeSym = symbol.replace(/%5E/gi,'^').replace(/%3D/gi,'=');
-    const range = req.query.range || '1y';
-
-    const fetchOpts = {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://finance.yahoo.com/',
-        'Origin': 'https://finance.yahoo.com'
-      }
-    };
-
-    // Appel principal : range demandé (1y par défaut) avec interval 1d
-    // meta.regularMarketPrice = cours actuel
-    // meta.chartPreviousClose = close J-1 RÉEL (fiable sur range >= 5d)
-    // Pour la variation journalière on fait un 2ème appel sur 5d qui est plus fiable
-    const url5d   = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(safeSym)}?interval=1d&range=5d`;
-    const urlHist = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(safeSym)}?interval=1d&range=${range}`;
-
-    const [r5d, rHist] = await Promise.all([
-      fetch(url5d, fetchOpts),
-      fetch(urlHist, fetchOpts)
+    const [r5d, rhist] = await Promise.all([
+      fetch(`${BASE}${sym}?range=5d&interval=1d&includePrePost=false`, YH),
+      fetch(`${BASE}${sym}?range=1y&interval=1mo&includePrePost=false`, YH),
     ]);
 
-    if (!r5d.ok && !rHist.ok) return res.status(502).json({ error: 'Yahoo Finance indisponible' });
+    const d5    = r5d.ok   ? await r5d.json()   : null;
+    const dhist = rhist.ok ? await rhist.json() : null;
+    const chart = d5?.chart?.result?.[0];
+    if (!chart) return res.status(404).json({ error: `Ticker introuvable: ${symbol}` });
 
-    // Extraire prix et variation J depuis l'appel 5d
-    let price=null, changeAbs=null, changePct=null, prevClose=null, currency='USD', exchange='';
+    const meta      = chart.meta;
+    const price     = meta.regularMarketPrice || meta.previousClose;
+    const prev      = meta.previousClose || meta.chartPreviousClose;
+    const currency  = meta.currency || 'USD';
+    const changeAbs = price - prev;
+    const changePct = prev ? (changeAbs / prev) * 100 : 0;
 
-    const parse5d = r5d.ok ? await r5d.json() : null;
-    const meta5d = parse5d?.chart?.result?.[0]?.meta;
+    const hchart = dhist?.chart?.result?.[0];
+    const closes = hchart?.indicators?.quote?.[0]?.close || [];
+    const times  = hchart?.timestamp || [];
+    const pts    = closes.map((c, i) => c != null ? { c, t: times[i] } : null).filter(Boolean);
 
-    if (meta5d) {
-      price    = meta5d.regularMarketPrice || null;
-      currency = meta5d.currency || 'USD';
-      exchange = meta5d.exchangeName || '';
-
-      // Reconstituer le vrai J-1 depuis les closes du range 5d
-      const result5d = parse5d?.chart?.result?.[0];
-      const ts5d     = result5d?.timestamp || [];
-      const cl5d     = result5d?.indicators?.quote?.[0]?.close || [];
-
-      // Filtrer les closes valides et triés
-      const validDays = ts5d
-        .map((t, i) => ({ ts: t, close: cl5d[i] }))
-        .filter(d => d.close != null)
-        .sort((a, b) => a.ts - b.ts);
-
-      const nowTs = Date.now() / 1000;
-      // Le close J-1 = dernier close avant le cours actuel (avant aujourd'hui)
-      const today0h = new Date(); today0h.setHours(0,0,0,0);
-      const today0hTs = today0h.getTime() / 1000;
-
-      const prevDays = validDays.filter(d => d.ts < today0hTs);
-      if (prevDays.length > 0) {
-        prevClose = prevDays[prevDays.length - 1].close;
-      } else if (validDays.length >= 2) {
-        // Fallback : avant-dernier point
-        prevClose = validDays[validDays.length - 2].close;
-      } else {
-        prevClose = meta5d.chartPreviousClose || meta5d.previousClose || null;
-      }
-
-      if (price && prevClose) {
-        changeAbs = price - prevClose;
-        changePct = ((price - prevClose) / prevClose) * 100;
-      }
+    let change1M = null, changeYTD = null, change1Y = null;
+    if (pts.length > 0) {
+      const now = pts[pts.length - 1].c;
+      const jan1 = new Date(); jan1.setMonth(0); jan1.setDate(1);
+      const ytdPt = pts.find(e => e.t * 1000 >= jan1.getTime());
+      if (ytdPt) changeYTD = ((now - ytdPt.c) / ytdPt.c) * 100;
+      if (pts.length >= 2)  change1M = ((now - pts[pts.length - 2].c) / pts[pts.length - 2].c) * 100;
+      if (pts.length >= 12) change1Y = ((now - pts[pts.length - 12].c) / pts[pts.length - 12].c) * 100;
     }
 
-    // Fallback prix depuis hist si 5d a échoué
-    if (!price && rHist.ok) {
-      const parseHist = await rHist.json();
-      const metaH = parseHist?.chart?.result?.[0]?.meta;
-      if (metaH) {
-        price    = metaH.regularMarketPrice || metaH.previousClose || null;
-        currency = metaH.currency || 'USD';
-        exchange = metaH.exchangeName || '';
-        prevClose = metaH.chartPreviousClose || metaH.previousClose || null;
-        if (price && prevClose) { changeAbs = price - prevClose; changePct = ((price-prevClose)/prevClose)*100; }
-      }
-    }
-
-    if (!price) return res.status(404).json({ error: `Cours introuvable pour ${symbol}` });
-
-    // Variations multi-périodes depuis hist
-    let change1M=null, changeYTD=null, change1Y=null;
-    if (rHist.ok) {
-      // Si déjà consommé pour fallback, re-fetch (rare)
-      let parseHist2;
-      try { parseHist2 = await rHist.json(); } catch(e) { parseHist2 = null; }
-      const result = parseHist2?.chart?.result?.[0];
-      if (result?.timestamp && result?.indicators?.quote?.[0]?.close) {
-        const timestamps = result.timestamp;
-        const closes     = result.indicators.quote[0].close;
-        const now        = Date.now() / 1000;
-        const findClose  = ts => {
-          let best=null, bestDiff=Infinity;
-          timestamps.forEach((t,i)=>{ const d=Math.abs(t-ts); if(d<bestDiff&&closes[i]!=null){best=closes[i];bestDiff=d;} });
-          return best;
-        };
-        const c1M  = findClose(now - 30*24*3600);
-        const cYTD = findClose(new Date(new Date().getFullYear(),0,1).getTime()/1000);
-        const c1Y  = findClose(now - 365*24*3600);
-        if (c1M  && price) change1M  = ((price-c1M) /c1M) *100;
-        if (cYTD && price) changeYTD = ((price-cYTD)/cYTD)*100;
-        if (c1Y  && price) change1Y  = ((price-c1Y) /c1Y) *100;
-      }
-    }
-
-    res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate');
-    return res.json({ symbol, price, prevClose, changeAbs, changePct, change1M, changeYTD, change1Y, currency, exchange, timestamp:Date.now() });
-
-  } catch(err) { return res.status(500).json({error:err.message}); }
+    return res.json({ symbol, price, prevClose: prev, changeAbs, changePct, change1M, changeYTD, change1Y, currency, exchange: meta.exchangeName, timestamp: Date.now() });
+  } catch (err) { return res.status(500).json({ error: err.message }); }
 };
