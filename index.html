@@ -208,7 +208,10 @@ const META_OVERRIDE={
   'SMSN.L':{country:'KR',sector:'Information Technology'},
   'ATEYY'  :{country:'JP',sector:'Information Technology'},
   'BESI.AS':{country:'NL',sector:'Information Technology'},
-  'ESE.PA' :{country:'US',sector:'ETF'},
+  'SMNG' :{country:'KR',sector:'Information Technology'},
+  'SIV'  :{country:'SE',sector:'Information Technology'},
+  '2DG'  :{country:'SE',sector:'Information Technology'},
+  'ESE.PA':{country:'US',sector:'ETF'},
   'ESE'    :{country:'US',sector:'ETF'},
   'PAASI.PA':{country:'CN',sector:'ETF'},
   'PAASI'  :{country:'CN',sector:'ETF'},
@@ -250,6 +253,7 @@ const S={accounts:[],transactions:[],prices:{},profiles:{},fundamentals:{},eurUs
 const manualPrices={};
 let chartMode='positions',chartDrill=[];
 let posSort={col:'value',dir:'desc'};
+let ratiosSort={col:null,dir:'desc'};
 
 // ═══ INIT ═══
 window.addEventListener('load',async()=>{loadSess();if(getUser()){showApp();await bootstrap();navigate('portfolio');}else showAuth();});
@@ -622,6 +626,32 @@ async function loadRatios(){
 }
 
 
+
+function clickRatioSort(col){
+  if(ratiosSort.col===col)ratiosSort.dir=ratiosSort.dir==='desc'?'asc':'desc';
+  else{ratiosSort.col=col;ratiosSort.dir='desc';}
+  sortRatiosTable();
+}
+function ratioSortIcon(col){if(ratiosSort.col!==col)return'<span style="opacity:.3;font-size:9px">↕</span>';return ratiosSort.dir==='desc'?'↓':'↑';}
+function sortRatiosTable(){
+  const tbody=document.getElementById('ratios-tbody');if(!tbody)return;
+  const rows=Array.from(tbody.querySelectorAll('tr'));
+  const col=ratiosSort.col;if(!col)return;
+  rows.sort((a,b)=>{
+    const av=parseFloat(a.querySelector('[data-col="'+col+'"]')?.dataset?.val??'NaN');
+    const bv=parseFloat(b.querySelector('[data-col="'+col+'"]')?.dataset?.val??'NaN');
+    if(isNaN(av)&&isNaN(bv))return 0;if(isNaN(av))return 1;if(isNaN(bv))return -1;
+    return ratiosSort.dir==='desc'?bv-av:av-bv;
+  });
+  rows.forEach(r=>tbody.appendChild(r));
+  // Update sort icons
+  document.querySelectorAll('th[data-ratio-col]').forEach(th=>{
+    const c=th.dataset.ratioCol;
+    th.classList.toggle('sort-active',ratiosSort.col===c);
+    const sp=th.querySelector('span.si');
+    if(sp)sp.textContent=ratiosSort.col===c?(ratiosSort.dir==='desc'?'↓':'↑'):'↕';
+  });
+}
 // ═══ RATIOS PAGE ═══
 function renderRatios(){
   const pg=document.getElementById('page');
@@ -650,16 +680,16 @@ function renderRatios(){
     '<thead><tr>'+
     '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+
     '<th>Cours</th>'+
-    '<th title="P/E Trailing 12M">PER</th>'+
-    '<th title="Forward P/E 12M glissants">Fwd PER</th>'+
-    '<th title="PEG = PER / croissance EPS">PEG</th>'+
-    '<th title="Price / Operating Cash Flow">P/OCF</th>'+
-    '<th title="Marge bénéficiaire nette">M. Nette</th>'+
-    '<th title="Croissance CA annuelle YoY">CA 1A</th>'+
-    '<th title="Croissance EPS annuelle YoY">EPS 1A</th>'+
-    '<th title="Dette nette / EBITDA">D/EBITDA</th>'+
+    '<th data-ratio-col="per" onclick="clickRatioSort(\"per\")" style="cursor:pointer" title="P/E Trailing 12M">PER <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
+    '<th data-ratio-col="fwdpe" onclick="clickRatioSort(\"fwdpe\")" style="cursor:pointer" title="Forward P/E 12M glissants">Fwd PER <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
+    '<th data-ratio-col="peg" onclick="clickRatioSort(\"peg\")" style="cursor:pointer" title="PEG = PER / croissance EPS">PEG <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
+    '<th data-ratio-col="pocf" onclick="clickRatioSort(\"pocf\")" style="cursor:pointer" title="Price / Operating Cash Flow">P/OCF <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
+    '<th data-ratio-col="marge" onclick="clickRatioSort(\"marge\")" style="cursor:pointer" title="Marge nette">M. Nette <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
+    '<th data-ratio-col="ca1a" onclick="clickRatioSort(\"ca1a\")" style="cursor:pointer" title="Croissance CA YoY">CA 1A <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
+    '<th data-ratio-col="eps1a" onclick="clickRatioSort(\"eps1a\")" style="cursor:pointer" title="Croissance EPS YoY">EPS 1A <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
+    '<th data-ratio-col="debt" onclick="clickRatioSort(\"debt\")" style="cursor:pointer" title="Dette nette / EBITDA">D/EBITDA <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
     '</tr></thead>'+
-    '<tbody>'+rows+'</tbody></table></div></div>';
+    '<tbody id="ratios-tbody">'+rows+'</tbody></table></div></div>';
 }
 
 async function loadAllRatios(){
@@ -684,6 +714,8 @@ function updateRatioRow(p){
   const tid=p.ticker.replace(/\./g,'_');
   const set=(key,val,fmt,colorFn)=>{
     const el=document.getElementById('r-'+tid+'-'+key);if(!el)return;
+    el.setAttribute('data-col',key);
+    el.setAttribute('data-val',val??'');
     if(val==null||isNaN(val)||!isFinite(val)){el.innerHTML='<span style="color:var(--muted)">—</span>';return;}
     el.innerHTML='<span class="mono" style="color:'+colorFn(val)+'">'+fmt(val)+'</span>';
   };
