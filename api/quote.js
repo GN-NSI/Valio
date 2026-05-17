@@ -22,11 +22,12 @@ module.exports = async (req, res) => {
   if (type === 'fundamentals') {
     const FMP_KEY = 'yrFxAuUHv6XgKGxfXol6sGWVxmEq6tBr';
     try {
-      const [rMetrics, rRatios, rCF, rEst] = await Promise.all([
+      const [rMetrics, rRatios, rCF, rEst, rGrowth] = await Promise.all([
         fetch(`https://financialmodelingprep.com/stable/key-metrics-ttm?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_KEY}`),
         fetch(`https://financialmodelingprep.com/stable/ratios-ttm?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_KEY}`),
         fetch(`https://financialmodelingprep.com/stable/cash-flow-statement?symbol=${encodeURIComponent(symbol)}&limit=2&apikey=${FMP_KEY}`),
-        fetch(`https://financialmodelingprep.com/stable/analyst-estimates?symbol=${encodeURIComponent(symbol)}&period=annual&limit=10&apikey=${FMP_KEY}`)
+        fetch(`https://financialmodelingprep.com/stable/analyst-estimates?symbol=${encodeURIComponent(symbol)}&period=annual&limit=10&apikey=${FMP_KEY}`),
+        fetch(`https://financialmodelingprep.com/stable/income-statement?symbol=${encodeURIComponent(symbol)}&period=annual&limit=2&apikey=${FMP_KEY}`)
       ]);
       const metricsData = rMetrics.ok ? await rMetrics.json() : [];
       const ratiosData  = rRatios.ok  ? await rRatios.json()  : [];
@@ -38,12 +39,9 @@ module.exports = async (req, res) => {
         const estData = await rEst.json();
         if (Array.isArray(estData)) {
           const today = new Date();
-          const nineMonths = new Date(today.getTime() + 9*30*24*60*60*1000);
-          const nextFY = estData.filter(e => new Date(e.date) > nineMonths && e.epsAvg > 0).sort((a,b) => new Date(a.date)-new Date(b.date))[0];
-          if (!nextFY) {
-            const fallback = estData.filter(e => new Date(e.date) > today && e.epsAvg > 0).sort((a,b) => new Date(a.date)-new Date(b.date))[0];
-            if (fallback) epsForward = fallback.epsAvg;
-          } else { epsForward = nextFY.epsAvg; }
+          const nextEst = estData.filter(e => new Date(e.date) > today && e.epsAvg > 0)
+            .sort((a,b) => new Date(a.date)-new Date(b.date))[0];
+          if (nextEst) epsForward = nextEst.epsAvg;
         }
       }
       let fcfGrowth=null,fcf0=null,cfo0=null,capex0=null;
@@ -55,6 +53,22 @@ module.exports = async (req, res) => {
           if (fcf0&&fcf1&&fcf1!==0) fcfGrowth=((fcf0-fcf1)/Math.abs(fcf1))*100;
         } else if (Array.isArray(cfData)&&cfData.length===1) {
           fcf0=cfData[0]?.freeCashFlow||null; cfo0=cfData[0]?.operatingCashFlow||null; capex0=cfData[0]?.capitalExpenditure||null;
+        }
+      }
+      // Revenue & EPS growth from income statement growth
+      let revenueGrowthYoY = null, epsGrowth1Y = null;
+      if (rGrowth?.ok) {
+        const isData = await rGrowth.json().catch(() => []);
+        if (Array.isArray(isData) && isData.length >= 2) {
+          const curr = isData[0], prev = isData[1];
+          if (curr?.revenue && prev?.revenue && prev.revenue !== 0) {
+            revenueGrowthYoY = ((curr.revenue - prev.revenue) / Math.abs(prev.revenue)) * 100;
+          }
+          const cEps = curr?.eps ?? curr?.epsBasic ?? curr?.epsDiluted ?? null;
+          const pEps = prev?.eps ?? prev?.epsBasic ?? prev?.epsDiluted ?? null;
+          if (cEps != null && pEps != null && pEps !== 0) {
+            epsGrowth1Y = ((cEps - pEps) / Math.abs(pEps)) * 100;
+          }
         }
       }
       const currentPrice = m?.stockPriceTTM || null;
@@ -71,12 +85,14 @@ module.exports = async (req, res) => {
         freeCashflow:  fcf0,
         operatingCashFlow: cfo0,
         pfcf:          r?.priceToFreeCashFlowRatioTTM || null,
-        pocf:          r?.priceToOperatingCashFlowsRatioTTM || null,
+        pocf:          r?.priceToOperatingCashFlowsRatioTTM || m?.pocfRatioTTM || null,
         mktCap:        m?.marketCapTTM || m?.marketCap || null,
         roic:          m?.roicTTM ? m.roicTTM*100 : null,
         returnOnEquity: m?.returnOnEquityTTM ? m.returnOnEquityTTM*100 : null,
         netDebtToEBITDA: m?.netDebtToEBITDATTM || null,
         fcfGrowth,
+        revenueGrowthYoY,
+        epsGrowth1Y,
         currentPriceUSD: currentPrice,
         timestamp: Date.now()
       });
