@@ -472,7 +472,7 @@ async function renderPortfolio(){
               <select class="chart-select" id="chart-mode-sel" onchange="changeChartMode(this.value)">
                 <option value="positions">Positions</option>
                 <option value="enveloppe">Par enveloppe</option>
-                <option value="type">Par type d'actif</option>
+                <option value="type">Stock picking / ETF</option>
                 <option value="secteur">Par secteur</option>
                 <option value="region">Par région 🔍</option>
                 <option value="pays">Par pays</option>
@@ -633,7 +633,7 @@ function buildChartData(){
   }
 
   if(chartMode==='type'){
-    const TL={stock:'Actions',etf:'ETFs',crypto:'Crypto'};
+    const TL={stock:'Stock picking',etf:'ETF',crypto:'Crypto'};
     if(!drill.length)return{...groupByKey(pos,p=>TL[p.asset_type]||'Actions'),clickable:true};
     else{const filt=pos.filter(p=>(TL[p.asset_type]||'Actions')===drill[0]);return{...groupByKey(filt,p=>p.ticker,(t,i)=>tickerColor(t,i)),clickable:false};}
   }
@@ -781,8 +781,7 @@ async function loadRatios(){
         <div class="stats-section">
           <div class="stats-section-title">Valorisation</div>
           ${row('P/E Trailing',wAvg('trailingPE'),'x',50,'var(--blue)')}
-          ${row('P/E Forward',wAvg('forwardPE'),'x',40,'var(--blue)')}
-          ${row('P/OCF',wAvg('pocf'),'x',40,'var(--blue)')}
+          ${row('P/FCF',wAvg('pfcf'),'x',50,'var(--blue)')}
           ${row('PEG',wAvg('pegRatio'),'x',3,'var(--purple)')}
         </div>
         <div class="stats-section">
@@ -793,13 +792,14 @@ async function loadRatios(){
       <div>
         <div class="stats-section">
           <div class="stats-section-title">Rentabilité</div>
-          ${row('ROIC',wAvg('roic'),'%',40,'var(--green)')}
           ${row('ROE',wAvg('returnOnEquity'),'%',50,'var(--green)')}
+          ${row('Marge brute',wAvg('grossMarginPct'),'%',80,'var(--green)')}
           ${row('Marge nette',wAvg('profitMarginPct'),'%',50,'var(--green)')}
         </div>
         <div class="stats-section">
           <div class="stats-section-title">Croissance</div>
           ${row('FCF Growth',wAvg('fcfGrowth'),'%',100,'var(--purple)')}
+          ${row('EPS 1A',wAvg('epsGrowth1Y'),'%',50,'var(--purple)')}
         </div>
       </div>
     </div>
@@ -880,6 +880,11 @@ function renderRatios(){
   if(stocks.length>0)setTimeout(()=>loadAllRatios(),hasNew?400:50);
 }
 
+function clearAndReload(){
+  // Effacer les tickers "tentés" pour permettre un retry complet
+  S.fundamentalsAttempted.clear();
+  loadAllRatios();
+}
 async function loadAllRatios(){
   const btn=document.getElementById('load-ratios-btn');
   // Vérifier si tout est déjà chargé (évite rechargement inutile entre onglets)
@@ -892,7 +897,7 @@ async function loadAllRatios(){
     return;
   }
   if(btn){btn.disabled=true;btn.innerHTML='<div class="spinner"></div> Chargement…';}
-  const BATCH=3,DELAY=600;
+  const BATCH=1,DELAY=600; // 1 ticker à la fois pour ne pas dépasser le rate limit FMP (5 req/s)
   for(let i=0;i<needsFetch.length;i+=BATCH){
     await Promise.all(needsFetch.slice(i,i+BATCH).map(async p=>{
       S.fundamentalsAttempted.add(p.ticker); // Marquer comme tenté (évite retry inutile)
