@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Folio</title>
+<title>Valio</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
@@ -125,7 +125,7 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 <body>
 <div id="auth-screen">
   <div class="auth-box">
-    <div class="auth-logo"><div class="mark">F</div><h1>Folio</h1><p>Suivi de portefeuille personnel</p></div>
+    <div class="auth-logo"><div class="mark">F</div><h1>Valio</h1><p>Votre portefeuille intelligent</p></div>
     <div class="auth-tabs">
       <div class="auth-tab active" id="tab-login" onclick="switchTab('login')">Connexion</div>
       <div class="auth-tab" id="tab-signup" onclick="switchTab('signup')">Inscription</div>
@@ -140,7 +140,7 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 <div id="app-screen">
   <div class="app-layout">
     <aside id="sidebar">
-      <div class="sidebar-logo"><div class="mark">F</div><span class="name">Folio</span></div>
+      <div class="sidebar-logo"><div class="mark">F</div><span class="name">Valio</span></div>
       <nav>
         <div class="nav-item active" id="nav-portfolio" onclick="navigate('portfolio')"><span class="nav-icon">📊</span><span>Portefeuille</span></div>
         <div class="nav-item" id="nav-accounts" onclick="navigate('accounts')"><span class="nav-icon">💳</span><span>Comptes</span></div>
@@ -230,12 +230,36 @@ const TICKER_COUNTRY={
   // ETFs (exposition économique, pas domicile)
   'ESE.PA':'US',ESE:'US','PAASI.PA':'CN',PAASI:'CN',CW8:'US',
 };
+
+// ═══ SECTEURS HARDCODÉS (pas besoin de FMP pour les secteurs) ═══
+const TICKER_SECTOR={
+  // Communication Services
+  GOOGL:'Communication Services',GOOG:'Communication Services',
+  META:'Communication Services',RDDT:'Communication Services',
+  // Consumer Discretionary
+  AMZN:'Consumer Discretionary',BKNG:'Consumer Discretionary',
+  // Financials
+  SPGI:'Financials',V:'Financials',MA:'Financials',JPM:'Financials',
+  COIN:'Financials',HOOD:'Financials',
+  // Technology / IT
+  NVDA:'Information Technology',MSFT:'Information Technology',
+  TSM:'Information Technology',TSMC:'Information Technology',
+  ATEYY:'Information Technology',SMNG:'Information Technology',
+  'SMSN.L':'Information Technology','BESI.AS':'Information Technology',
+  SIV:'Information Technology','2DG':'Information Technology',
+  NVTS:'Information Technology',ASML:'Information Technology',
+  // Industrials
+  VRT:'Industrials',
+  // Tech (others)
+  UBER:'Technology',LYFT:'Technology',
+  // ETFs
+  'ESE.PA':'ETF',ESE:'ETF','PAASI.PA':'ETF',PAASI:'ETF',CW8:'ETF',
+};
 function getProfile(ticker){
   const base=S.profiles[ticker]||{};
   const override=META_OVERRIDE[ticker]||{};
-  // Hardcoded country takes priority (no FMP call needed for geo)
   const country=override.country||TICKER_COUNTRY[ticker]||base.country||null;
-  const sector=override.sector||base.sector||null;
+  const sector=override.sector||TICKER_SECTOR[ticker]||base.sector||null;
   const mktCap=base.mktCap||null;
   return{country,sector,mktCap};
 }
@@ -667,7 +691,8 @@ async function loadRatios(){
 
 
 
-function clickRatioSort(col){
+function clickRatioSort(el){
+  const col=el.dataset.ratioCol||el;
   if(ratiosSort.col===col)ratiosSort.dir=ratiosSort.dir==='desc'?'asc':'desc';
   else{ratiosSort.col=col;ratiosSort.dir='desc';}
   sortRatiosTable();
@@ -720,16 +745,18 @@ function renderRatios(){
     '<thead><tr>'+
     '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+
     '<th>Cours</th>'+
-    '<th data-ratio-col="per" onclick="clickRatioSort(\"per\")" style="cursor:pointer" title="P/E Trailing 12M">PER <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
-    '<th data-ratio-col="fwdpe" onclick="clickRatioSort(\"fwdpe\")" style="cursor:pointer" title="Forward P/E 12M glissants">Fwd PER <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
-    '<th data-ratio-col="peg" onclick="clickRatioSort(\"peg\")" style="cursor:pointer" title="PEG = PER / croissance EPS">PEG <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
-    '<th data-ratio-col="pocf" onclick="clickRatioSort(\"pocf\")" style="cursor:pointer" title="Price / Operating Cash Flow">P/OCF <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
-    '<th data-ratio-col="marge" onclick="clickRatioSort(\"marge\")" style="cursor:pointer" title="Marge nette">M. Nette <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
-    '<th data-ratio-col="ca1a" onclick="clickRatioSort(\"ca1a\")" style="cursor:pointer" title="Croissance CA YoY">CA 1A <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
-    '<th data-ratio-col="eps1a" onclick="clickRatioSort(\"eps1a\")" style="cursor:pointer" title="Croissance EPS YoY">EPS 1A <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
-    '<th data-ratio-col="debt" onclick="clickRatioSort(\"debt\")" style="cursor:pointer" title="Dette nette / EBITDA">D/EBITDA <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
+    '<th id="rh-per" data-ratio-col="per" onclick="clickRatioSort(this)" style="cursor:pointer" title="P/E Trailing 12M">PER <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
+    '<th id="rh-fwdpe" data-ratio-col="fwdpe" onclick="clickRatioSort(this)" style="cursor:pointer" title="Forward P/E 12M glissants">Fwd PER <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
+    '<th id="rh-peg" data-ratio-col="peg" onclick="clickRatioSort(this)" style="cursor:pointer" title="PEG = PER / croissance EPS">PEG <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
+    '<th id="rh-pocf" data-ratio-col="pocf" onclick="clickRatioSort(this)" style="cursor:pointer" title="Price / Operating Cash Flow">P/OCF <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
+    '<th id="rh-marge" data-ratio-col="marge" onclick="clickRatioSort(this)" style="cursor:pointer" title="Marge nette">M. Nette <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
+    '<th id="rh-ca1a" data-ratio-col="ca1a" onclick="clickRatioSort(this)" style="cursor:pointer" title="Croissance CA YoY">CA 1A <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
+    '<th id="rh-eps1a" data-ratio-col="eps1a" onclick="clickRatioSort(this)" style="cursor:pointer" title="Croissance EPS YoY">EPS 1A <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
+    '<th id="rh-debt" data-ratio-col="debt" onclick="clickRatioSort(this)" style="cursor:pointer" title="Dette nette / EBITDA">D/EBITDA <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
     '</tr></thead>'+
     '<tbody id="ratios-tbody">'+rows+'</tbody></table></div></div>';
+  // Auto-load si positions déjà chargées
+  if(S.enrichedPos.length>0)setTimeout(()=>loadAllRatios(),400);
 }
 
 async function loadAllRatios(){
