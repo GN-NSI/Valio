@@ -145,6 +145,7 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
         <div class="nav-item active" id="nav-portfolio" onclick="navigate('portfolio')"><span class="nav-icon">📊</span><span>Portefeuille</span></div>
         <div class="nav-item" id="nav-accounts" onclick="navigate('accounts')"><span class="nav-icon">💳</span><span>Comptes</span></div>
         <div class="nav-section">Analyse</div>
+        <div class="nav-item" id="nav-ratios" onclick="navigate('ratios')"><span class="nav-icon">📈</span><span>Ratios</span></div>
         <div class="nav-item disabled"><span class="nav-icon">🔍</span><span>Screener</span><span class="nav-soon">BIENTÔT</span></div>
         <div class="nav-item disabled"><span class="nav-icon">⭐</span><span>Watchlist</span><span class="nav-soon">BIENTÔT</span></div>
         <div class="nav-item disabled"><span class="nav-icon">📓</span><span>Journal</span><span class="nav-soon">BIENTÔT</span></div>
@@ -207,8 +208,10 @@ const META_OVERRIDE={
   'SMSN.L':{country:'KR',sector:'Information Technology'},
   'ATEYY'  :{country:'JP',sector:'Information Technology'},
   'BESI.AS':{country:'NL',sector:'Information Technology'},
-  'PAASI'  :{country:'TW',sector:'ETF'},   // exposition Asie Pacifique
-  'PAASI.PA':{country:'TW',sector:'ETF'},
+  'ESE.PA' :{country:'US',sector:'ETF'},
+  'ESE'    :{country:'US',sector:'ETF'},
+  'PAASI.PA':{country:'CN',sector:'ETF'},
+  'PAASI'  :{country:'CN',sector:'ETF'},
 };
 function getProfile(ticker){
   return Object.assign({},S.profiles[ticker]||{},META_OVERRIDE[ticker]||{});
@@ -278,7 +281,7 @@ function xlErr(m){if(m.includes('Invalid login'))return 'Email ou mot de passe i
 async function logout(){try{await fetch(SU+'/auth/v1/logout',{method:'POST',headers:hdrs()});}catch{}saveSess(null);S.accounts=[];S.transactions=[];S.enrichedPos=[];showAuth();}
 
 // ═══ NAV ═══
-function navigate(page){S.page=page;document.querySelectorAll('.nav-item:not(.disabled)').forEach(e=>e.classList.remove('active'));document.getElementById('nav-'+page)?.classList.add('active');document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes'}[page]||page;if(page==='portfolio')renderPortfolio();else if(page==='accounts')renderAccounts();}
+function navigate(page){S.page=page;document.querySelectorAll('.nav-item:not(.disabled)').forEach(e=>e.classList.remove('active'));document.getElementById('nav-'+page)?.classList.add('active');document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes'}[page]||page;if(page==='portfolio')renderPortfolio();else if(page==='accounts')renderAccounts();else if(page==='ratios')renderRatios();}
 
 // ═══ POSITION MATH (CMP) ═══
 function computePositions(){
@@ -437,7 +440,7 @@ async function fetchOneTicker(p){
     const ve=pe*p.quantity,pnl=ve-p.totalCostEur,pct=p.totalCostEur>0?(pnl/p.totalCostEur)*100:0,chg=d.changePct??0;
     p.priceEur=pe;p.valueEur=ve;p.pnlEur=pnl;p.pnlPct=pct;
     // Mise à jour directe des cellules (pas de re-render)
-    if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<span class="mono">`+(usd?'$':'€')+`${fN(d.price)}</span><div style="font-size:11px;color:${chg>=0?'var(--green)':'var(--red)'};margin-top:2px">${chg>=0?'+':''}${chg.toFixed(2)}%</div>`;
+    const showChg=Math.abs(chg)>=0.01;if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<span class="mono">`+(usd?'$':'€')+`${fN(d.price)}</span>`+(showChg?`<div style="font-size:11px;color:${chg>=0?'var(--green)':'var(--red)'};margin-top:2px">${chg>=0?'+':''}${chg.toFixed(2)}%</div>`:`<div style="font-size:11px;color:var(--muted2);margin-top:2px">marché fermé</div>`);
     if($('vl-'+p.ticker))$('vl-'+p.ticker).innerHTML=`<span class="mono">${fE(ve)}</span>`;
     if($('pl-'+p.ticker))$('pl-'+p.ticker).innerHTML=`<span class="mono ${pnl>=0?'c-green':'c-red'}">${pnl>=0?'+':''}${fE(pnl)}</span>`;
     if($('pp-'+p.ticker))$('pp-'+p.ticker).innerHTML=`<span class="mono ${pct>=0?'c-green':'c-red'}">${pct>=0?'+':''}${pct.toFixed(2)}%</span>`;
@@ -616,6 +619,84 @@ async function loadRatios(){
     </div>
     <div style="font-size:10px;color:var(--muted2);margin-top:6px">Moyennes pondérées par valorisation · ${loaded}/${pos.length} titres</div>`;
   if(btn){btn.disabled=false;btn.textContent='Actualiser';}
+}
+
+
+// ═══ RATIOS PAGE ═══
+function renderRatios(){
+  const pg=document.getElementById('page');
+  if(!S.transactions.length){pg.innerHTML='<div class="empty-state"><div class="icon">📈</div><h3>Aucune position</h3><p>Ajoute des transactions pour voir les ratios</p></div>';return;}
+  const pos=S.enrichedPos.length?S.enrichedPos:computePositions();
+  const rows=pos.map(p=>{
+    const d=manualPrices[p.ticker]||S.prices[p.ticker];
+    const isUsd=(d?.currency||'USD')==='USD';
+    const priceStr=d?.price?('<span class="mono">'+(isUsd?'$':'€')+fN(d.price)+'</span>'):'—';
+    const tid=p.ticker.replace(/\./g,'_');
+    return '<tr>'+
+      '<td style="text-align:left;padding-left:20px"><div class="ticker-cell">'+
+      '<div class="ticker-logo"><img src="https://assets.parqet.com/logos/symbol/'+p.ticker+'?format=png" onload="this.style.display='block'" onerror="this.parentNode.innerHTML='<span>'+p.ticker.slice(0,3)+'</span>'" style="display:none"></div>'+
+      '<div><div class="ticker-name">'+p.name+'</div><div class="ticker-sym">'+p.ticker+'</div></div></div></td>'+
+      '<td>'+priceStr+'</td>'+
+      ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','debt'].map(k=>'<td id="r-'+tid+'-'+k+'" style="color:var(--muted)">—</td>').join('')+
+      '</tr>';
+  }).join('');
+
+  pg.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;flex-wrap:wrap;gap:10px">'+
+    '<div><h2 style="font-size:18px;font-weight:700">Ratios du portefeuille</h2>'+
+    '<p style="color:var(--muted);font-size:13px;margin-top:3px">Fondamentaux par position · FMP · 🟢 excellent 🟡 correct 🟠 à surveiller 🔴 élevé/négatif</p></div>'+
+    '<button class="btn btn-primary" id="load-ratios-btn" onclick="loadAllRatios()">⟳ Charger les ratios</button>'+
+    '</div>'+
+    '<div class="card"><div class="tbl-wrap"><table>'+
+    '<thead><tr>'+
+    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+
+    '<th>Cours</th>'+
+    '<th title="P/E Trailing 12M">PER</th>'+
+    '<th title="Forward P/E 12M glissants">Fwd PER</th>'+
+    '<th title="PEG = PER / croissance EPS">PEG</th>'+
+    '<th title="Price / Operating Cash Flow">P/OCF</th>'+
+    '<th title="Marge bénéficiaire nette">M. Nette</th>'+
+    '<th title="Croissance CA annuelle YoY">CA 1A</th>'+
+    '<th title="Croissance EPS annuelle YoY">EPS 1A</th>'+
+    '<th title="Dette nette / EBITDA">D/EBITDA</th>'+
+    '</tr></thead>'+
+    '<tbody>'+rows+'</tbody></table></div></div>';
+}
+
+async function loadAllRatios(){
+  const btn=document.getElementById('load-ratios-btn');
+  if(btn){btn.disabled=true;btn.innerHTML='<div class="spinner"></div> Chargement…';}
+  const pos=S.enrichedPos.length?S.enrichedPos:computePositions();
+  const BATCH=3,DELAY=600;
+  for(let i=0;i<pos.length;i+=BATCH){
+    await Promise.all(pos.slice(i,i+BATCH).map(async p=>{
+      if(!S.fundamentals[p.ticker]){
+        try{const r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker)+'&type=fundamentals',{signal:AbortSignal.timeout(10000)});const d=await r.json();if(d&&!d.error)S.fundamentals[p.ticker]=d;}catch{}
+      }
+      updateRatioRow(p);
+    }));
+    if(i+BATCH<pos.length)await new Promise(r=>setTimeout(r,DELAY));
+  }
+  if(btn){btn.disabled=false;btn.textContent='⟳ Actualiser';}
+}
+
+function updateRatioRow(p){
+  const f=S.fundamentals[p.ticker];if(!f)return;
+  const tid=p.ticker.replace(/\./g,'_');
+  const set=(key,val,fmt,colorFn)=>{
+    const el=document.getElementById('r-'+tid+'-'+key);if(!el)return;
+    if(val==null||isNaN(val)||!isFinite(val)){el.innerHTML='<span style="color:var(--muted)">—</span>';return;}
+    el.innerHTML='<span class="mono" style="color:'+colorFn(val)+'">'+fmt(val)+'</span>';
+  };
+  const pct=v=>(v>=0?'+':'')+v.toFixed(1)+'%';
+  const xStr=v=>fN(v)+'x';
+  set('per',f.trailingPE,xStr,v=>v<15?'var(--green)':v<30?'var(--yellow)':v<50?'#f97316':'var(--red)');
+  set('fwdpe',f.forwardPE,xStr,v=>v<12?'var(--green)':v<25?'var(--yellow)':v<40?'#f97316':'var(--red)');
+  set('peg',f.pegRatio,xStr,v=>v<1?'var(--green)':v<2?'var(--yellow)':'var(--red)');
+  set('pocf',f.pocf,xStr,v=>v<15?'var(--green)':v<30?'var(--yellow)':'var(--red)');
+  set('marge',f.profitMarginPct,v=>v.toFixed(1)+'%',v=>v>20?'var(--green)':v>10?'var(--yellow)':v>5?'#f97316':'var(--red)');
+  set('ca1a',f.revenueGrowthYoY,pct,v=>v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)');
+  set('eps1a',f.epsGrowth1Y,pct,v=>v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)');
+  set('debt',f.netDebtToEBITDA,xStr,v=>v<1?'var(--green)':v<2?'var(--yellow)':v<3.5?'#f97316':'var(--red)');
 }
 
 // ═══ ACCOUNTS PAGE ═══
