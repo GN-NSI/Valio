@@ -634,7 +634,7 @@ function renderRatios(){
     const tid=p.ticker.replace(/\./g,'_');
     return '<tr>'+
       '<td style="text-align:left;padding-left:20px"><div class="ticker-cell">'+
-      '<div class="ticker-logo"><img src="https://assets.parqet.com/logos/symbol/'+p.ticker+'?format=png" onload="this.style.display='block'" onerror="this.parentNode.innerHTML='<span>'+p.ticker.slice(0,3)+'</span>'" style="display:none"></div>'+
+      '<div class="ticker-logo"><img src="https://assets.parqet.com/logos/symbol/'+p.ticker+'?format=png" onload="this.style.display=\'block\'" onerror="this.parentNode.innerHTML=\'<span>'+p.ticker.slice(0,3)+'<\/span>\'" style="display:none"></div>'+
       '<div><div class="ticker-name">'+p.name+'</div><div class="ticker-sym">'+p.ticker+'</div></div></div></td>'+
       '<td>'+priceStr+'</td>'+
       ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','debt'].map(k=>'<td id="r-'+tid+'-'+k+'" style="color:var(--muted)">—</td>').join('')+
