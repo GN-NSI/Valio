@@ -52,11 +52,10 @@ module.exports = async (req, res) => {
   // ── FUNDAMENTALS ──────────────────────────────────────────────────────
   if (type === 'fundamentals') {
     try {
-      const [metricsRaw, ratiosRaw, cfRaw, estRaw] = await Promise.all([
+      const [metricsRaw, ratiosRaw, cfRaw] = await Promise.all([
         fmpFetch(`key-metrics-ttm?symbol=${encodeURIComponent(symbol)}`),
         fmpFetch(`ratios-ttm?symbol=${encodeURIComponent(symbol)}`),
         fmpFetch(`cash-flow-statement?symbol=${encodeURIComponent(symbol)}&limit=2`),
-        fmpFetch(`analyst-estimates?symbol=${encodeURIComponent(symbol)}&period=annual&limit=10`),
       ]);
 
       const m = Array.isArray(metricsRaw) ? metricsRaw[0] : metricsRaw;
@@ -67,15 +66,8 @@ module.exports = async (req, res) => {
         fmpError: true,
       });
 
-      // Forward EPS
-      let epsForward = null;
-      if (Array.isArray(estRaw)) {
-        const today = new Date();
-        const next = estRaw
-          .filter(e => new Date(e.date) > today && (e.epsAvg || e.epsEstimated || 0) > 0)
-          .sort((a, b) => new Date(a.date) - new Date(b.date))[0];
-        if (next) epsForward = next.epsAvg || next.epsEstimated;
-      }
+      // Forward EPS — non disponible sur FMP free tier (analyst-estimates supprimé pour économiser le quota)
+      const epsForward = null;
 
       // Cash flow
       let fcfGrowth = null, fcf0 = null, cfo0 = null;
@@ -98,7 +90,8 @@ module.exports = async (req, res) => {
         epsForward,
         pegRatio:           r?.priceToEarningsGrowthRatioTTM    || null,
         pfcf:               r?.priceToFreeCashFlowsRatioTTM     || null,
-        pocf:               r?.priceToOperatingCashFlowsRatioTTM || m?.pocfRatioTTM || null,
+        pocf:               r?.priceToOperatingCashFlowsRatioTTM || m?.pocfRatioTTM ||
+                            (mktCap && cfo0 && cfo0 > 0 ? mktCap / cfo0 : null),
         profitMarginPct:    r?.netProfitMarginTTM   ? r.netProfitMarginTTM   * 100 : null,
         grossMarginPct:     r?.grossProfitMarginTTM ? r.grossProfitMarginTTM * 100 : null,
         roic:               m?.roicTTM              ? m.roicTTM              * 100 : null,
