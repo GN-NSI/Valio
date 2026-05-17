@@ -255,6 +255,49 @@ const TICKER_SECTOR={
   // ETFs
   'ESE.PA':'ETF',ESE:'ETF','PAASI.PA':'ETF',PAASI:'ETF',CW8:'ETF',
 };
+
+// ═══ COMPOSITION DES ETFs (pour répartition sectorielle et géographique précise) ═══
+// Sources : MSCI, S&P Global — compositions approx. 2025
+const ETF_BREAKDOWN={
+  'ESE.PA':{  // BNP Paribas Easy S&P 500
+    sectors:{'Information Technology':0.31,'Financials':0.14,'Health Care':0.11,'Consumer Discretionary':0.10,'Communication Services':0.09,'Industrials':0.08,'Consumer Staples':0.05,'Energy':0.04,'Utilities':0.02,'Materials':0.02,'Real Estate':0.02,'Other':0.02},
+    countries:{US:1},
+    regions:{'Amérique du Nord':1},
+    capi:{'Mega (>1 000 Mds $)':0.55,'Large (100–1 000 Mds $)':0.43,'Mid (10–100 Mds $)':0.02},
+  },
+  'ESE':{
+    sectors:{'Information Technology':0.31,'Financials':0.14,'Health Care':0.11,'Consumer Discretionary':0.10,'Communication Services':0.09,'Industrials':0.08,'Consumer Staples':0.05,'Energy':0.04,'Utilities':0.02,'Materials':0.02,'Real Estate':0.02,'Other':0.02},
+    countries:{US:1},regions:{'Amérique du Nord':1},
+    capi:{'Mega (>1 000 Mds $)':0.55,'Large (100–1 000 Mds $)':0.43,'Mid (10–100 Mds $)':0.02},
+  },
+  'PAASI.PA':{  // Lyxor MSCI Pacific ex-Japan EM
+    sectors:{'Information Technology':0.26,'Financials':0.21,'Consumer Discretionary':0.13,'Communication Services':0.11,'Materials':0.07,'Industrials':0.06,'Energy':0.05,'Consumer Staples':0.05,'Health Care':0.04,'Utilities':0.02},
+    countries:{CN:0.35,IN:0.25,KR:0.18,TW:0.12,SG:0.05,Autres:0.05},
+    regions:{'Asie':1},
+    capi:{'Large (100–1 000 Mds $)':0.55,'Mid (10–100 Mds $)':0.35,'Small (<10 Mds $)':0.10},
+  },
+  'PAASI':{
+    sectors:{'Information Technology':0.26,'Financials':0.21,'Consumer Discretionary':0.13,'Communication Services':0.11,'Materials':0.07,'Industrials':0.06,'Energy':0.05,'Consumer Staples':0.05,'Health Care':0.04,'Utilities':0.02},
+    countries:{CN:0.35,IN:0.25,KR:0.18,TW:0.12,SG:0.05,Autres:0.05},
+    regions:{'Asie':1},
+    capi:{'Large (100–1 000 Mds $)':0.55,'Mid (10–100 Mds $)':0.35,'Small (<10 Mds $)':0.10},
+  },
+};
+
+// Explode ETF positions into sub-positions selon la dimension du graphique
+function explodeForMode(positions, mode){
+  const result=[];
+  positions.forEach(p=>{
+    const etf=ETF_BREAKDOWN[p.ticker];
+    if(!etf||!(p.valueEur>0)){result.push(p);return;}
+    const dim=etf[mode==='secteur'?'sectors':mode==='region'?'regions':mode==='pays'?'countries':mode==='capi'?'capi':null];
+    if(!dim){result.push(p);return;}
+    Object.entries(dim).forEach(([key,weight])=>{
+      result.push({...p,_etfKey:key,_isEtfSlice:true,valueEur:p.valueEur*weight});
+    });
+  });
+  return result;
+}
 function getProfile(ticker){
   const base=S.profiles[ticker]||{};
   const override=META_OVERRIDE[ticker]||{};
@@ -566,8 +609,19 @@ function buildChartData(){
   }
 
   if(chartMode==='secteur'){
-    if(!drill.length)return{...groupByKey(pos,p=>getProfile(p.ticker).sector||'Non défini'),clickable:true};
-    else{const filt=pos.filter(p=>(getProfile(p.ticker).sector||'Non défini')===drill[0]);return{...groupByKey(filt,p=>p.ticker,(t,i)=>tickerColor(t,i)),clickable:false};}
+    if(!drill.length){
+      const exp=explodeForMode(pos,'secteur');
+      const m={};exp.forEach(ep=>{const k=ep._etfKey||(getProfile(ep.ticker).sector||'Non défini');m[k]=(m[k]||0)+(ep.valueEur||0);});
+      const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
+      return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((_,i)=>PALETTE[i%PALETTE.length]),clickable:true};
+    }else{
+      const sel=drill[0];
+      const exp=explodeForMode(pos,'secteur');
+      const filt=exp.filter(ep=>(ep._etfKey||(getProfile(ep.ticker).sector||'Non défini'))===sel);
+      const m={};filt.forEach(ep=>{const k=ep._isEtfSlice?ep.name+' (expo.)':ep.ticker;m[k]=(m[k]||0)+(ep.valueEur||0);});
+      const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
+      return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((e,i)=>tickerColor(e[0].split(' ')[0],i)),clickable:false};
+    }
   }
 
   if(chartMode==='region'){
@@ -577,13 +631,35 @@ function buildChartData(){
   }
 
   if(chartMode==='pays'){
-    if(!drill.length)return{...groupByKey(pos,p=>CNAMES[getProfile(p.ticker).country||'XX']||'Autre'),clickable:true};
-    const filt=pos.filter(p=>(CNAMES[getProfile(p.ticker).country||'XX']||'Autre')===drill[0]);return{...groupByKey(filt,p=>p.ticker,(t,i)=>tickerColor(t,i)),clickable:false};
+    if(!drill.length){
+      const exp=explodeForMode(pos,'pays');
+      const m={};exp.forEach(ep=>{
+        const k=ep._etfKey?(CNAMES[ep._etfKey]||ep._etfKey):(CNAMES[getProfile(ep.ticker).country||'XX']||'Autre');
+        m[k]=(m[k]||0)+(ep.valueEur||0);
+      });
+      const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
+      return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((_,i)=>PALETTE[i%PALETTE.length]),clickable:true};
+    }else{
+      const sel=drill[0];
+      const exp=explodeForMode(pos,'pays');
+      const filt=exp.filter(ep=>{const k=ep._etfKey?(CNAMES[ep._etfKey]||ep._etfKey):(CNAMES[getProfile(ep.ticker).country||'XX']||'Autre');return k===sel;});
+      const m={};filt.forEach(ep=>{const k=ep._isEtfSlice?ep.name+' (expo.)':ep.ticker;m[k]=(m[k]||0)+(ep.valueEur||0);});
+      const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
+      return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((e,i)=>tickerColor(e[0].split(' ')[0],i)),clickable:false};
+    }
   }
 
   if(chartMode==='capi'){
     const tiers={'Mega (>1 000 Mds $)':0,'Large (100–1 000 Mds $)':0,'Mid (10–100 Mds $)':0,'Small (<10 Mds $)':0};
-    pos.forEach(p=>{const mc=getProfile(p.ticker).mktCap||S.profiles[p.ticker]?.mktCap||0;if(!mc)return;if(mc>1e12)tiers['Mega (>1 000 Mds $)']+=p.valueEur;else if(mc>1e11)tiers['Large (100–1 000 Mds $)']+=p.valueEur;else if(mc>1e10)tiers['Mid (10–100 Mds $)']+=p.valueEur;else tiers['Small (<10 Mds $)']+=p.valueEur;});
+    const exp=explodeForMode(pos,'capi');
+    exp.forEach(p=>{
+      if(p._etfKey){tiers[p._etfKey]=(tiers[p._etfKey]||0)+(p.valueEur||0);return;}
+      const mc=getProfile(p.ticker).mktCap||S.profiles[p.ticker]?.mktCap||0;if(!mc)return;
+      if(mc>1e12)tiers['Mega (>1 000 Mds $)']+=p.valueEur;
+      else if(mc>1e11)tiers['Large (100–1 000 Mds $)']+=p.valueEur;
+      else if(mc>1e10)tiers['Mid (10–100 Mds $)']+=p.valueEur;
+      else tiers['Small (<10 Mds $)']+=p.valueEur;
+    });
     const entries=Object.entries(tiers).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
     return{labels:entries.map(e=>e[0]),values:entries.map(e=>e[1]),colors:entries.map((_,i)=>PALETTE[i%PALETTE.length]),clickable:false};
   }
