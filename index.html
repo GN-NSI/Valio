@@ -331,7 +331,14 @@ const TICKER_SUBSECTOR={
 
 // ═══ TICKERS ETF CONNUS (override si asset_type incorrect en DB) ═══
 const ETF_TICKERS=new Set(['ESE.PA','ESE','PAASI.PA','PAASI','CW8','LVO.DE','IWDA','VWCE']);
-function isETF(p){return ETF_TICKERS.has(p.ticker)||(p.asset_type||'').toLowerCase()==='etf';}
+function isETF(p){
+  if(!p) return false;
+  if(ETF_TICKERS.has(p.ticker)) return true;
+  if((p.asset_type||'').toLowerCase()==='etf') return true;
+  if((p.name||'').toLowerCase().includes('etf')) return true;
+  if((p.name||'').toLowerCase().includes('tracker')) return true;
+  return false;
+}
 function getProfile(ticker){
   const base=S.profiles[ticker]||{};
   const override=META_OVERRIDE[ticker]||{};
@@ -393,6 +400,12 @@ function showAuth(){document.getElementById('auth-screen').style.display='flex';
 async function bootstrap(){
   const u=getUser();if(!u)return;
   loadCache(); // Charge profils et fondamentaux depuis localStorage
+  // Si les fondamentaux semblent venir de l'ancienne version (pas de currentRatio),
+  // on les efface pour forcer un reload propre
+  const fundEntries=Object.entries(S.fundamentals);
+  if(fundEntries.length>0&&fundEntries.every(([,v])=>v.currentRatio===undefined)){
+    S.fundamentals={};try{localStorage.removeItem('folio_fundamentals');}catch{}
+  }
   try{await dbUpsert('profiles',{id:u.id,username:u.email.split('@')[0],display_name:u.email.split('@')[0]},'id');}catch{}
   try{const p=(await dbGet('profiles','id=eq.'+u.id))?.[0];if(p){const n=p.display_name||p.username||u.email.split('@')[0];document.getElementById('sidebar-username').textContent=n;document.getElementById('sidebar-avatar').textContent=n[0].toUpperCase();}}catch{}
   const accts=await dbGet('accounts','user_id=eq.'+u.id+'&order=created_at');S.accounts=accts||[];
@@ -873,7 +886,6 @@ function renderRatios(){
     '<th id="rh-per" data-ratio-col="per" onclick="clickRatioSort(this)" style="cursor:pointer" title="P/E Trailing 12M">PER <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
     '<th id="rh-fwdpe" data-ratio-col="fwdpe" onclick="clickRatioSort(this)" style="cursor:pointer" title="Forward P/E 12M glissants">Fwd PER <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
     '<th id="rh-peg" data-ratio-col="peg" onclick="clickRatioSort(this)" style="cursor:pointer" title="PEG = PER / croissance EPS">PEG <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
-    '<th id="rh-fwdpe" data-ratio-col="fwdpe" onclick="clickRatioSort(this)" style="cursor:pointer" title="Forward P/E">Fwd PER <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
     '<th id="rh-pocf" data-ratio-col="pocf" onclick="clickRatioSort(this)" style="cursor:pointer" title="Price / Operating Cash Flow">P/OCF <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
     '<th id="rh-marge" data-ratio-col="marge" onclick="clickRatioSort(this)" style="cursor:pointer" title="Marge nette">M. Nette <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
     '<th id="rh-ca1a" data-ratio-col="ca1a" onclick="clickRatioSort(this)" style="cursor:pointer" title="Croissance CA YoY">CA 1A <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
@@ -888,8 +900,10 @@ function renderRatios(){
 }
 
 function clearAndReload(){
-  // Effacer les tickers "tentés" pour permettre un retry complet
+  // Vider TOUT le cache fondamentaux (mémoire + localStorage)
   S.fundamentalsAttempted.clear();
+  S.fundamentals={};
+  try{localStorage.removeItem('folio_fundamentals');}catch{}
   loadAllRatios();
 }
 async function loadAllRatios(){
@@ -904,7 +918,7 @@ async function loadAllRatios(){
     return;
   }
   if(btn){btn.disabled=true;btn.innerHTML='<div class="spinner"></div> Chargement…';}
-  const BATCH=3,DELAY=400; // 3 tickers en parallèle (Yahoo Finance = sans quota)
+  const BATCH=1,DELAY=200; // 1 ticker à la fois (chacun fait 4 appels FMP séquentiels)
   for(let i=0;i<needsFetch.length;i+=BATCH){
     await Promise.all(needsFetch.slice(i,i+BATCH).map(async p=>{
       S.fundamentalsAttempted.add(p.ticker); // Marquer comme tenté (évite retry inutile)
