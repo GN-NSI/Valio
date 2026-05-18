@@ -5,7 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Valio</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js">
+// Délégation d'événement pour ouvrir la fiche société
+document.addEventListener('click', function(e){
+  var el = e.target.closest ? e.target.closest('.cd-link') : null;
+  if(el) openCompanyDetail(el.dataset.ticker, el.textContent.trim());
+});
+</script>
 <style>
 :root{--bg:#080811;--bg2:#0d0d1a;--card:#111120;--card2:#18182a;--border:#1e1e35;--border2:#2a2a45;
   --text:#e8e8f5;--muted:#6b6b8a;--muted2:#3d3d5c;--blue:#5b7ef5;--blue2:#3a5ce4;
@@ -827,7 +833,7 @@ async function loadRatios(){
           ${row('P/E Trailing',wAvg('trailingPE'),'x',50,'var(--blue)')}
           ${row('P/E Forward',wAvg('forwardPE'),'x',40,'var(--blue)')}
           ${row('PEG',wAvg('pegRatio'),'x',3,'var(--purple)')}
-          ${row('P/FCF',wAvg('pfcf'),'x',50,'var(--blue)')}
+          
         </div>
         <div class="stats-section">
           <div class="stats-section-title">Santé financière</div>
@@ -984,6 +990,43 @@ function updateRatioRow(p){
 }
 
 
+
+// ═══ TRI WATCHLIST / SCREENER ═══
+var wlSort={col:null,dir:'desc'};
+var scSort={col:null,dir:'desc'};
+
+function sortWL(col){
+  if(wlSort.col===col)wlSort.dir=wlSort.dir==='desc'?'asc':'desc';
+  else{wlSort.col=col;wlSort.dir='desc';}
+  renderWatchlistTable();
+}
+function sortSC(col){
+  if(scSort.col===col)scSort.dir=scSort.dir==='desc'?'asc':'desc';
+  else{scSort.col=col;scSort.dir='desc';}
+  // Re-render screener rows with sort
+  renderScreenerTable(scSort);
+}
+function getSortVal(ticker, col){
+  if(col==='price') return (S.prices[ticker]&&S.prices[ticker].price)||0;
+  var f=S.fundamentals[ticker]; if(!f) return null;
+  var map={per:'trailingPE',fwdpe:'forwardPE',peg:'pegRatio',pocf:'pocf',marge:'profitMarginPct',ca1a:'revenueGrowthYoY',eps1a:'epsGrowth1Y',debt:'netDebtToEBITDA'};
+  return f[map[col]]??null;
+}
+function sortItems(items, sort){
+  if(!sort.col) return items;
+  return items.slice().sort(function(a,b){
+    var ta=a.ticker||a, tb=b.ticker||b;
+    var va=getSortVal(ta,sort.col), vb=getSortVal(tb,sort.col);
+    if(va==null&&vb==null) return 0;
+    if(va==null) return 1;
+    if(vb==null) return -1;
+    return sort.dir==='desc'?vb-va:va-vb;
+  });
+}
+function thSort(label,col,sortState,fn){
+  var arrow=sortState.col===col?(sortState.dir==='desc'?'▼':'▲'):'↕';
+  return '<th style="cursor:pointer;user-select:none" onclick="'+fn+'(\''+col+'\')">'+(label)+' <span style="font-size:9px;opacity:.5">'+arrow+'</span></th>';
+}
 // ═══ WATCHLIST ═══
 var watchlistItems = [];
 
@@ -1023,7 +1066,9 @@ function renderWatchlistTable(){
     el.innerHTML='<div style="text-align:center;padding:60px;color:var(--muted)">Aucun titre en watchlist.<br>Clique "+ Ajouter un titre" pour commencer.</div>';
     return;
   }
-  var rows=watchlistItems.map(function(w){
+// rows will be built inside the sort block below
+  var sorted=sortItems(watchlistItems.slice(),wlSort);
+  var rows=sorted.map(function(w){
     var d=S.prices[w.ticker];
     var isUsd=(d && d.currency && d.currency!=='EUR');
     var priceStr=d && d.price ? '<span class="mono">'+(isUsd?'$':'€')+fN(d.price)+'</span>' : '<span style="color:var(--muted)">—</span>';
@@ -1031,7 +1076,7 @@ function renderWatchlistTable(){
     return '<tr>'+
       '<td style="text-align:left;padding-left:20px"><div class="ticker-cell">'+
       mkLogoCell(w.ticker)+
-      '<div><div class="ticker-name">'+w.name+'</div><div class="ticker-sym">'+w.ticker+'</div></div></div></td>'+
+      '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+w.ticker+'">'+w.name+'</div><div class="ticker-sym">'+w.ticker+'</div></div></div></td>'+
       '<td>'+priceStr+'</td>'+
       ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','debt'].map(function(k){return '<td id="wr-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '<td><button class="btn btn-danger btn-sm" onclick="removeWatch(this)" data-id="'+w.id+'" data-ticker="'+w.ticker+'">✕</button></td>'+
@@ -1040,7 +1085,16 @@ function renderWatchlistTable(){
   el.innerHTML='<div class="card"><div class="tbl-wrap"><table>'+
     '<thead><tr>'+
     '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+
-    '<th>Cours</th><th>PER</th><th>Fwd PER</th><th>PEG</th><th>P/OCF</th><th>M. Nette</th><th>CA 1A</th><th>EPS 1A</th><th>D/EBITDA</th><th></th>'+
+    thSort('Cours','price',wlSort,'sortWL')+
+    thSort('PER','per',wlSort,'sortWL')+
+    thSort('Fwd PER','fwdpe',wlSort,'sortWL')+
+    thSort('PEG','peg',wlSort,'sortWL')+
+    thSort('P/OCF','pocf',wlSort,'sortWL')+
+    thSort('M. Nette','marge',wlSort,'sortWL')+
+    thSort('CA 1A','ca1a',wlSort,'sortWL')+
+    thSort('EPS 1A','eps1a',wlSort,'sortWL')+
+    thSort('D/EBITDA','debt',wlSort,'sortWL')+
+    '<th></th>'+
     '</tr></thead><tbody>'+rows+'</tbody></table></div></div>'+
     '<div style="margin-top:12px;display:flex;justify-content:flex-end">'+
     '<button class="btn btn-primary" onclick="loadWatchRatios()">⟳ Charger les ratios</button></div>';
@@ -1145,8 +1199,7 @@ async function renderScreener(){
     '<button class="btn btn-primary" onclick="loadScreenerRatios()">⟳ Charger les ratios</button></div>'+
     '<div class="card"><div class="tbl-wrap"><table>'+
     '<thead><tr>'+
-    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th><th>Cours</th>'+
-    '<th>PER</th><th>Fwd PER</th><th>PEG</th><th>P/OCF</th><th>M. Nette</th><th>CA 1A</th><th>EPS 1A</th><th>D/EBITDA</th>'+
+    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+thSort('Cours','price',scSort,'sortSC')+thSort('PER','per',scSort,'sortSC')+thSort('Fwd PER','fwdpe',scSort,'sortSC')+thSort('PEG','peg',scSort,'sortSC')+thSort('P/OCF','pocf',scSort,'sortSC')+thSort('M. Nette','marge',scSort,'sortSC')+thSort('CA 1A','ca1a',scSort,'sortSC')+thSort('EPS 1A','eps1a',scSort,'sortSC')+thSort('D/EBITDA','debt',scSort,'sortSC')+
     '</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
 
   allItems.forEach(function(p){ updateRatioRowById('sc',p.ticker); });
@@ -1283,6 +1336,36 @@ async function renderCompanyDetail(ticker, name) {
     '</div>';
 }
 
+
+function renderScreenerTable(sort){
+  // Re-sort and re-render screener rows only
+  var tbody=document.querySelector('#sc-content table tbody');
+  if(!tbody) return;
+  var pfPos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p);});
+  var wlOnly=watchlistItems.filter(function(w){return !pfPos.find(function(p){return p.ticker===w.ticker;});});
+  var allItems=sortItems(pfPos.concat(wlOnly.map(function(w){return {ticker:w.ticker,name:w.name,_isWatch:true};})),sort);
+  tbody.innerHTML=allItems.map(function(p){
+    var d=S.prices[p.ticker];
+    var isUsd=!(d && d.currency==='EUR');
+    var priceStr=d && d.price ? '<span class="mono">'+(isUsd?'$':'€')+fN(d.price)+'</span>' : '—';
+    var tid=p.ticker.replace(/[^a-zA-Z0-9]/g,'_');
+    var badge=p._isWatch?'<span style="font-size:10px;background:rgba(245,158,11,.15);color:#f59e0b;padding:2px 5px;border-radius:4px;margin-left:4px">WATCH</span>':'';
+    return '<tr>'+
+      '<td style="text-align:left;padding-left:20px"><div class="ticker-cell">'+
+      mkLogoCell(p.ticker)+
+      '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+p.ticker+'">'+(p.name||p.ticker)+badge+'</div><div class="ticker-sym">'+p.ticker+'</div></div></div></td>'+
+      '<td>'+priceStr+'</td>'+
+      ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
+      '</tr>';
+  }).join('');
+  allItems.forEach(function(p){ updateRatioRowById('sc',p.ticker); });
+  // Update sort arrows
+  document.querySelectorAll('#sc-content thead th').forEach(function(th){
+    var s=th.querySelector('span');if(!s)return;
+    var col=th.getAttribute('data-sortcol');
+    s.textContent=col&&scSort.col===col?(scSort.dir==='desc'?'▼':'▲'):'↕';
+  });
+}
 // ═══ ACCOUNTS PAGE ═══
 function renderAccounts(){
   const pg=document.getElementById('page');
@@ -1372,6 +1455,12 @@ function fQ(v){if(v==null)return '—';return Number.isInteger(v)?String(v):v.to
 function fD(d){return new Date(d+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'});}
 function cS(c){return{EUR:'€',USD:'$',GBP:'£',JPY:'¥',HKD:'HK$',CHF:'CHF'}[c]||c;}
 function showToast(m,ms=3500){document.querySelector('.toast')?.remove();const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),ms);}
+
+// Délégation d'événement pour ouvrir la fiche société
+document.addEventListener('click', function(e){
+  var el = e.target.closest ? e.target.closest('.cd-link') : null;
+  if(el) openCompanyDetail(el.dataset.ticker, el.textContent.trim());
+});
 </script>
 </body>
 </html>
