@@ -125,7 +125,7 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 <body>
 <div id="auth-screen">
   <div class="auth-box">
-    <div class="auth-logo"><div class="mark">F</div><h1>Valio</h1><p>Votre portefeuille intelligent</p></div>
+    <div class="auth-logo"><div class="mark">V</div><h1>Valio</h1><p>Votre portefeuille intelligent</p></div>
     <div class="auth-tabs">
       <div class="auth-tab active" id="tab-login" onclick="switchTab('login')">Connexion</div>
       <div class="auth-tab" id="tab-signup" onclick="switchTab('signup')">Inscription</div>
@@ -140,7 +140,7 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 <div id="app-screen">
   <div class="app-layout">
     <aside id="sidebar">
-      <div class="sidebar-logo"><div class="mark">F</div><span class="name">Valio</span></div>
+      <div class="sidebar-logo"><div class="mark">V</div><span class="name">Valio</span></div>
       <nav>
         <div class="nav-item active" id="nav-portfolio" onclick="navigate('portfolio')"><span class="nav-icon">📊</span><span>Portefeuille</span></div>
         <div class="nav-item" id="nav-accounts" onclick="navigate('accounts')"><span class="nav-icon">💳</span><span>Comptes</span></div>
@@ -328,6 +328,10 @@ const TICKER_SUBSECTOR={
   // Technology (Mobilité)
   UBER:'Mobilité à la demande',LYFT:'Mobilité à la demande',
 };
+
+// ═══ TICKERS ETF CONNUS (override si asset_type incorrect en DB) ═══
+const ETF_TICKERS=new Set(['ESE.PA','ESE','PAASI.PA','PAASI','CW8','LVO.DE','IWDA','VWCE']);
+function isETF(p){return ETF_TICKERS.has(p.ticker)||(p.asset_type||'').toLowerCase()==='etf';}
 function getProfile(ticker){
   const base=S.profiles[ticker]||{};
   const override=META_OVERRIDE[ticker]||{};
@@ -781,12 +785,14 @@ async function loadRatios(){
         <div class="stats-section">
           <div class="stats-section-title">Valorisation</div>
           ${row('P/E Trailing',wAvg('trailingPE'),'x',50,'var(--blue)')}
-          ${row('P/FCF',wAvg('pfcf'),'x',50,'var(--blue)')}
+          ${row('P/E Forward',wAvg('forwardPE'),'x',40,'var(--blue)')}
           ${row('PEG',wAvg('pegRatio'),'x',3,'var(--purple)')}
+          ${row('P/FCF',wAvg('pfcf'),'x',50,'var(--blue)')}
         </div>
         <div class="stats-section">
           <div class="stats-section-title">Santé financière</div>
           ${row('Dette/EBITDA',wAvg('netDebtToEBITDA'),'x',5,'var(--yellow)')}
+          ${row('Current Ratio',wAvg('currentRatio'),'x',3,'var(--green)')}
         </div>
       </div>
       <div>
@@ -798,7 +804,7 @@ async function loadRatios(){
         </div>
         <div class="stats-section">
           <div class="stats-section-title">Croissance</div>
-          ${row('FCF Growth',wAvg('fcfGrowth'),'%',100,'var(--purple)')}
+          ${row('CA 1A',wAvg('revenueGrowthYoY'),'%',50,'var(--purple)')}
           ${row('EPS 1A',wAvg('epsGrowth1Y'),'%',50,'var(--purple)')}
         </div>
       </div>
@@ -840,7 +846,7 @@ function renderRatios(){
   const pg=document.getElementById('page');
   if(!S.transactions.length){pg.innerHTML='<div class="empty-state"><div class="icon">📈</div><h3>Aucune position</h3><p>Ajoute des transactions pour voir les ratios</p></div>';return;}
   // Filtrer les ETFs — onglet réservé aux actions
-  const pos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(p=>p.asset_type!=='etf');
+  const pos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(p=>!isETF(p));
   const rows=pos.map(p=>{
     const d=manualPrices[p.ticker]||S.prices[p.ticker];
     const isUsd=(d?.currency||'USD')==='USD';
@@ -867,6 +873,7 @@ function renderRatios(){
     '<th id="rh-per" data-ratio-col="per" onclick="clickRatioSort(this)" style="cursor:pointer" title="P/E Trailing 12M">PER <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
     '<th id="rh-fwdpe" data-ratio-col="fwdpe" onclick="clickRatioSort(this)" style="cursor:pointer" title="Forward P/E 12M glissants">Fwd PER <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
     '<th id="rh-peg" data-ratio-col="peg" onclick="clickRatioSort(this)" style="cursor:pointer" title="PEG = PER / croissance EPS">PEG <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
+    '<th id="rh-fwdpe" data-ratio-col="fwdpe" onclick="clickRatioSort(this)" style="cursor:pointer" title="Forward P/E">Fwd PER <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
     '<th id="rh-pocf" data-ratio-col="pocf" onclick="clickRatioSort(this)" style="cursor:pointer" title="Price / Operating Cash Flow">P/OCF <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
     '<th id="rh-marge" data-ratio-col="marge" onclick="clickRatioSort(this)" style="cursor:pointer" title="Marge nette">M. Nette <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
     '<th id="rh-ca1a" data-ratio-col="ca1a" onclick="clickRatioSort(this)" style="cursor:pointer" title="Croissance CA YoY">CA 1A <span class="si" style="font-size:9px;opacity:.4">↕</span></th>'+
@@ -875,7 +882,7 @@ function renderRatios(){
     '</tr></thead>'+
     '<tbody id="ratios-tbody">'+rows+'</tbody></table></div></div>';
   // Auto-load uniquement si des fondamentaux manquent ET non encore tentés
-  const stocks=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(p=>p.asset_type!=='etf');
+  const stocks=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(p=>!isETF(p));
   const hasNew=stocks.some(p=>!S.fundamentals[p.ticker]&&!S.fundamentalsAttempted.has(p.ticker));
   if(stocks.length>0)setTimeout(()=>loadAllRatios(),hasNew?400:50);
 }
@@ -888,7 +895,7 @@ function clearAndReload(){
 async function loadAllRatios(){
   const btn=document.getElementById('load-ratios-btn');
   // Vérifier si tout est déjà chargé (évite rechargement inutile entre onglets)
-  const stocks=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(p=>p.asset_type!=='etf');
+  const stocks=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(p=>!isETF(p));
   const needsFetch=stocks.filter(p=>!S.fundamentals[p.ticker]&&!S.fundamentalsAttempted.has(p.ticker));
   if(needsFetch.length===0){
     // Tout est en cache — juste re-render
@@ -897,7 +904,7 @@ async function loadAllRatios(){
     return;
   }
   if(btn){btn.disabled=true;btn.innerHTML='<div class="spinner"></div> Chargement…';}
-  const BATCH=1,DELAY=600; // 1 ticker à la fois pour ne pas dépasser le rate limit FMP (5 req/s)
+  const BATCH=3,DELAY=400; // 3 tickers en parallèle (Yahoo Finance = sans quota)
   for(let i=0;i<needsFetch.length;i+=BATCH){
     await Promise.all(needsFetch.slice(i,i+BATCH).map(async p=>{
       S.fundamentalsAttempted.add(p.ticker); // Marquer comme tenté (évite retry inutile)
@@ -925,6 +932,7 @@ function updateRatioRow(p){
   const pct=v=>(v>=0?'+':'')+v.toFixed(1)+'%';
   const xStr=v=>fN(v)+'x';
   set('per',f.trailingPE,xStr,v=>v<15?'var(--green)':v<30?'var(--yellow)':v<50?'#f97316':'var(--red)');
+  set('fwdpe',f.forwardPE,xStr,v=>v<12?'var(--green)':v<25?'var(--yellow)':v<40?'#f97316':'var(--red)');
   set('fwdpe',f.forwardPE,xStr,v=>v<12?'var(--green)':v<25?'var(--yellow)':v<40?'#f97316':'var(--red)');
   set('peg',f.pegRatio,xStr,v=>v<1?'var(--green)':v<2?'var(--yellow)':'var(--red)');
   set('pocf',f.pocf,xStr,v=>v<15?'var(--green)':v<30?'var(--yellow)':'var(--red)');
