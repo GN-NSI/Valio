@@ -101,7 +101,9 @@ module.exports = async (req, res) => {
     try {
       // Cache Supabase → réponse instantanée si données < 24h
       const cached = await getCache(symbol);
-      if (cached) return res.json({ ...cached, _fromCache: true });
+      // Invalider si données vieilles (champs Yahoo Finance manquants = ancien format FMP)
+      const cacheValid = cached && cached.grossMarginPct !== undefined;
+      if (cacheValid) return res.json({ ...cached, _fromCache: true });
 
       // Sinon : Yahoo Finance quoteSummary
       const yf = await yfSummary(symbol, 'defaultKeyStatistics,financialData,summaryDetail');
@@ -148,6 +150,20 @@ module.exports = async (req, res) => {
       await setCache(symbol, result); // Stocker 24h
       return res.json(result);
     } catch (e) { return res.status(500).json({ error: e.message }); }
+  }
+
+  // ── CHART (données brutes 1 an quotidien pour fiche société) ──────────────
+  if (type === 'chart') {
+    try {
+      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?range=1y&interval=1d&includePrePost=false`, { headers: { 'User-Agent': UA } });
+      const d = r.ok ? await r.json() : null;
+      const chart = d?.chart?.result?.[0];
+      if (!chart) return res.status(404).json({ error: 'No chart data' });
+      const closes = chart.indicators?.quote?.[0]?.close || [];
+      const times  = chart.timestamp || [];
+      const pts = closes.map((c,i) => c != null ? { c: Math.round(c * 100) / 100, t: times[i] } : null).filter(Boolean);
+      return res.json({ symbol, chartData: pts });
+    } catch(e) { return res.status(500).json({ error: e.message }); }
   }
 
   // ── PRIX (Yahoo Finance chart v8) ─────────────────────────────────────
