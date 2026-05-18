@@ -157,7 +157,7 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
         <div class="nav-item" id="nav-accounts" onclick="navigate('accounts')"><span class="nav-icon">💳</span><span>Comptes</span></div>
         <div class="nav-section">Analyse</div>
         <div class="nav-item" id="nav-ratios" onclick="navigate('ratios')"><span class="nav-icon">📈</span><span>Ratios</span></div>
-        <div class="nav-item" id="nav-screener" onclick="navigate('screener')"><span class="nav-icon">🔍</span><span>Screener</span></div>
+        <!-- Screener retiré: accès via clic sur entreprise dans Ratios -->
         <div class="nav-item" id="nav-watchlist" onclick="navigate('watchlist')"><span class="nav-icon">⭐</span><span>Watchlist</span></div>
         <div class="nav-item disabled"><span class="nav-icon">📓</span><span>Journal</span><span class="nav-soon">BIENTÔT</span></div>
         <div class="nav-section">Social</div>
@@ -480,7 +480,7 @@ function thCls(col){return`class="${posSort.col===col?'sort-active':''}" onclick
 
 // ═══ PORTFOLIO PAGE ═══
 async function renderPortfolio(){
-  chartDrill=[]; // Réinitialiser le drill du camembert
+  chartMode='positions'; chartDrill=[]; // Toujours repartir en mode Positions
   const pg=document.getElementById('page');
   if(!S.accounts.length){pg.innerHTML=`<div class="empty-state"><div class="icon">💼</div><h3>Aucun compte configuré</h3><p>Crée tes comptes pour commencer</p><button class="btn btn-primary" style="width:auto" onclick="navigate('accounts')">Gérer mes comptes →</button></div>`;return;}
   if(!S.transactions.length){pg.innerHTML=`<div class="empty-state"><div class="icon">📋</div><h3>Aucune transaction</h3><p>Ajoute tes achats pour voir ton portefeuille en temps réel</p><button class="btn btn-primary" style="width:auto" onclick="navigate('accounts')">Ajouter des transactions →</button></div>`;return;}
@@ -764,7 +764,13 @@ function renderDonut(){
 
 async function changeChartMode(mode){
   chartMode=mode;chartDrill=[];
-  if(!S.enrichedPos.length){showToast('⏳ Attends que les prix se chargent…');return;}
+  // Si S.enrichedPos vide mais des prix existent, attendre qu'ils chargent
+  if(!S.enrichedPos.length){
+    showToast('⏳ Attends que les prix se chargent…');
+    // Retry après 2s
+    setTimeout(function(){ if(S.enrichedPos.length) changeChartMode(mode); }, 2000);
+    return;
+  }
   if(['secteur','region','pays','capi'].includes(mode)){
     const el=document.getElementById('chart-loading');if(el)el.style.display='inline-flex';
     // Fetch seulement les tickers sans profil ET sans pays hardcodé
@@ -1267,7 +1273,12 @@ async function renderCompanyDetail(ticker, name) {
     } catch(e) {}
   }
 
-  // Get price
+  // Toujours re-fetcher le prix pour avoir les données graphique fraîches
+  try {
+    var rp = await fetch(API+'?symbol='+encodeURIComponent(ticker));
+    var dp = await rp.json();
+    if (dp && dp.price) { S.prices[ticker] = dp; }
+  } catch(e) {}
   var price = S.prices[ticker];
 
   var cd = document.getElementById('cd-content');
@@ -1368,13 +1379,21 @@ async function renderCompanyDetail(ticker, name) {
     '</div>' +
     '</div>'; // Fin grid 2 colonnes
 
-  // Dessiner le graphique (après que le DOM soit mis à jour)
+  // Charger données graphique via endpoint dédié (1 an, quotidien)
+  var chartPts = [];
+  try {
+    var rc = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=chart');
+    var dc = await rc.json();
+    chartPts = dc.chartData || [];
+  } catch(e) {}
+
+  // Dessiner le graphique
   setTimeout(function(){
     var canvas = document.getElementById('company-price-chart');
     if(!canvas) return;
-    var pts = (price && price.chartData) || [];
+    var pts = chartPts;
     if(pts.length < 2){
-      canvas.parentNode.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px;font-size:13px">Données graphique indisponibles.<br>Rafraîchis la page pour charger les prix.</div>';
+      canvas.parentNode.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px;font-size:13px">Chargement du graphique…</div>';
       return;
     }
     var labels = pts.map(function(p){
