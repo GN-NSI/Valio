@@ -120,6 +120,11 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 @keyframes slideUp{from{transform:translateY(12px);opacity:0}to{transform:translateY(0);opacity:1}}
 .c-green{color:var(--green)!important}.c-red{color:var(--red)!important}.c-muted{color:var(--muted)!important}
 .manual-btn{font-size:11px;padding:3px 8px;background:rgba(245,158,11,.15);color:#f59e0b;border:1px solid rgba(245,158,11,.3);border-radius:5px;cursor:pointer;title:"Clic pour saisir le prix manuellement"}
+
+.cd-metric{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);}
+.cd-metric:last-child{border-bottom:none;}
+.cd-label{font-size:13px;color:var(--muted);}
+.cd-val{font-size:14px;font-weight:600;font-family:'SF Mono',monospace;}
 </style>
 </head>
 <body>
@@ -792,7 +797,22 @@ async function loadRatios(){
   if(!pos.length){if(rc)rc.innerHTML='Aucune position avec prix.';if(btn){btn.disabled=false;btn.textContent='Réessayer';}return;}
   await Promise.all(pos.map(async p=>{if(S.fundamentals[p.ticker])return;
     try{const r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker)+'&type=fundamentals',{signal:AbortSignal.timeout(8000)});const d=await r.json();if(d&&!d.error)S.fundamentals[p.ticker]=d;}catch{}}));
-  const wAvg=key=>{let n=0,d=0;pos.forEach(p=>{const f=S.fundamentals[p.ticker];const v=f?.[key];if(v!=null&&isFinite(v)&&!isNaN(v)){n+=v*p.valueEur;d+=p.valueEur;}});return d>0?n/d:null;};
+  const wAvg=key=>{
+    let n=0,d=0;
+    pos.forEach(p=>{
+      const f=S.fundamentals[p.ticker];
+      if(!f) return;
+      let v=f[key];
+      if(v==null||!isFinite(v)||isNaN(v)) return;
+      // Exclure les PE/PEG négatifs (biais mathématique pour entreprises déficitaires)
+      if((key==='trailingPE'||key==='forwardPE'||key==='pegRatio')&&v<=0) return;
+      // Plafonner croissance à ±300% (Reddit +675%, Lyft +488% = effets base négative)
+      if((key==='epsGrowth1Y'||key==='revenueGrowthYoY')&&Math.abs(v)>300) return;
+      n+=v*(p.valueEur||0);
+      d+=(p.valueEur||0);
+    });
+    return d>0?n/d:null;
+  };
   const row=(label,val,sfx='',barMax=null,color='var(--green)')=>{
     const vs=val!=null?fN(val)+sfx:'—';const vc=sfx==='%'&&val!=null?val>0?'var(--green)':val<0?'var(--red)':'var(--text)':'var(--text)';
     const bar=barMax&&val!=null?`<div class="stat-bar"><div class="stat-fill" style="width:${Math.min(100,Math.max(0,(Math.abs(val)/barMax)*100)).toFixed(0)}%;background:${color}"></div></div>`:'';
@@ -1077,7 +1097,7 @@ async function saveWatch(){
   if(!ticker||!name){showToast('Remplis les deux champs');return;}
   var u=getUser(); if(!u) return;
   try{
-    var d=await dbPost('watchlist',{user_id:u.id,ticker:ticker,name:name,asset_type:'stock'});
+    var d=await dbPost('watchlist',{user_id:u.id,ticker:ticker,name:name});
     watchlistItems.push(d);
     closeModal();showToast('✅ '+ticker+' ajouté');renderWatchlistTable();
   } catch(e){ showToast('Erreur: '+e.message); }
@@ -1150,6 +1170,117 @@ async function loadScreenerRatios(){
     if(i+BATCH<allItems.length) await new Promise(function(r){setTimeout(r,DELAY);});
   }
   saveCache();
+}
+
+
+// ═══ PAGE DÉTAIL ENTREPRISE ═══
+var _prevPage = 'ratios';
+
+function openCompanyDetail(ticker, name) {
+  _prevPage = S.page || 'ratios';
+  S.page = 'company';
+  document.querySelectorAll('.nav-item').forEach(function(el){ el.classList.remove('active'); });
+  renderCompanyDetail(ticker, name || ticker);
+}
+
+async function renderCompanyDetail(ticker, name) {
+  var pg = document.getElementById('page');
+  pg.innerHTML = '<div style="display:flex;align-items:center;gap:12px;margin-bottom:24px">' +
+    '<button class="btn btn-ghost btn-sm" onclick="navigate(\''+_prevPage+'\')">← Retour</button>' +
+    '<h2 style="font-size:20px;font-weight:700">'+name+' <span style="color:var(--muted);font-size:14px;font-weight:400">'+ticker+'</span></h2>' +
+    '</div>' +
+    '<div id="cd-content"><div style="text-align:center;padding:60px"><div class="spinner"></div> Chargement des données…</div></div>';
+
+  // Get fundamentals (use cache if available)
+  var f = S.fundamentals[ticker];
+  if (!f) {
+    try {
+      var r = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=fundamentals', {signal:AbortSignal.timeout(15000)});
+      var d = await r.json();
+      if (d && !d.error) { S.fundamentals[ticker] = d; f = d; }
+    } catch(e) {}
+  }
+
+  // Get price
+  var price = S.prices[ticker];
+
+  var cd = document.getElementById('cd-content');
+  if (!f && !price) { cd.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px">Données indisponibles pour '+ticker+'</div>'; return; }
+
+  // Price header
+  var isUsd = !(price && price.currency === 'EUR');
+  var sym = isUsd ? '$' : '€';
+  var priceStr = price && price.price ? sym+fN(price.price) : '—';
+  var chgColor = price && price.changePct >= 0 ? 'var(--green)' : 'var(--red)';
+  var chgStr = price && price.changePct != null ? (price.changePct >= 0 ? '+' : '')+price.changePct.toFixed(2)+'%' : '';
+  var sub = TICKER_SUBSECTOR[ticker] ? TICKER_SUBSECTOR[ticker] : '';
+
+  function metric(label, val, fmt, colorFn) {
+    if (val == null || isNaN(val) || !isFinite(val)) return '<div class="cd-metric"><span class="cd-label">'+label+'</span><span class="cd-val" style="color:var(--muted)">—</span></div>';
+    var v = fmt ? fmt(val) : val;
+    var col = colorFn ? colorFn(val) : 'var(--text)';
+    return '<div class="cd-metric"><span class="cd-label">'+label+'</span><span class="cd-val" style="color:'+col+'">'+v+'</span></div>';
+  }
+  function pct(v) { return (v >= 0 ? '+' : '')+v.toFixed(1)+'%'; }
+  function xs(v) { return fN(v)+'x'; }
+  function col_pe(v) { return v < 15 ? 'var(--green)' : v < 30 ? 'var(--yellow)' : v < 50 ? '#f97316' : 'var(--red)'; }
+  function col_fpe(v) { return v < 20 ? 'var(--green)' : v < 25 ? 'var(--yellow)' : v < 30 ? '#f97316' : 'var(--red)'; }
+  function col_mg(v) { return v > 20 ? 'var(--green)' : v > 10 ? 'var(--yellow)' : v > 0 ? '#f97316' : 'var(--red)'; }
+  function col_grw(v) { return v > 15 ? 'var(--green)' : v > 5 ? 'var(--yellow)' : v >= 0 ? '#f97316' : 'var(--red)'; }
+  function col_roe(v) { return v > 20 ? 'var(--green)' : v > 10 ? 'var(--yellow)' : 'var(--red)'; }
+  function col_debt(v) { return v < 1 ? 'var(--green)' : v < 2 ? 'var(--yellow)' : v < 3.5 ? '#f97316' : 'var(--red)'; }
+
+  // Performance badges
+  var perf1m = price && price.change1M != null ? (price.change1M >= 0 ? '+' : '')+price.change1M.toFixed(1)+'%' : '—';
+  var perfYTD = price && price.changeYTD != null ? (price.changeYTD >= 0 ? '+' : '')+price.changeYTD.toFixed(1)+'%' : '—';
+  var perf1y = price && price.change1Y != null ? (price.change1Y >= 0 ? '+' : '')+price.change1Y.toFixed(1)+'%' : '—';
+
+  cd.innerHTML =
+    // Prix + perf
+    '<div class="card" style="margin-bottom:16px">' +
+      '<div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap">' +
+        '<div><div style="font-size:32px;font-weight:800">'+priceStr+'</div>' +
+        '<div style="font-size:16px;color:'+chgColor+';margin-top:2px">'+chgStr+' aujourd&#x27;hui</div></div>' +
+        (sub ? '<div style="color:var(--muted);font-size:13px">'+sub+'</div>' : '') +
+        '<div style="display:flex;gap:16px;margin-left:auto">' +
+          '<div style="text-align:center"><div style="font-size:11px;color:var(--muted);text-transform:uppercase">1 mois</div><div style="font-weight:700;color:var(--blue)">'+perf1m+'</div></div>' +
+          '<div style="text-align:center"><div style="font-size:11px;color:var(--muted);text-transform:uppercase">YTD</div><div style="font-weight:700;color:var(--blue)">'+perfYTD+'</div></div>' +
+          '<div style="text-align:center"><div style="font-size:11px;color:var(--muted);text-transform:uppercase">1 an</div><div style="font-weight:700;color:var(--blue)">'+perf1y+'</div></div>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    // Grille ratios
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px">' +
+      // Valorisation
+      '<div class="card"><div class="stats-section-title" style="margin-bottom:12px">Valorisation</div>' +
+        metric('P/E Trailing', f && f.trailingPE, xs, col_pe) +
+        metric('P/E Forward', f && f.forwardPE, xs, col_fpe) +
+        metric('PEG', f && f.pegRatio, xs, function(v){return v<1?'var(--green)':v<2?'var(--yellow)':'var(--red)';}) +
+        metric('P/FCF', f && f.pfcf, xs, function(v){return v<20?'var(--green)':v<35?'var(--yellow)':'var(--red)';}) +
+        metric('P/OCF', f && f.pocf, xs, function(v){return v<20?'var(--green)':v<35?'var(--yellow)':'var(--red)';}) +
+      '</div>' +
+      // Rentabilité
+      '<div class="card"><div class="stats-section-title" style="margin-bottom:12px">Rentabilité</div>' +
+        metric('Marge brute', f && f.grossMarginPct, function(v){return v.toFixed(1)+'%';}, function(v){return v>40?'var(--green)':v>20?'var(--yellow)':'var(--red)';}) +
+        metric('Marge opérationnelle', f && f.operatingMarginPct, function(v){return v.toFixed(1)+'%';}, col_mg) +
+        metric('Marge nette', f && f.profitMarginPct, function(v){return v.toFixed(1)+'%';}, col_mg) +
+        metric('ROE', f && f.returnOnEquity, function(v){return v.toFixed(1)+'%';}, col_roe) +
+        metric('ROA', f && f.returnOnAssets, function(v){return v.toFixed(1)+'%';}, function(v){return v>10?'var(--green)':v>5?'var(--yellow)':'var(--red)';}) +
+      '</div>' +
+      // Croissance
+      '<div class="card"><div class="stats-section-title" style="margin-bottom:12px">Croissance</div>' +
+        metric('CA 1A', f && f.revenueGrowthYoY, pct, col_grw) +
+        metric('EPS 1A', f && f.epsGrowth1Y, pct, col_grw) +
+        metric('FCF Growth', f && f.fcfGrowth, pct, col_grw) +
+      '</div>' +
+      // Santé financière
+      '<div class="card"><div class="stats-section-title" style="margin-bottom:12px">Santé financière</div>' +
+        metric('Dette / EBITDA', f && f.netDebtToEBITDA, xs, col_debt) +
+        metric('Current Ratio', f && f.currentRatio, xs, function(v){return v>2?'var(--green)':v>1?'var(--yellow)':'var(--red)';}) +
+        (f && f.freeCashflow ? metric('Free Cash Flow', f.freeCashflow/1e9, function(v){return v.toFixed(2)+' Md $';}, function(v){return v>0?'var(--green)':'var(--red)';}) : '') +
+        (f && f.mktCap ? metric('Market Cap', f.mktCap/1e9, function(v){return v.toFixed(0)+' Md $';}, function(){return 'var(--text)';}) : '') +
+      '</div>' +
+    '</div>';
 }
 
 // ═══ ACCOUNTS PAGE ═══
