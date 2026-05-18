@@ -49,78 +49,71 @@ module.exports = async (req, res) => {
     } catch (err) { return res.status(500).json({ error: err.message }); }
   }
 
-  // ── FUNDAMENTALS ──────────────────────────────────────────────────────
+  // ── FUNDAMENTALS (Yahoo Finance primary + FMP supplement) ─────────────
+  // Yahoo Finance quoteSummary = gratuit, sans quota, couvre tous les tickers
+  // FMP key-metrics = 1 seul appel pour D/EBITDA et ROIC
   if (type === 'fundamentals') {
     try {
-      const [metricsRaw, ratiosRaw, cfRaw, isRaw] = await Promise.all([
-        fmpFetch(`key-metrics-ttm?symbol=${encodeURIComponent(symbol)}`),
-        fmpFetch(`ratios-ttm?symbol=${encodeURIComponent(symbol)}`),
-        fmpFetch(`cash-flow-statement?symbol=${encodeURIComponent(symbol)}&limit=2`),
-        fmpFetch(`income-statement?symbol=${encodeURIComponent(symbol)}&period=annual&limit=2`),
+      const sym = encodeURIComponent(symbol);
+      const YH = { headers: { 'User-Agent': 'Mozilla/5.0' } };
+
+      const [yfResp, fmpM_raw] = await Promise.all([
+        fetch(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=defaultKeyStatistics,financialData,summaryDetail`, YH),
+        fmpFetch(`key-metrics-ttm?symbol=${encodeURIComponent(symbol)}`), // ROIC + D/EBITDA
       ]);
 
-      const m = Array.isArray(metricsRaw) ? metricsRaw[0] : metricsRaw;
-      const r = Array.isArray(ratiosRaw)  ? ratiosRaw[0]  : ratiosRaw;
+      const yfData = yfResp.ok ? await yfResp.json() : null;
+      const yf    = yfData?.quoteSummary?.result?.[0];
+      const sd    = yf?.summaryDetail        || {};
+      const fd    = yf?.financialData        || {};
+      const ks    = yf?.defaultKeyStatistics || {};
+      const fmpM  = Array.isArray(fmpM_raw) ? fmpM_raw[0] : fmpM_raw;
 
-      if (!m && !r) return res.status(503).json({
-        error: 'Toutes les clés FMP épuisées. Ajoute FMP_KEY_2 dans Vercel.',
-        fmpError: true,
-      });
+      if (!yf && !fmpM) return res.status(404).json({ error: `No fundamental data for ${symbol}` });
 
-      // Forward EPS — non disponible free tier
-      const epsForward = null;
-      // CA 1A et EPS 1A depuis income-statement annuel (2 dernières années)
-      let revenueGrowthYoY = null, epsGrowth1Y = null;
-      if (Array.isArray(isRaw) && isRaw.length >= 2) {
-        const [curr, prev] = isRaw;
-        if (curr?.revenue && prev?.revenue && prev.revenue !== 0)
-          revenueGrowthYoY = ((curr.revenue - prev.revenue) / Math.abs(prev.revenue)) * 100;
-        const cEps = curr?.eps ?? curr?.epsBasic ?? curr?.epsDiluted ?? null;
-        const pEps = prev?.eps ?? prev?.epsBasic ?? prev?.epsDiluted ?? null;
-        if (cEps != null && pEps != null && pEps !== 0)
-          epsGrowth1Y = ((cEps - pEps) / Math.abs(pEps)) * 100;
-      }
+      const raw = v => (v?.raw ?? null);
+      const pct = v => (v?.raw != null ? v.raw * 100 : null);
 
-      // Cash flow
-      let fcfGrowth = null, fcf0 = null, cfo0 = null;
-      if (Array.isArray(cfRaw) && cfRaw.length > 0) {
-        fcf0 = cfRaw[0]?.freeCashFlow       || null;
-        cfo0 = cfRaw[0]?.operatingCashFlow  || null;
-        if (cfRaw.length >= 2) {
-          const fcf1 = cfRaw[1]?.freeCashFlow || null;
-          if (fcf0 && fcf1 && fcf1 !== 0) fcfGrowth = ((fcf0 - fcf1) / Math.abs(fcf1)) * 100;
-        }
-      }
-
-      const currentPrice = m?.stockPriceTTM || null;
-      const forwardPE    = (epsForward > 0 && currentPrice) ? currentPrice / epsForward : null;
+      const mktCap = raw(ks.marketCap);
+      const fcf    = raw(fd.freeCashflow);
+      const ocf    = raw(fd.operatingCashflow);
+      const pfcf   = (mktCap && fcf && fcf > 0) ? mktCap / fcf : null;
+      const pocf   = (mktCap && ocf && ocf > 0) ? mktCap / ocf : null;
 
       return res.json({
         symbol,
-        trailingPE:         r?.priceToEarningsRatioTTM          || null,
-        forwardPE,
-        epsForward,
-        pegRatio:           r?.priceToEarningsGrowthRatioTTM    || null,
-        pfcf:               r?.priceToFreeCashFlowsRatioTTM     || null,
-        pocf:               r?.priceToOperatingCashFlowsRatioTTM || m?.pocfRatioTTM ||
-                            (mktCap && cfo0 && cfo0 > 0 ? mktCap / cfo0 : null),
-        profitMarginPct:    r?.netProfitMarginTTM   ? r.netProfitMarginTTM   * 100 : null,
-        grossMarginPct:     r?.grossProfitMarginTTM ? r.grossProfitMarginTTM * 100 : null,
-        roic:               m?.roicTTM              ? m.roicTTM              * 100 : null,
-        returnOnEquity:     m?.returnOnEquityTTM    ? m.returnOnEquityTTM    * 100 : null,
-        netDebtToEBITDA:    m?.netDebtToEBITDATTM  || null,
-        freeCashflow:       fcf0,
-        operatingCashFlow:  cfo0,
-        fcfGrowth,
-        mktCap:             m?.marketCapTTM || m?.marketCap || null,
-        currentPriceUSD:    currentPrice,
-        revenueGrowthYoY,
-        epsGrowth1Y,
-        timestamp:          Date.now(),
+        // Valorisation
+        trailingPE:      raw(sd.trailingPE),
+        forwardPE:       raw(sd.forwardPE),      // ← Yahoo Finance direct !
+        epsForward:      raw(ks.forwardEps),
+        pegRatio:        raw(ks.pegRatio),
+        pfcf,
+        pocf,
+        // Marges
+        profitMarginPct:    pct(fd.profitMargins),
+        grossMarginPct:     pct(fd.grossMargins),
+        operatingMarginPct: pct(fd.operatingMargins),
+        // Rentabilité
+        returnOnEquity:  pct(fd.returnOnEquity),
+        returnOnAssets:  pct(fd.returnOnAssets),
+        roic:            fmpM?.roicTTM ? fmpM.roicTTM * 100 : null,
+        // Santé
+        netDebtToEBITDA: fmpM?.netDebtToEBITDATTM || null,
+        currentRatio:    raw(fd.currentRatio),
+        // Croissance
+        revenueGrowthYoY: pct(fd.revenueGrowth),
+        epsGrowth1Y:      pct(fd.earningsGrowth),
+        // Cash flow
+        freeCashflow:     fcf,
+        operatingCashFlow: ocf,
+        fcfGrowth:        null,
+        // Market
+        mktCap,
+        currentPriceUSD:  raw(fd.currentPrice),
+        timestamp:        Date.now(),
       });
     } catch (err) { return res.status(500).json({ error: err.message }); }
   }
-
   // ── PRIX (Yahoo Finance) ──────────────────────────────────────────────
   const sym  = encodeURIComponent(symbol);
   const BASE = 'https://query1.finance.yahoo.com/v8/finance/chart/';
