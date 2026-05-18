@@ -784,14 +784,18 @@ async function changeChartMode(mode){
   renderDonut();
 }
 
-function handleDrill(label){chartDrill.push(label);renderDonut();}
-function drillBack(n){chartDrill=chartDrill.slice(0,n);renderDonut();}
-function updateBC(){
-  const el=document.getElementById('chart-bc');if(!el)return;
-  if(!chartDrill.length){el.innerHTML='';return;}
-  const roots={positions:'Titres',enveloppe:'Comptes',type:'Types',secteur:'Secteurs',region:'Régions',pays:'Pays',capi:'Capitalisation'};
-  const parts=[roots[chartMode]||'Tout',...chartDrill];
-  el.innerHTML=parts.map((p,i)=>i===parts.length-1?`<strong>${p}</strong>`:`<span class="bc-link" onclick="drillBack(${i})">${p}</span>`).join(`<span class="bc-sep"> › </span>`);
+function handleDrill(label){
+  var data=buildChartData();
+  if(!data.clickable){
+    // Niveau final: tenter d'ouvrir la fiche société
+    var allP=S.enrichedPos.concat(watchlistItems.map(function(w){return {ticker:w.ticker,name:w.name};}));
+    var found=allP.find(function(p){return p.ticker===label;});
+    if(found){openCompanyDetail(found.ticker,found.name||found.ticker);}
+    return;
+  }
+  chartDrill.push(label);
+  renderDonut();
+  updateBC();
 }
 
 // ═══ RATIOS ═══
@@ -1098,6 +1102,8 @@ function renderWatchlistTable(){
     '</tr></thead><tbody>'+rows+'</tbody></table></div></div>'+
     '<div style="margin-top:12px;display:flex;justify-content:flex-end">'+
     '<button class="btn btn-primary" onclick="loadWatchRatios()">⟳ Charger les ratios</button></div>';
+  // Restaurer les ratios depuis le cache (S.fundamentals)
+  sorted.forEach(function(w){ if(S.fundamentals[w.ticker]) updateRatioRowById('wr',w.ticker); });
 }
 
 async function loadWatchRatios(){
@@ -1169,6 +1175,8 @@ async function removeWatch(btn){var id=btn.dataset.id||btn;var ticker=btn.datase
 // ═══ SCREENER (Portefeuille + Watchlist combinés) ═══
 async function renderScreener(){
   var pg=document.getElementById('page');
+  // Auto-charger la watchlist si pas encore fait
+  if(!watchlistItems.length){ await loadWatchlist(); }
   pg.innerHTML='<div style="margin-bottom:22px">'+
     '<h2 style="font-size:18px;font-weight:700">Screener</h2>'+
     '<p style="color:var(--muted);font-size:13px;margin-top:3px">Portefeuille + Watchlist — tous tes titres, triables par ratio</p>'+
@@ -1179,6 +1187,10 @@ async function renderScreener(){
   var wlOnly=watchlistItems.filter(function(w){return !pfPos.find(function(p){return p.ticker===w.ticker;});});
   var allItems=pfPos.concat(wlOnly.map(function(w){return {ticker:w.ticker,name:w.name,_isWatch:true};}));
 
+  // Charger les prix manquants pour les items de la watchlist
+  await Promise.all(allItems.filter(function(p){return p._isWatch && !S.prices[p.ticker];}).map(async function(p){
+    try{var r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker));var d=await r.json();if(d&&d.price)S.prices[p.ticker]=d;}catch(e){}
+  }));
   var rows=allItems.map(function(p){
     var d=S.prices[p.ticker];
     var isUsd=!(d && d.currency==='EUR');
@@ -1350,7 +1362,7 @@ function renderScreenerTable(sort){
     var priceStr=d && d.price ? '<span class="mono">'+(isUsd?'$':'€')+fN(d.price)+'</span>' : '—';
     var tid=p.ticker.replace(/[^a-zA-Z0-9]/g,'_');
     var badge=p._isWatch?'<span style="font-size:10px;background:rgba(245,158,11,.15);color:#f59e0b;padding:2px 5px;border-radius:4px;margin-left:4px">WATCH</span>':'';
-    return '<tr>'+
+    return '<tr style="user-select:none">'+
       '<td style="text-align:left;padding-left:20px"><div class="ticker-cell">'+
       mkLogoCell(p.ticker)+
       '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+p.ticker+'">'+(p.name||p.ticker)+badge+'</div><div class="ticker-sym">'+p.ticker+'</div></div></div></td>'+
