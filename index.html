@@ -480,6 +480,7 @@ function thCls(col){return`class="${posSort.col===col?'sort-active':''}" onclick
 
 // ═══ PORTFOLIO PAGE ═══
 async function renderPortfolio(){
+  chartDrill=[]; // Réinitialiser le drill du camembert
   const pg=document.getElementById('page');
   if(!S.accounts.length){pg.innerHTML=`<div class="empty-state"><div class="icon">💼</div><h3>Aucun compte configuré</h3><p>Crée tes comptes pour commencer</p><button class="btn btn-primary" style="width:auto" onclick="navigate('accounts')">Gérer mes comptes →</button></div>`;return;}
   if(!S.transactions.length){pg.innerHTML=`<div class="empty-state"><div class="icon">📋</div><h3>Aucune transaction</h3><p>Ajoute tes achats pour voir ton portefeuille en temps réel</p><button class="btn btn-primary" style="width:auto" onclick="navigate('accounts')">Ajouter des transactions →</button></div>`;return;}
@@ -905,7 +906,7 @@ function renderRatios(){
     return '<tr>'+
       '<td style="text-align:left;padding-left:20px"><div class="ticker-cell">'+
       mkLogoCell(p.ticker)+
-      '<div><div class="ticker-name">'+p.name+'</div><div class="ticker-sym">'+p.ticker+'</div></div></div></td>'+
+      '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+p.ticker+'">'+p.name+'</div><div class="ticker-sym">'+p.ticker+'</div></div></div></td>'+
       '<td>'+priceStr+'</td>'+
       ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','debt'].map(k=>'<td id="r-'+tid+'-'+k+'" style="color:var(--muted)">—</td>').join('')+
       '</tr>';
@@ -1300,7 +1301,19 @@ async function renderCompanyDetail(ticker, name) {
   var perfYTD = price && price.changeYTD != null ? (price.changeYTD >= 0 ? '+' : '')+price.changeYTD.toFixed(1)+'%' : '—';
   var perf1y = price && price.change1Y != null ? (price.change1Y >= 0 ? '+' : '')+price.change1Y.toFixed(1)+'%' : '—';
 
+  // Fetch fresh price data for chart if not available
+  if (!price || !price.chartData) {
+    try {
+      var r2 = await fetch(API+'?symbol='+encodeURIComponent(ticker));
+      var d2 = await r2.json();
+      if (d2 && d2.price) { S.prices[ticker] = d2; price = d2; }
+    } catch(e) {}
+  }
+
   cd.innerHTML =
+    // Layout 2 colonnes : gauche = ratios, droite = graphique
+    '<div style="display:grid;grid-template-columns:340px 1fr;gap:20px;align-items:start">' +
+    '<div>' + // Colonne gauche
     // Prix + perf
     '<div class="card" style="margin-bottom:16px">' +
       '<div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap">' +
@@ -1345,7 +1358,15 @@ async function renderCompanyDetail(ticker, name) {
         (f && f.freeCashflow ? metric('Free Cash Flow', f.freeCashflow/1e9, function(v){return v.toFixed(2)+' Md $';}, function(v){return v>0?'var(--green)':'var(--red)';}) : '') +
         (f && f.mktCap ? metric('Market Cap', f.mktCap/1e9, function(v){return v.toFixed(0)+' Md $';}, function(){return 'var(--text)';}) : '') +
       '</div>' +
-    '</div>';
+    '</div>' + // Fin grille gauche
+    '</div>' + // Fin colonne gauche
+    '<div>' + // Colonne droite : graphique
+      '<div class="card" style="margin-bottom:16px">' +
+        '<div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Cours — 12 derniers mois</div>' +
+        '<canvas id="company-price-chart" style="width:100%;height:220px"></canvas>' +
+      '</div>' +
+    '</div>' +
+    '</div>'; // Fin grid 2 colonnes
 }
 
 
