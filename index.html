@@ -146,8 +146,8 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
         <div class="nav-item" id="nav-accounts" onclick="navigate('accounts')"><span class="nav-icon">💳</span><span>Comptes</span></div>
         <div class="nav-section">Analyse</div>
         <div class="nav-item" id="nav-ratios" onclick="navigate('ratios')"><span class="nav-icon">📈</span><span>Ratios</span></div>
-        <div class="nav-item disabled"><span class="nav-icon">🔍</span><span>Screener</span><span class="nav-soon">BIENTÔT</span></div>
-        <div class="nav-item disabled"><span class="nav-icon">⭐</span><span>Watchlist</span><span class="nav-soon">BIENTÔT</span></div>
+        <div class="nav-item" id="nav-screener" onclick="navigate('screener')"><span class="nav-icon">🔍</span><span>Screener</span></div>
+        <div class="nav-item" id="nav-watchlist" onclick="navigate('watchlist')"><span class="nav-icon">⭐</span><span>Watchlist</span></div>
         <div class="nav-item disabled"><span class="nav-icon">📓</span><span>Journal</span><span class="nav-soon">BIENTÔT</span></div>
         <div class="nav-section">Social</div>
         <div class="nav-item disabled"><span class="nav-icon">👥</span><span>Amis</span><span class="nav-soon">BIENTÔT</span></div>
@@ -430,7 +430,7 @@ function xlErr(m){if(m.includes('Invalid login'))return 'Email ou mot de passe i
 async function logout(){try{await fetch(SU+'/auth/v1/logout',{method:'POST',headers:hdrs()});}catch{}saveSess(null);S.accounts=[];S.transactions=[];S.enrichedPos=[];showAuth();}
 
 // ═══ NAV ═══
-function navigate(page){S.page=page;document.querySelectorAll('.nav-item:not(.disabled)').forEach(e=>e.classList.remove('active'));document.getElementById('nav-'+page)?.classList.add('active');document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes'}[page]||page;if(page==='portfolio')renderPortfolio();else if(page==='accounts')renderAccounts();else if(page==='ratios')renderRatios();}
+function navigate(page){S.page=page;document.querySelectorAll('.nav-item:not(.disabled)').forEach(e=>e.classList.remove('active'));document.getElementById('nav-'+page)?.classList.add('active');document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes'}[page]||page;if(page==='portfolio')renderPortfolio();else if(page==='accounts')renderAccounts();else if(page==='ratios')renderRatios();else if(page==='watchlist')renderWatchlist();else if(page==='screener')renderScreener();}
 
 // ═══ POSITION MATH (CMP) ═══
 function computePositions(){
@@ -650,9 +650,16 @@ function buildChartData(){
   }
 
   if(chartMode==='type'){
-    const TL={stock:'Stock picking',etf:'ETF',crypto:'Crypto'};
-    if(!drill.length)return{...groupByKey(pos,p=>TL[p.asset_type]||'Actions'),clickable:true};
-    else{const filt=pos.filter(p=>(TL[p.asset_type]||'Actions')===drill[0]);return{...groupByKey(filt,p=>p.ticker,(t,i)=>tickerColor(t,i)),clickable:false};}
+    const allPos=S.enrichedPos.filter(p=>(p.valueEur||p.totalCostEur||0)>0);
+    if(!drill.length){
+      const m={};
+      allPos.forEach(p=>{const k=isETF(p)?'ETF':'Stock picking';m[k]=(m[k]||0)+(p.valueEur||p.totalCostEur||0);});
+      const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
+      return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((_,i)=>i===0?'#5b7ef5':'#22c55e'),clickable:true};
+    }
+    const sel=drill[0];
+    const filt=allPos.filter(p=>(isETF(p)?'ETF':'Stock picking')===sel);
+    return{...groupByKey(filt,p=>p.ticker,(t,i)=>tickerColor(t,i)),clickable:false};
   }
 
   if(chartMode==='secteur'){
@@ -867,8 +874,8 @@ function renderRatios(){
     const tid=p.ticker.replace(/\./g,'_');
     return '<tr>'+
       '<td style="text-align:left;padding-left:20px"><div class="ticker-cell">'+
-      '<div class="ticker-logo"><img src="https://assets.parqet.com/logos/symbol/'+p.ticker+'?format=png" onload="this.style.display=\'block\'" onerror="this.parentNode.innerHTML=\'<span>'+p.ticker.slice(0,3)+'<\/span>\'" style="display:none"></div>'+
-      '<div><div class="ticker-name">'+p.name+'</div><div class="ticker-sym">'+p.ticker+(TICKER_SUBSECTOR[p.ticker]?' · <span style="color:var(--muted2);font-size:10px">'+TICKER_SUBSECTOR[p.ticker]+'</span>':'')+'</div></div></div></td>'+
+      mkLogoCell(p.ticker)+
+      '<div><div class="ticker-name">'+p.name+'</div><div class="ticker-sym">'+p.ticker+'</div></div></div></td>'+
       '<td>'+priceStr+'</td>'+
       ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','debt'].map(k=>'<td id="r-'+tid+'-'+k+'" style="color:var(--muted)">—</td>').join('')+
       '</tr>';
@@ -946,14 +953,203 @@ function updateRatioRow(p){
   const pct=v=>(v>=0?'+':'')+v.toFixed(1)+'%';
   const xStr=v=>fN(v)+'x';
   set('per',f.trailingPE,xStr,v=>v<15?'var(--green)':v<30?'var(--yellow)':v<50?'#f97316':'var(--red)');
-  set('fwdpe',f.forwardPE,xStr,v=>v<12?'var(--green)':v<25?'var(--yellow)':v<40?'#f97316':'var(--red)');
-  set('fwdpe',f.forwardPE,xStr,v=>v<12?'var(--green)':v<25?'var(--yellow)':v<40?'#f97316':'var(--red)');
+  set('fwdpe',f.forwardPE,xStr,v=>v<20?'var(--green)':v<25?'var(--yellow)':v<30?'#f97316':'var(--red)');
+  set('fwdpe',f.forwardPE,xStr,v=>v<20?'var(--green)':v<25?'var(--yellow)':v<30?'#f97316':'var(--red)');
   set('peg',f.pegRatio,xStr,v=>v<1?'var(--green)':v<2?'var(--yellow)':'var(--red)');
   set('pocf',f.pocf,xStr,v=>v<15?'var(--green)':v<30?'var(--yellow)':'var(--red)');
   set('marge',f.profitMarginPct,v=>v.toFixed(1)+'%',v=>v>20?'var(--green)':v>10?'var(--yellow)':v>5?'#f97316':'var(--red)');
   set('ca1a',f.revenueGrowthYoY,pct,v=>v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)');
   set('eps1a',f.epsGrowth1Y,pct,v=>v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)');
   set('debt',f.netDebtToEBITDA,xStr,v=>v<1?'var(--green)':v<2?'var(--yellow)':v<3.5?'#f97316':'var(--red)');
+}
+
+
+// ═══ WATCHLIST ═══
+var watchlistItems = [];
+
+function mkLogoCell(ticker) {
+  var t = ticker.replace(/[^A-Z0-9]/gi,'').slice(0,3).toUpperCase();
+  return '<div class="ticker-logo"><span style="font-size:10px;font-weight:700">'+t+'</span></div>';
+}
+
+async function renderWatchlist(){
+  var pg=document.getElementById('page');
+  var u=getUser(); if(!u) return;
+  pg.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;flex-wrap:wrap;gap:10px">'+
+    '<div><h2 style="font-size:18px;font-weight:700">Watchlist</h2><p style="color:var(--muted);font-size:13px;margin-top:3px">Suivre des titres sans les posséder</p></div>'+
+    '<button class="btn btn-primary" onclick="openAddWatch()">+ Ajouter un titre</button>'+
+    '</div><div id="wl-content"><div style="text-align:center;padding:40px"><div class="spinner"></div></div></div>';
+  await loadWatchlist();
+}
+
+async function loadWatchlist(){
+  var u=getUser(); if(!u) return;
+  try {
+    watchlistItems = await dbGet('watchlist','user_id=eq.'+u.id+'&order=created_at') || [];
+    renderWatchlistTable();
+    await Promise.all(watchlistItems.map(async function(w){
+      if(S.prices[w.ticker]) return;
+      try { var r=await fetch(API+'?symbol='+encodeURIComponent(w.ticker)); var d=await r.json(); if(d && d.price) S.prices[w.ticker]=d; } catch(e){}
+    }));
+    renderWatchlistTable();
+  } catch(e) {
+    document.getElementById('wl-content').innerHTML='<div style="color:var(--red);padding:20px">Erreur: '+e.message+'</div>';
+  }
+}
+
+function renderWatchlistTable(){
+  var el=document.getElementById('wl-content'); if(!el) return;
+  if(!watchlistItems.length){
+    el.innerHTML='<div style="text-align:center;padding:60px;color:var(--muted)">Aucun titre en watchlist.<br>Clique "+ Ajouter un titre" pour commencer.</div>';
+    return;
+  }
+  var rows=watchlistItems.map(function(w){
+    var d=S.prices[w.ticker];
+    var isUsd=(d && d.currency && d.currency!=='EUR');
+    var priceStr=d && d.price ? '<span class="mono">'+(isUsd?'$':'€')+fN(d.price)+'</span>' : '<span style="color:var(--muted)">—</span>';
+    var tid=w.ticker.replace(/[^a-zA-Z0-9]/g,'_');
+    return '<tr>'+
+      '<td style="text-align:left;padding-left:20px"><div class="ticker-cell">'+
+      mkLogoCell(w.ticker)+
+      '<div><div class="ticker-name">'+w.name+'</div><div class="ticker-sym">'+w.ticker+'</div></div></div></td>'+
+      '<td>'+priceStr+'</td>'+
+      ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','debt'].map(function(k){return '<td id="wr-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
+      '<td><button class="btn btn-danger btn-sm" onclick="removeWatch(this)" data-id="'+w.id+'" data-ticker="'+w.ticker+'">✕</button></td>'+
+      '</tr>';
+  }).join('');
+  el.innerHTML='<div class="card"><div class="tbl-wrap"><table>'+
+    '<thead><tr>'+
+    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+
+    '<th>Cours</th><th>PER</th><th>Fwd PER</th><th>PEG</th><th>P/OCF</th><th>M. Nette</th><th>CA 1A</th><th>EPS 1A</th><th>D/EBITDA</th><th></th>'+
+    '</tr></thead><tbody>'+rows+'</tbody></table></div></div>'+
+    '<div style="margin-top:12px;display:flex;justify-content:flex-end">'+
+    '<button class="btn btn-primary" onclick="loadWatchRatios()">⟳ Charger les ratios</button></div>';
+}
+
+async function loadWatchRatios(){
+  var BATCH=3,DELAY=400;
+  for(var i=0;i<watchlistItems.length;i+=BATCH){
+    var batch=watchlistItems.slice(i,i+BATCH);
+    await Promise.all(batch.map(async function(w){
+      if(!S.fundamentals[w.ticker] && !S.fundamentalsAttempted.has(w.ticker)){
+        S.fundamentalsAttempted.add(w.ticker);
+        try{var r=await fetch(API+'?symbol='+encodeURIComponent(w.ticker)+'&type=fundamentals',{signal:AbortSignal.timeout(10000)});var d=await r.json();if(d&&!d.error)S.fundamentals[w.ticker]=d;}catch(e){}
+      }
+      updateRatioRowById('wr',w.ticker);
+    }));
+    if(i+BATCH<watchlistItems.length) await new Promise(function(r){setTimeout(r,DELAY);});
+  }
+  saveCache();
+}
+
+function updateRatioRowById(prefix,ticker){
+  var f=S.fundamentals[ticker]; if(!f) return;
+  var tid=ticker.replace(/[^a-zA-Z0-9]/g,'_');
+  function set(key,val,fmt,colorFn){
+    var el=document.getElementById(prefix+'-'+tid+'-'+key); if(!el) return;
+    if(val==null||isNaN(val)||!isFinite(val)){el.innerHTML='<span style="color:var(--muted)">—</span>';return;}
+    el.innerHTML='<span class="mono" style="color:'+colorFn(val)+'">'+fmt(val)+'</span>';
+  }
+  function pct(v){return (v>=0?'+':'')+v.toFixed(1)+'%';}
+  function xs(v){return fN(v)+'x';}
+  set('per',f.trailingPE,xs,function(v){return v<15?'var(--green)':v<30?'var(--yellow)':v<50?'#f97316':'var(--red)';});
+  set('fwdpe',f.forwardPE,xs,function(v){return v<20?'var(--green)':v<25?'var(--yellow)':v<30?'#f97316':'var(--red)';});
+  set('peg',f.pegRatio,xs,function(v){return v<1?'var(--green)':v<2?'var(--yellow)':'var(--red)';});
+  set('pocf',f.pocf,xs,function(v){return v<15?'var(--green)':v<30?'var(--yellow)':'var(--red)';});
+  set('marge',f.profitMarginPct,function(v){return v.toFixed(1)+'%';},function(v){return v>20?'var(--green)':v>10?'var(--yellow)':v>5?'#f97316':'var(--red)';});
+  set('ca1a',f.revenueGrowthYoY,pct,function(v){return v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)';});
+  set('eps1a',f.epsGrowth1Y,pct,function(v){return v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)';});
+  set('debt',f.netDebtToEBITDA,xs,function(v){return v<1?'var(--green)':v<2?'var(--yellow)':v<3.5?'#f97316':'var(--red)';});
+}
+
+function openAddWatch(){
+  showModal('<div class="modal-hd"><h2>Ajouter à la watchlist</h2><button class="modal-close" onclick="closeModal()">✕</button></div>'+
+    '<div class="form-row">'+
+    '<div class="form-group"><label class="form-label">Ticker *</label><input type="text" id="w-ticker" class="form-input" placeholder="ex: AAPL" oninput="this.value=this.value.toUpperCase()"></div>'+
+    '<div class="form-group"><label class="form-label">Nom *</label><input type="text" id="w-name" class="form-input" placeholder="ex: Apple"></div>'+
+    '</div>'+
+    '<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveWatch()">Ajouter</button></div>');
+}
+
+async function saveWatch(){
+  var ticker=document.getElementById('w-ticker').value.trim().toUpperCase();
+  var name=document.getElementById('w-name').value.trim();
+  if(!ticker||!name){showToast('Remplis les deux champs');return;}
+  var u=getUser(); if(!u) return;
+  try{
+    var d=await dbPost('watchlist',{user_id:u.id,ticker:ticker,name:name,asset_type:'stock'});
+    watchlistItems.push(d);
+    closeModal();showToast('✅ '+ticker+' ajouté');renderWatchlistTable();
+  } catch(e){ showToast('Erreur: '+e.message); }
+}
+
+async function removeWatch(btn){var id=btn.dataset.id||btn;var ticker=btn.dataset.ticker||btn;
+  if(!confirm('Retirer '+ticker+' de la watchlist ?')) return;
+  try{
+    await dbDel('watchlist','id=eq.'+id);
+    watchlistItems=watchlistItems.filter(function(w){return w.id!==id;});
+    showToast('✅ Retiré');renderWatchlistTable();
+  } catch(e){ showToast('Erreur: '+e.message); }
+}
+
+// ═══ SCREENER (Portefeuille + Watchlist combinés) ═══
+async function renderScreener(){
+  var pg=document.getElementById('page');
+  pg.innerHTML='<div style="margin-bottom:22px">'+
+    '<h2 style="font-size:18px;font-weight:700">Screener</h2>'+
+    '<p style="color:var(--muted);font-size:13px;margin-top:3px">Portefeuille + Watchlist — tous tes titres, triables par ratio</p>'+
+    '</div><div id="sc-content"><div style="text-align:center;padding:40px"><div class="spinner"></div></div></div>';
+
+  var pfPos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p);});
+  if(!watchlistItems.length){ await loadWatchlist(); }
+  var wlOnly=watchlistItems.filter(function(w){return !pfPos.find(function(p){return p.ticker===w.ticker;});});
+  var allItems=pfPos.concat(wlOnly.map(function(w){return {ticker:w.ticker,name:w.name,_isWatch:true};}));
+
+  var rows=allItems.map(function(p){
+    var d=S.prices[p.ticker];
+    var isUsd=!(d && d.currency==='EUR');
+    var priceStr=d && d.price ? '<span class="mono">'+(isUsd?'$':'€')+fN(d.price)+'</span>' : '—';
+    var tid=p.ticker.replace(/[^a-zA-Z0-9]/g,'_');
+    var badge=p._isWatch?'<span style="font-size:10px;background:rgba(245,158,11,.15);color:#f59e0b;padding:2px 5px;border-radius:4px;margin-left:4px">WATCH</span>':'';
+    return '<tr>'+
+      '<td style="text-align:left;padding-left:20px"><div class="ticker-cell">'+
+      mkLogoCell(p.ticker)+
+      '<div><div class="ticker-name">'+p.name+badge+'</div><div class="ticker-sym">'+p.ticker+(TICKER_SUBSECTOR[p.ticker]?' · <span style="color:var(--muted2);font-size:10px">'+TICKER_SUBSECTOR[p.ticker]+'</span>':'')+'</div></div></div></td>'+
+      '<td>'+priceStr+'</td>'+
+      ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
+      '</tr>';
+  }).join('');
+
+  document.getElementById('sc-content').innerHTML=
+    '<div style="display:flex;justify-content:flex-end;margin-bottom:12px">'+
+    '<button class="btn btn-primary" onclick="loadScreenerRatios()">⟳ Charger les ratios</button></div>'+
+    '<div class="card"><div class="tbl-wrap"><table>'+
+    '<thead><tr>'+
+    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th><th>Cours</th>'+
+    '<th>PER</th><th>Fwd PER</th><th>PEG</th><th>P/OCF</th><th>M. Nette</th><th>CA 1A</th><th>EPS 1A</th><th>D/EBITDA</th>'+
+    '</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+
+  allItems.forEach(function(p){ updateRatioRowById('sc',p.ticker); });
+  setTimeout(loadScreenerRatios, 300);
+}
+
+async function loadScreenerRatios(){
+  var pfPos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p);});
+  var wlOnly=watchlistItems.filter(function(w){return !pfPos.find(function(p){return p.ticker===w.ticker;});});
+  var allItems=pfPos.concat(wlOnly.map(function(w){return {ticker:w.ticker,name:w.name};}));
+  var BATCH=3,DELAY=400;
+  for(var i=0;i<allItems.length;i+=BATCH){
+    var batch=allItems.slice(i,i+BATCH);
+    await Promise.all(batch.map(async function(p){
+      if(!S.fundamentals[p.ticker] && !S.fundamentalsAttempted.has(p.ticker)){
+        S.fundamentalsAttempted.add(p.ticker);
+        try{var r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker)+'&type=fundamentals',{signal:AbortSignal.timeout(10000)});var d=await r.json();if(d&&!d.error)S.fundamentals[p.ticker]=d;}catch(e){}
+      }
+      updateRatioRowById('sc',p.ticker);
+    }));
+    if(i+BATCH<allItems.length) await new Promise(function(r){setTimeout(r,DELAY);});
+  }
+  saveCache();
 }
 
 // ═══ ACCOUNTS PAGE ═══
