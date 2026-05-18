@@ -32,6 +32,42 @@ async function fmpFetch(path) {
   return null;
 }
 
+
+// ═══ CACHE SUPABASE (TTL 24h — cross-browser, cross-device) ═══
+const SUPA_URL = process.env.SUPABASE_URL || 'https://dnmibojfzquicbhtactx.supabase.co';
+const SUPA_SVC = process.env.SUPABASE_SERVICE_KEY; // Service role key (Supabase → Settings → API)
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24h en ms
+
+async function getCache(ticker) {
+  if (!SUPA_SVC) return null;
+  try {
+    const r = await fetch(
+      `${SUPA_URL}/rest/v1/fundamentals_cache?ticker=eq.${encodeURIComponent(ticker)}&select=data,fetched_at&limit=1`,
+      { headers: { apikey: SUPA_SVC, Authorization: `Bearer ${SUPA_SVC}` } }
+    );
+    const rows = r.ok ? await r.json() : [];
+    const row = rows[0];
+    if (!row) return null;
+    if (Date.now() - new Date(row.fetched_at).getTime() < CACHE_TTL) return row.data;
+    return null; // Périmé (> 24h)
+  } catch { return null; }
+}
+
+async function setCache(ticker, data) {
+  if (!SUPA_SVC) return;
+  try {
+    await fetch(`${SUPA_URL}/rest/v1/fundamentals_cache`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPA_SVC,
+        Authorization: `Bearer ${SUPA_SVC}`,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates,return=minimal'
+      },
+      body: JSON.stringify({ ticker, data, fetched_at: new Date().toISOString() })
+    });
+  } catch {}
+}
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET');
@@ -49,69 +85,80 @@ module.exports = async (req, res) => {
     } catch (err) { return res.status(500).json({ error: err.message }); }
   }
 
-  // ── FUNDAMENTALS (Yahoo Finance primary + FMP supplement) ─────────────
-  // Yahoo Finance quoteSummary = gratuit, sans quota, couvre tous les tickers
-  // FMP key-metrics = 1 seul appel pour D/EBITDA et ROIC
+  // ── FUNDAMENTALS (cache Supabase 24h → FMP séquentiel si cache manquant) ──
   if (type === 'fundamentals') {
     try {
+      // 1. Vérifier le cache Supabase (< 24h → réponse instantanée)
+      const cached = await getCache(symbol);
+      if (cached) return res.json({ ...cached, _fromCache: true });
+
+      // 2. Cache manquant ou périmé → FMP séquentiel (pas de rate limit)
+      const sleep = ms => new Promise(r => setTimeout(r, ms));
       const sym = encodeURIComponent(symbol);
-      const YH = { headers: { 'User-Agent': 'Mozilla/5.0' } };
 
-      const [yfResp, fmpM_raw] = await Promise.all([
-        fetch(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=defaultKeyStatistics,financialData,summaryDetail`, YH),
-        fmpFetch(`key-metrics-ttm?symbol=${encodeURIComponent(symbol)}`), // ROIC + D/EBITDA
-      ]);
+      const metricsRaw = await fmpFetch(`key-metrics-ttm?symbol=${sym}`);
+      await sleep(250);
+      const ratiosRaw = await fmpFetch(`ratios-ttm?symbol=${sym}`);
+      await sleep(250);
+      const cfRaw = await fmpFetch(`cash-flow-statement?symbol=${sym}&limit=2`);
+      await sleep(250);
+      const isRaw = await fmpFetch(`income-statement?symbol=${sym}&period=annual&limit=2`);
 
-      const yfData = yfResp.ok ? await yfResp.json() : null;
-      const yf    = yfData?.quoteSummary?.result?.[0];
-      const sd    = yf?.summaryDetail        || {};
-      const fd    = yf?.financialData        || {};
-      const ks    = yf?.defaultKeyStatistics || {};
-      const fmpM  = Array.isArray(fmpM_raw) ? fmpM_raw[0] : fmpM_raw;
+      const m = Array.isArray(metricsRaw) ? metricsRaw[0] : metricsRaw;
+      const r = Array.isArray(ratiosRaw)  ? ratiosRaw[0]  : ratiosRaw;
 
-      if (!yf && !fmpM) return res.status(404).json({ error: `No fundamental data for ${symbol}` });
-
-      const raw = v => (v?.raw ?? null);
-      const pct = v => (v?.raw != null ? v.raw * 100 : null);
-
-      const mktCap = raw(ks.marketCap);
-      const fcf    = raw(fd.freeCashflow);
-      const ocf    = raw(fd.operatingCashflow);
-      const pfcf   = (mktCap && fcf && fcf > 0) ? mktCap / fcf : null;
-      const pocf   = (mktCap && ocf && ocf > 0) ? mktCap / ocf : null;
-
-      return res.json({
-        symbol,
-        // Valorisation
-        trailingPE:      raw(sd.trailingPE),
-        forwardPE:       raw(sd.forwardPE),      // ← Yahoo Finance direct !
-        epsForward:      raw(ks.forwardEps),
-        pegRatio:        raw(ks.pegRatio),
-        pfcf,
-        pocf,
-        // Marges
-        profitMarginPct:    pct(fd.profitMargins),
-        grossMarginPct:     pct(fd.grossMargins),
-        operatingMarginPct: pct(fd.operatingMargins),
-        // Rentabilité
-        returnOnEquity:  pct(fd.returnOnEquity),
-        returnOnAssets:  pct(fd.returnOnAssets),
-        roic:            fmpM?.roicTTM ? fmpM.roicTTM * 100 : null,
-        // Santé
-        netDebtToEBITDA: fmpM?.netDebtToEBITDATTM || null,
-        currentRatio:    raw(fd.currentRatio),
-        // Croissance
-        revenueGrowthYoY: pct(fd.revenueGrowth),
-        epsGrowth1Y:      pct(fd.earningsGrowth),
-        // Cash flow
-        freeCashflow:     fcf,
-        operatingCashFlow: ocf,
-        fcfGrowth:        null,
-        // Market
-        mktCap,
-        currentPriceUSD:  raw(fd.currentPrice),
-        timestamp:        Date.now(),
+      if (!m && !r) return res.status(503).json({
+        error: 'Données FMP indisponibles.', fmpError: true
       });
+
+      let fcfGrowth = null, fcf0 = null, cfo0 = null;
+      if (Array.isArray(cfRaw) && cfRaw.length > 0) {
+        fcf0 = cfRaw[0]?.freeCashFlow || null;
+        cfo0 = cfRaw[0]?.operatingCashFlow || null;
+        if (cfRaw.length >= 2) {
+          const fcf1 = cfRaw[1]?.freeCashFlow || null;
+          if (fcf0 && fcf1 && fcf1 !== 0) fcfGrowth = ((fcf0 - fcf1) / Math.abs(fcf1)) * 100;
+        }
+      }
+
+      let revenueGrowthYoY = null, epsGrowth1Y = null;
+      if (Array.isArray(isRaw) && isRaw.length >= 2) {
+        const [curr, prev] = isRaw;
+        if (curr?.revenue && prev?.revenue && prev.revenue !== 0)
+          revenueGrowthYoY = ((curr.revenue - prev.revenue) / Math.abs(prev.revenue)) * 100;
+        const cEps = curr?.eps ?? curr?.epsBasic ?? curr?.epsDiluted ?? null;
+        const pEps = prev?.eps ?? prev?.epsBasic ?? prev?.epsDiluted ?? null;
+        if (cEps != null && pEps != null && pEps !== 0)
+          epsGrowth1Y = ((cEps - pEps) / Math.abs(pEps)) * 100;
+      }
+
+      const mktCap = m?.marketCapTTM || m?.marketCap || null;
+      const pfcf   = r?.priceToFreeCashFlowsRatioTTM || null;
+      const pocf   = r?.priceToOperatingCashFlowsRatioTTM || m?.pocfRatioTTM ||
+                     (mktCap && cfo0 && cfo0 > 0 ? mktCap / cfo0 : null);
+
+      const result = {
+        symbol,
+        trailingPE:      r?.priceToEarningsRatioTTM          || null,
+        forwardPE:       null, // FMP free tier: non disponible
+        pegRatio:        r?.priceToEarningsGrowthRatioTTM    || null,
+        pfcf, pocf,
+        profitMarginPct: r?.netProfitMarginTTM   ? r.netProfitMarginTTM   * 100 : null,
+        grossMarginPct:  r?.grossProfitMarginTTM ? r.grossProfitMarginTTM * 100 : null,
+        returnOnEquity:  m?.returnOnEquityTTM    ? m.returnOnEquityTTM    * 100 : null,
+        roic:            m?.roicTTM              ? m.roicTTM              * 100 : null,
+        netDebtToEBITDA: m?.netDebtToEBITDATTM  || null,
+        currentRatio:    m?.currentRatioTTM      || null,
+        freeCashflow: fcf0, operatingCashFlow: cfo0, fcfGrowth,
+        revenueGrowthYoY, epsGrowth1Y,
+        mktCap,
+        timestamp: Date.now(),
+      };
+
+      // 3. Stocker en cache Supabase pour les prochaines 24h
+      await setCache(symbol, result);
+
+      return res.json(result);
     } catch (err) { return res.status(500).json({ error: err.message }); }
   }
   // ── PRIX (Yahoo Finance) ──────────────────────────────────────────────
