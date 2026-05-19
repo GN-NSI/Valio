@@ -887,7 +887,8 @@ function renderRatios(){
   renderScreener();
 }
 
-
+var wlSort={col:null,dir:'desc'};
+var scSort={col:null,dir:'desc'};
 
 function sortWL(col){
   if(wlSort.col===col)wlSort.dir=wlSort.dir==='desc'?'asc':'desc';
@@ -1065,15 +1066,18 @@ async function removeWatch(btn){var id=btn.dataset.id||btn;var ticker=btn.datase
 // ═══ SCREENER (Portefeuille + Watchlist combinés) ═══
 async function renderScreener(){
   var pg=document.getElementById('page');
-  // Auto-charger la watchlist si pas encore fait
-  if(!watchlistItems.length){ await loadWatchlist(); }
   pg.innerHTML='<div style="margin-bottom:22px">'+
     '<h2 style="font-size:18px;font-weight:700">Screener</h2>'+
     '<p style="color:var(--muted);font-size:13px;margin-top:3px">Portefeuille + Watchlist — tous tes titres, triables par ratio</p>'+
     '</div><div id="sc-content"><div style="text-align:center;padding:40px"><div class="spinner"></div></div></div>';
 
+  // Charger la watchlist si nécessaire, avec timeout de sécurité
+  if(!watchlistItems.length){
+    try { await Promise.race([loadWatchlist(), new Promise((_,r)=>setTimeout(()=>r(new Error('timeout')),8000))]); }
+    catch(e){ /* continuer même si la watchlist échoue */ }
+  }
+
   var pfPos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p);});
-  if(!watchlistItems.length){ await loadWatchlist(); }
   var wlOnly=watchlistItems.filter(function(w){return !pfPos.find(function(p){return p.ticker===w.ticker;});});
   var allItems=pfPos.concat(wlOnly.map(function(w){return {ticker:w.ticker,name:w.name,_isWatch:true};}));
 
