@@ -55,7 +55,7 @@ nav{flex:1;padding:10px 8px;overflow-y:auto}
 #main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
 #topbar{height:56px;flex-shrink:0;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 28px;gap:12px}
 .topbar-title{font-size:16px;font-weight:700;flex:1}
-#page{flex:1;overflow-y:auto;padding:28px}
+#page,#page-portfolio{flex:1;overflow-y:auto;padding:28px}
 .card{background:var(--card);border:1px solid var(--border);border-radius:13px}
 .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}
 .kpi-card{background:var(--card);border:1px solid var(--border);border-radius:13px;padding:22px}
@@ -174,6 +174,7 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
         <span id="eurusd-rate" style="font-size:12px;color:var(--muted)"></span>
         <button class="btn btn-ghost btn-sm" onclick="refreshData()" style="color:var(--muted)">↻ Actualiser</button>
       </div>
+      <div id="page-portfolio" style="display:none"></div>
       <div id="page"></div>
     </div>
   </div>
@@ -379,7 +380,31 @@ function getToken(){return _sess?.access_token||null;}
 // ═══ REST ═══
 const SU='https://dnmibojfzquicbhtactx.supabase.co',SK='sb_publishable_Wn3itCQXPfm-Onwey7h7Uw_pa2foE-f',API='/api/quote';
 function hdrs(x={}){const h={'apikey':SK,'Content-Type':'application/json',...x};const t=getToken();if(t)h['Authorization']='Bearer '+t;return h;}
-async function rest(path,opts={}){const r=await fetch(SU+path,{...opts,headers:{...hdrs(),...(opts.headers||{})}});if(r.status===204)return null;const d=await r.json();if(!r.ok)throw new Error(d?.message||d?.error_description||d?.error||JSON.stringify(d));return d;}
+async function refreshSession(){
+  const rt=_sess?.refresh_token;
+  if(!rt){saveSess(null);showAuth();return false;}
+  try{
+    const r=await fetch(SU+'/auth/v1/token?grant_type=refresh_token',{method:'POST',headers:{apikey:SK,'Content-Type':'application/json'},body:JSON.stringify({refresh_token:rt})});
+    const d=await r.json();
+    if(d.access_token){saveSess(d);return true;}
+    saveSess(null);showAuth();return false;
+  }catch{saveSess(null);showAuth();return false;}
+}
+async function rest(path,opts={}){
+  const makeReq=()=>fetch(SU+path,{...opts,headers:{...hdrs(),...(opts.headers||{})}});
+  let r=await makeReq();
+  if(r.status===204)return null;
+  let d=await r.json();
+  if(!r.ok){
+    const msg=d?.message||d?.error_description||d?.error||JSON.stringify(d);
+    if((r.status===401||msg.includes('JWT expired'))&&_sess?.refresh_token){
+      const ok=await refreshSession();
+      if(ok){r=await makeReq();if(r.status===204)return null;d=await r.json();if(!r.ok)throw new Error(d?.message||d?.error_description||d?.error||JSON.stringify(d));return d;}
+    }
+    throw new Error(msg);
+  }
+  return d;
+}
 async function authPost(path,body){const r=await fetch(SU+path,{method:'POST',headers:{apikey:SK,'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(d.error||d.error_description)throw new Error(d.error_description||d.error);return d;}
 async function dbGet(t,q=''){return rest('/rest/v1/'+t+(q?'?'+q:''),{headers:{Prefer:'return=representation'}});}
 async function dbPost(t,data){const d=await rest('/rest/v1/'+t,{method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify(data)});return Array.isArray(d)?d[0]:d;}
@@ -388,7 +413,7 @@ async function dbDel(t,q){await rest('/rest/v1/'+t+'?'+q,{method:'DELETE'});}
 async function dbUpsert(t,data,conflict){await rest('/rest/v1/'+t+(conflict?'?on_conflict='+conflict:''),{method:'POST',headers:{Prefer:'resolution=ignore-duplicates,return=representation'},body:JSON.stringify(data)});}
 
 // ═══ STATE ═══
-const S={accounts:[],transactions:[],prices:{},profiles:{},fundamentals:{},fundamentalsAttempted:new Set(),eurUsd:1.08,page:'portfolio',chart:null,enrichedPos:[]};
+const S={accounts:[],transactions:[],prices:{},profiles:{},fundamentals:{},fundamentalsAttempted:new Set(),eurUsd:1.08,page:'portfolio',chart:null,enrichedPos:[],portfolioRendered:false};
 const manualPrices={};
 let chartMode='positions',chartDrill=[];
 let posSort={col:'value',dir:'desc'};
@@ -424,7 +449,7 @@ async function bootstrap(){
   else S.transactions=[];
   try{const r=await fetch(API+'?symbol=EURUSD%3DX',{signal:AbortSignal.timeout(5000)});const d=await r.json();if(d.price){S.eurUsd=d.price;document.getElementById('eurusd-rate').textContent='1 EUR = '+d.price.toFixed(4)+' USD';}}catch{}
 }
-async function refreshData(){showToast('🔄 Actualisation…');S.prices={};S.profiles={};S.fundamentals={};S.enrichedPos=[];await bootstrap();navigate(S.page);}
+async function refreshData(){showToast('🔄 Actualisation…');S.prices={};S.profiles={};S.fundamentals={};S.enrichedPos=[];S.portfolioRendered=false;document.getElementById('page-portfolio').innerHTML='';await bootstrap();navigate(S.page);}
 
 // ═══ AUTH ═══
 let authMode='login';
@@ -441,7 +466,26 @@ function xlErr(m){if(m.includes('Invalid login'))return 'Email ou mot de passe i
 async function logout(){try{await fetch(SU+'/auth/v1/logout',{method:'POST',headers:hdrs()});}catch{}saveSess(null);S.accounts=[];S.transactions=[];S.enrichedPos=[];showAuth();}
 
 // ═══ NAV ═══
-function navigate(page){S.page=page;document.querySelectorAll('.nav-item:not(.disabled)').forEach(e=>e.classList.remove('active'));document.getElementById('nav-'+page)?.classList.add('active');document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes'}[page]||page;if(page==='portfolio')renderPortfolio();else if(page==='accounts')renderAccounts();else if(page==='ratios')renderRatios();else if(page==='watchlist')renderWatchlist();else if(page==='screener')renderScreener();}
+function navigate(page){
+  S.page=page;
+  document.querySelectorAll('.nav-item:not(.disabled)').forEach(e=>e.classList.remove('active'));
+  document.getElementById('nav-'+page)?.classList.add('active');
+  document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes'}[page]||page;
+  const pfDiv=document.getElementById('page-portfolio');
+  const pgDiv=document.getElementById('page');
+  if(page==='portfolio'){
+    pgDiv.style.display='none';
+    pfDiv.style.display='';
+    if(!S.portfolioRendered){S.portfolioRendered=true;renderPortfolio();}
+  } else {
+    pfDiv.style.display='none';
+    pgDiv.style.display='';
+    if(page==='accounts')renderAccounts();
+    else if(page==='ratios')renderRatios();
+    else if(page==='watchlist')renderWatchlist();
+    else if(page==='screener')renderScreener();
+  }
+}
 
 // ═══ POSITION MATH (CMP) ═══
 function computePositions(){
@@ -481,7 +525,7 @@ function thCls(col){return`class="${posSort.col===col?'sort-active':''}" onclick
 // ═══ PORTFOLIO PAGE ═══
 async function renderPortfolio(){
   chartMode='positions'; chartDrill=[]; // Toujours repartir en mode Positions
-  const pg=document.getElementById('page');
+  const pg=document.getElementById('page-portfolio');
   if(!S.accounts.length){pg.innerHTML=`<div class="empty-state"><div class="icon">💼</div><h3>Aucun compte configuré</h3><p>Crée tes comptes pour commencer</p><button class="btn btn-primary" style="width:auto" onclick="navigate('accounts')">Gérer mes comptes →</button></div>`;return;}
   if(!S.transactions.length){pg.innerHTML=`<div class="empty-state"><div class="icon">📋</div><h3>Aucune transaction</h3><p>Ajoute tes achats pour voir ton portefeuille en temps réel</p><button class="btn btn-primary" style="width:auto" onclick="navigate('accounts')">Ajouter des transactions →</button></div>`;return;}
   const pos=computePositions();
