@@ -881,9 +881,7 @@ async function loadRatios(){
 }
 
 function renderRatios(){
-  S.page='screener';
-  document.querySelectorAll('.nav-item').forEach(e=>e.classList.remove('active'));
-  document.getElementById('nav-ratios')?.classList.add('active');
+  // Affiche le screener dans #page (déjà montré par navigate)
   renderScreener();
 }
 
@@ -1139,6 +1137,9 @@ function openCompanyDetail(ticker, name) {
   _prevPage = S.page || 'ratios';
   S.page = 'company';
   document.querySelectorAll('.nav-item').forEach(function(el){ el.classList.remove('active'); });
+  // Toujours afficher #page (peut être caché si on vient du portfolio)
+  document.getElementById('page-portfolio').style.display = 'none';
+  document.getElementById('page').style.display = '';
   renderCompanyDetail(ticker, name || ticker);
 }
 
@@ -1453,15 +1454,22 @@ async function deleteTx(id){if(!confirm('Supprimer cette transaction ?'))return;
 // Prix manuel EN EUROS (pour les titres sur Trade Republic)
 function setManualPrice(ticker){
   const cur=manualPrices[ticker];
-  const prev=cur?`${fN(cur.price)} €`:'';
+  const prev=cur?fN(cur.price):'';
   const val=prompt(`Prix manuel pour ${ticker} en EUR :\n(ex: 1850,50 pour Samsung)\nLaisse vide pour annuler`,prev);
   if(val===null||val.trim()==='')return;
-  const p=parseFloat(val.replace(',','.'));
-  if(isNaN(p)||p<=0)return showToast('❌ Prix invalide');
-  // Stocké en EUR — pas de conversion nécessaire pour les titres TR
+  // Parse nombres français : supprimer espaces, €, puis virgule → point
+  const cleaned=val.replace(/[\s\u00a0]/g,'').replace('€','').replace(',','.');
+  const p=parseFloat(cleaned);
+  if(isNaN(p)||p<=0)return showToast('❌ Prix invalide (ex: 1850,50)');
   manualPrices[ticker]={price:p,currency:'EUR',changePct:0,_t:Date.now(),manual:true};
   showToast('✅ Prix enregistré pour '+ticker+' : '+fN(p)+' €');
-  if(S.page==='portfolio')navigate('portfolio');
+  // Mettre à jour l'UI sans recharger toute la page
+  S.enrichedPos=[];
+  if(S.page==='portfolio'){
+    const pos=computePositions();
+    if(document.getElementById('pos-body')) renderPosBody(sortPos(pos));
+    renderDonut();
+  }
 }
 function acctColor(n){const s=(n||'').toLowerCase();if(s.includes('ibkr')||s.includes('interactive'))return{bg:'rgba(239,68,68,.18)',color:'#f87171'};if(s.includes('bourso'))return{bg:'rgba(91,126,245,.2)',color:'#7b9ef7'};if(s.includes('trade')||s.includes('republic'))return{bg:'rgba(220,220,220,.1)',color:'#d0d0e0'};return{bg:'rgba(91,126,245,.12)',color:'#5b7ef5'};}
 function acctTag(n){const c=acctColor(n);const w=n.split(' ');const s=w.length<=1?n:w[0]+' '+w.slice(1).map(x=>x[0]).join('');return`<span class="acct-tag" style="background:${c.bg};color:${c.color}">${s}</span>`;}
