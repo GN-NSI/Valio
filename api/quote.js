@@ -153,10 +153,14 @@ module.exports = async (req, res) => {
     } catch (e) { return res.status(500).json({ error: e.message }); }
   }
 
-  // ── CHART (données brutes 1 an quotidien pour fiche société) ──────────────
+  // ── CHART (données brutes pour fiche société) ──────────────────────────
   if (type === 'chart') {
     try {
-      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?range=1y&interval=1d&includePrePost=false`, { headers: { 'User-Agent': UA } });
+      const rangeParam = req.query.range || '5y';
+      // Map range to appropriate interval
+      const intervalMap = { '1mo': '1d', '6mo': '1d', '1y': '1d', '3y': '1wk', '5y': '1wk', '10y': '1mo', 'max': '1mo' };
+      const interval = intervalMap[rangeParam] || '1wk';
+      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?range=${rangeParam}&interval=${interval}&includePrePost=false`, { headers: { 'User-Agent': UA } });
       const d = r.ok ? await r.json() : null;
       const chart = d?.chart?.result?.[0];
       if (!chart) return res.status(404).json({ error: 'No chart data' });
