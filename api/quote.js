@@ -78,6 +78,7 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   const { symbol, type } = req.query;
   if (!symbol) return res.status(400).json({ error: 'symbol requis' });
+  const sym = encodeURIComponent(symbol); // Disponible pour tous les endpoints
 
   // ── PROFILE (secteur / pays pour les camemberts) ──────────────────────
   if (type === 'profile') {
@@ -116,7 +117,7 @@ module.exports = async (req, res) => {
       const raw = v => (v?.raw ?? null);
       const pct = v => (v?.raw != null ? v.raw * 100 : null);
 
-      const mktCap    = raw(ks.marketCap);
+      const mktCap    = raw(ks.marketCap) || raw(sd.marketCap); // fallback summaryDetail
       const fcf       = raw(fd.freeCashflow);
       const ocf       = raw(fd.operatingCashflow);
       const totalDebt = raw(fd.totalDebt);
@@ -167,7 +168,6 @@ module.exports = async (req, res) => {
   }
 
   // ── PRIX (Yahoo Finance chart v8) ─────────────────────────────────────
-  const sym  = encodeURIComponent(symbol);
   const BASE = 'https://query1.finance.yahoo.com/v8/finance/chart/';
   const H    = { headers: { 'User-Agent': UA } };
   try {
