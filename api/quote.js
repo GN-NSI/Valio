@@ -1,10 +1,9 @@
-// ═══ VALIO — quote.js ═══
+// ═══ VALIO — quote.js (Version Optimisée Ratios Historiques) ═══
 // Source unique : Yahoo Finance (sans quota, sans clé API)
 // Cache : Supabase 24h pour les fondamentaux
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
 
-// ── Yahoo Finance crumb (caché dans l'instance Vercel) ──────────────────
 let _crumb = null;
 let _cookies = null;
 
@@ -38,7 +37,6 @@ async function yfSummary(symbol, modules) {
   } catch { return null; }
 }
 
-// ── Cache Supabase 24h ──────────────────────────────────────────────────
 const SUPA_URL = process.env.SUPABASE_URL || 'https://dnmibojfzquicbhtactx.supabase.co';
 const SUPA_SVC = process.env.SUPABASE_SERVICE_KEY;
 const CACHE_TTL = 24 * 60 * 60 * 1000;
@@ -73,14 +71,12 @@ async function setCache(ticker, data) {
   } catch {}
 }
 
-// ───────────────────────────────────────────────────────────────────────
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   const { symbol, type } = req.query;
   if (!symbol) return res.status(400).json({ error: 'symbol requis' });
-  const sym = encodeURIComponent(symbol); // Disponible pour tous les endpoints
+  const sym = encodeURIComponent(symbol);
 
-  // ── PROFILE (secteur / pays pour les camemberts) ──────────────────────
   if (type === 'profile') {
     try {
       const yf = await yfSummary(symbol, 'assetProfile,summaryDetail');
@@ -97,27 +93,29 @@ module.exports = async (req, res) => {
     } catch (e) { return res.status(500).json({ error: e.message }); }
   }
 
-  // ── FONDAMENTAUX (100% Yahoo Finance, cache Supabase 24h) ─────────────
   if (type === 'fundamentals') {
     try {
-      // Cache Supabase → réponse instantanée si données < 24h
       const cached = await getCache(symbol);
-      // Invalider si données vieilles (champs Yahoo Finance manquants = ancien format FMP)
-      const cacheValid = cached && cached.grossMarginPct !== undefined;
+      // On force le rafraîchissement si le cache n'a pas notre nouveau champ "roic"
+      const cacheValid = cached && cached.roic !== undefined && cached.roic !== null;
       if (cacheValid) return res.json({ ...cached, _fromCache: true });
 
-      // Sinon : Yahoo Finance quoteSummary
-      const yf = await yfSummary(symbol, 'defaultKeyStatistics,financialData,summaryDetail');
+      // Ajout des états financiers historiques pour calculer le ROIC et les croissances réelles
+      const yf = await yfSummary(symbol, 'defaultKeyStatistics,financialData,summaryDetail,incomeStatementHistory,balanceSheetHistory,cashflowStatementHistory');
       if (!yf) return res.status(404).json({ error: `Pas de données pour ${symbol}` });
 
       const sd = yf.summaryDetail        || {};
       const fd = yf.financialData        || {};
       const ks = yf.defaultKeyStatistics || {};
+      
+      const incHist = yf.incomeStatementHistory?.incomeStatementHistory || [];
+      const balHist = yf.balanceSheetHistory?.balanceSheetHistory || [];
+      const cfHist  = yf.cashflowStatementHistory?.cashflowStatementHistory || [];
 
       const raw = v => (v?.raw ?? null);
       const pct = v => (v?.raw != null ? v.raw * 100 : null);
 
-      const mktCap    = raw(ks.marketCap) || raw(sd.marketCap); // fallback summaryDetail
+      const mktCap    = raw(ks.marketCap) || raw(sd.marketCap);
       const fcf       = raw(fd.freeCashflow);
       const ocf       = raw(fd.operatingCashflow);
       const totalDebt = raw(fd.totalDebt);
@@ -128,6 +126,43 @@ module.exports = async (req, res) => {
       const pocf = (mktCap && ocf && ocf > 0) ? mktCap / ocf : null;
       const netDebt = (totalDebt != null && totalCash != null) ? totalDebt - totalCash : null;
       const netDebtToEBITDA = (netDebt != null && ebitda && ebitda > 0) ? netDebt / ebitda : null;
+
+      // ── CALCUL DU ROIC ALGORITHMIQUE ──
+      let calculatedRoic = null;
+      if (incHist.length > 0 && balHist.length > 0) {
+        const currentInc = incHist[0];
+        const currentBal = balHist[0];
+        
+        const ebit = raw(currentInc.operatingIncome); 
+        const taxExpense = raw(currentInc.taxProvision) || 0;
+        const ebt = raw(currentInc.incomeBeforeTax) || 1; 
+        
+        // Calcul du taux effectif d'imposition
+        const taxRate = ebt > 0 ? Math.max(0, Math.min(0.5, taxExpense / ebt)) : 0.25;
+        const nopat = ebit !== null ? ebit * (1 - taxRate) : null;
+        
+        // Capitaux investis = Capitaux Propres + Dette Totale - Cash
+        const equity = raw(currentBal.totalStockholderEquity);
+        const shortDebt = raw(currentBal.shortLongTermDebt) || 0;
+        const longDebt = raw(currentBal.longTermDebt) || 0;
+        const cash = raw(currentBal.cash) || 0;
+        
+        const investedCapital = (equity !== null) ? (equity + shortDebt + longDebt - cash) : null;
+        
+        if (nopat !== null && investedCapital && investedCapital > 0) {
+          calculatedRoic = (nopat / investedCapital) * 100;
+        }
+      }
+
+      // ── CALCUL DU FCF GROWTH HISTORIQUE (1 AN) ──
+      let calculatedFcfGrowth = null;
+      if (cfHist.length >= 2) {
+        const fcfRecent = raw(cfHist[0].freeCashflow) || (raw(cfHist[0].totalCashFromOperatingActivities) - (Math.abs(raw(cfHist[0].capitalExpenditures)) || 0));
+        const fcfAncien = raw(cfHist[1].freeCashflow) || (raw(cfHist[1].totalCashFromOperatingActivities) - (Math.abs(raw(cfHist[1].capitalExpenditures)) || 0));
+        if (fcfAncien && fcfAncien > 0 && fcfRecent !== null) {
+          calculatedFcfGrowth = ((fcfRecent - fcfAncien) / fcfAncien) * 100;
+        }
+      }
 
       const result = {
         symbol,
@@ -144,20 +179,21 @@ module.exports = async (req, res) => {
         revenueGrowthYoY:   pct(fd.revenueGrowth),
         epsGrowth1Y:        pct(fd.earningsGrowth),
         freeCashflow: fcf, operatingCashFlow: ocf,
-        mktCap, fcfGrowth: null, roic: null,
+        mktCap, 
+        fcfGrowth: calculatedFcfGrowth, 
+        roic: calculatedRoic,
         timestamp: Date.now(),
       };
 
-      await setCache(symbol, result); // Stocker 24h
+      await setCache(symbol, result);
       return res.json(result);
     } catch (e) { return res.status(500).json({ error: e.message }); }
   }
 
-  // ── CHART (données brutes pour fiche société, range paramétrable) ────────
   if (type === 'chart') {
     try {
       const rangeParam = req.query.range || '5y';
-      const intervalMap = { '1mo':'1d','6mo':'1d','1y':'1d','3y':'1wk','5y':'1wk','10y':'1mo','max':'1mo' };
+      const intervalMap = { '1mo': '1d', '6mo': '1d', '1y': '1d', '3y': '1wk', '5y': '1wk', '10y': '1mo', 'max': '1mo' };
       const interval = intervalMap[rangeParam] || '1wk';
       const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?range=${rangeParam}&interval=${interval}&includePrePost=false`, { headers: { 'User-Agent': UA } });
       const d = r.ok ? await r.json() : null;
@@ -170,7 +206,6 @@ module.exports = async (req, res) => {
     } catch(e) { return res.status(500).json({ error: e.message }); }
   }
 
-  // ── PRIX (Yahoo Finance chart v8) ─────────────────────────────────────
   const BASE = 'https://query1.finance.yahoo.com/v8/finance/chart/';
   const H    = { headers: { 'User-Agent': UA } };
   try {
@@ -202,7 +237,6 @@ module.exports = async (req, res) => {
       if (pts.length >= 2)  change1M = ((now - pts[pts.length-2].c) / pts[pts.length-2].c) * 100;
       if (pts.length >= 12) change1Y = ((now - pts[pts.length-12].c) / pts[pts.length-12].c) * 100;
     }
-    // Données brutes pour le graphique (12 derniers mois mensuels)
     const chartPts = pts.slice(-13).map(p => ({ c: Math.round(p.c * 100) / 100, t: p.t }));
     return res.json({ symbol, price, prevClose: prev, changeAbs, changePct, change1M, changeYTD, change1Y, currency: meta.currency||'USD', exchange: meta.exchangeName, chartData: chartPts, timestamp: Date.now() });
   } catch (e) { return res.status(500).json({ error: e.message }); }
