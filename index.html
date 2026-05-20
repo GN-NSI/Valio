@@ -1,13 +1,10 @@
-const fs = require('fs');
-const path = require('path');
-
-const content = `<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Valio</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght=300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js">
 // Délégation d'événement pour ouvrir la fiche société
 document.addEventListener('click', function(e){
@@ -160,6 +157,7 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
         <div class="nav-item" id="nav-accounts" onclick="navigate('accounts')"><span class="nav-icon">💳</span><span>Comptes</span></div>
         <div class="nav-section">Analyse</div>
         <div class="nav-item" id="nav-ratios" onclick="navigate('ratios')"><span class="nav-icon">📈</span><span>Ratios</span></div>
+        <!-- Screener retiré: accès via clic sur entreprise dans Ratios -->
         <div class="nav-item" id="nav-watchlist" onclick="navigate('watchlist')"><span class="nav-icon">⭐</span><span>Watchlist</span></div>
         <div class="nav-item disabled"><span class="nav-icon">📓</span><span>Journal</span><span class="nav-soon">BIENTÔT</span></div>
         <div class="nav-section">Social</div>
@@ -536,7 +534,7 @@ async function renderPortfolio(){
   }).join('');
   pg.innerHTML=`
     <div class="kpi-grid" id="kpi-grid">
-      \${['Valeur totale','Montant investi','Plus-value latente','Performance'].map(l=>`<div class="kpi-card"><div class="kpi-label">\${l}</div><div class="shimmer" style="width:130px;height:28px;margin-bottom:10px"></div><div class="shimmer" style="width:90px;height:16px"></div></div>`).join('')}
+      ${['Valeur totale','Montant investi','Plus-value latente','Performance'].map(l=>`<div class="kpi-card"><div class="kpi-label">${l}</div><div class="shimmer" style="width:130px;height:28px;margin-bottom:10px"></div><div class="shimmer" style="width:90px;height:16px"></div></div>`).join('')}
     </div>
     <div class="pf-row">
       <div class="chart-card">
@@ -562,7 +560,7 @@ async function renderPortfolio(){
         <div class="chart-legend" id="chart-legend"></div>
       </div>
       <div class="right-panel">
-        <div class="panel-card"><div class="panel-title">Mes comptes</div>\${acctsMini}</div>
+        <div class="panel-card"><div class="panel-title">Mes comptes</div>${acctsMini}</div>
         <div class="panel-card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
             <div class="panel-title" style="margin-bottom:0">Ratios principaux</div>
@@ -574,21 +572,21 @@ async function renderPortfolio(){
     </div>
     <div class="card">
       <div style="padding:20px 20px 0"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-        <h3 style="font-size:15px;font-weight:600" id="pos-title">Positions · \${pos.length} titre\${pos.length>1?'s':''}</h3>
+        <h3 style="font-size:15px;font-weight:600" id="pos-title">Positions · ${pos.length} titre${pos.length>1?'s':''}</h3>
         <span style="font-size:12px;color:var(--muted)">PRU dans devise d'achat · méthode CMP · clic colonne pour trier</span>
       </div></div>
       <div class="tbl-wrap"><table>
         <thead><tr>
           <th style="text-align:left;padding-left:20px;min-width:180px">Titre</th>
-          <th \${thCls('qty')} style="text-align:right">Qté \${sortIcon('qty')}</th>
-          <th \${thCls('pru')} style="text-align:right">PRU \${sortIcon('pru')}</th>
+          <th ${thCls('qty')} style="text-align:right">Qté ${sortIcon('qty')}</th>
+          <th ${thCls('pru')} style="text-align:right">PRU ${sortIcon('pru')}</th>
           <th style="text-align:right">Cours</th>
-          <th \${thCls('value')} style="text-align:right">Valeur (€) \${sortIcon('value')}</th>
-          <th \${thCls('pnl')} style="text-align:right">P&amp;L (€) \${sortIcon('pnl')}</th>
-          <th \${thCls('pnlpct')} style="text-align:right">P&amp;L % \${sortIcon('pnlpct')}</th>
+          <th ${thCls('value')} style="text-align:right">Valeur (€) ${sortIcon('value')}</th>
+          <th ${thCls('pnl')} style="text-align:right">P&amp;L (€) ${sortIcon('pnl')}</th>
+          <th ${thCls('pnlpct')} style="text-align:right">P&amp;L % ${sortIcon('pnlpct')}</th>
           <th style="text-align:right">Comptes</th>
         </tr></thead>
-        <tbody id="pos-body">\${posTblRows(sortPos(pos))}</tbody>
+        <tbody id="pos-body">${posTblRows(sortPos(pos))}</tbody>
       </table></div>
     </div>`;
   await fetchPrices(pos);
@@ -606,26 +604,26 @@ function posTblRows(pos){
     const chg=d?.changePct??0;
 
     const priceHTML=priceLoaded
-      ?\`<span class="mono">\${d.manual?'✎ ':''}\`+(usd?'$':'€')+\`\${fN(d.price)}</span>\`+(!d.manual?\`<div style="font-size:11px;color:\${chg>=0?'var(--green)':'var(--red)'};margin-top:2px">\${chg>=0?'+':''}\${chg.toFixed(2)}%</div>\`:'')
-      :noPrice?\`<button class="manual-btn" onclick="setManualPrice('\${p.ticker}')">Saisir prix</button>\`
-      :\`<div class="shimmer" style="width:55px;height:14px"></div>\`;
+      ?`<span class="mono">${d.manual?'✎ ':''}`+(usd?'$':'€')+`${fN(d.price)}</span>`+(!d.manual?`<div style="font-size:11px;color:${chg>=0?'var(--green)':'var(--red)'};margin-top:2px">${chg>=0?'+':''}${chg.toFixed(2)}%</div>`:'')
+      :noPrice?`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix</button>`
+      :`<div class="shimmer" style="width:55px;height:14px"></div>`;
 
-    const valHTML=p.valueEur!=null?\`<span class="mono">\${fE(p.valueEur)}</span>\`:'—';
-    const pnlHTML=p.pnlEur!=null?\`<span class="mono \${p.pnlEur>=0?'c-green':'c-red'}">\${p.pnlEur>=0?'+':''}\${fE(p.pnlEur)}</span>\`:'—';
-    const pctHTML=p.pnlPct!=null?\`<span class="mono \${p.pnlPct>=0?'c-green':'c-red'}">\${p.pnlPct>=0?'+':''}\${p.pnlPct.toFixed(2)}%</span>\`:'—';
+    const valHTML=p.valueEur!=null?`<span class="mono">${fE(p.valueEur)}</span>`:'—';
+    const pnlHTML=p.pnlEur!=null?`<span class="mono ${p.pnlEur>=0?'c-green':'c-red'}">${p.pnlEur>=0?'+':''}${fE(p.pnlEur)}</span>`:'—';
+    const pctHTML=p.pnlPct!=null?`<span class="mono ${p.pnlPct>=0?'c-green':'c-red'}">${p.pnlPct>=0?'+':''}${p.pnlPct.toFixed(2)}%</span>`:'—';
 
-    return\`<tr>
+    return`<tr>
       <td style="text-align:left;padding-left:20px"><div class="ticker-cell">
-        <div class="ticker-logo"><img src="https://assets.parqet.com/logos/symbol/\${p.ticker}?format=png" onload="this.style.display='block'" onerror="this.parentNode.innerHTML='<span>\${p.ticker.slice(0,3)}</span>'" style="display:none"></div>
-        <div><div class="ticker-name">\${p.name}</div><div class="ticker-sym">\${p.ticker}</div></div></div></td>
-      <td class="mono">\${fQ(p.quantity)}</td>
-      <td class="mono">\${fN(p.pruDisplay)} \${cS(p.pruCurrency)}</td>
-      <td id="px-\${p.ticker}">\${priceHTML}</td>
-      <td class="mono" id="vl-\${p.ticker}">\${valHTML}</td>
-      <td id="pl-\${p.ticker}">\${pnlHTML}</td>
-      <td id="pp-\${p.ticker}">\${pctHTML}</td>
-      <td>\${p.accounts.map(a=>acctTag(a)).join('')}</td>
-    </tr>\`;
+        <div class="ticker-logo"><img src="https://assets.parqet.com/logos/symbol/${p.ticker}?format=png" onload="this.style.display='block'" onerror="this.parentNode.innerHTML='<span>${p.ticker.slice(0,3)}</span>'" style="display:none"></div>
+        <div><div class="ticker-name">${p.name}</div><div class="ticker-sym">${p.ticker}</div></div></div></td>
+      <td class="mono">${fQ(p.quantity)}</td>
+      <td class="mono">${fN(p.pruDisplay)} ${cS(p.pruCurrency)}</td>
+      <td id="px-${p.ticker}">${priceHTML}</td>
+      <td class="mono" id="vl-${p.ticker}">${valHTML}</td>
+      <td id="pl-${p.ticker}">${pnlHTML}</td>
+      <td id="pp-${p.ticker}">${pctHTML}</td>
+      <td>${p.accounts.map(a=>acctTag(a)).join('')}</td>
+    </tr>`;
   }).join('');
 }
 
@@ -642,18 +640,18 @@ async function fetchOneTicker(p){
       finally{clearTimeout(tid);}
       d._t=Date.now();S.prices[p.ticker]=d;
     }
-    if(!d?.price){if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=\`<button class="manual-btn" onclick="setManualPrice('\${p.ticker}')">Saisir prix ✎</button>\`;return;}
+    if(!d?.price){if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix ✎</button>`;return;}
     const usd=(d.currency||'USD')==='USD';const pe=usd?d.price/S.eurUsd:d.price;
     const ve=pe*p.quantity,pnl=ve-p.totalCostEur,pct=p.totalCostEur>0?(pnl/p.totalCostEur)*100:0,chg=d.changePct??0;
     p.priceEur=pe;p.valueEur=ve;p.pnlEur=pnl;p.pnlPct=pct;
     // Mise à jour directe des cellules (pas de re-render)
-    const showChg=Math.abs(chg)>=0.01;if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=\`<span class="mono">\`+(usd?'$':'€')+\`\${fN(d.price)}</span>\`+(showChg?\`<div style="font-size:11px;color:\${chg>=0?'var(--green)':'var(--red)'};margin-top:2px">\${chg>=0?'+':''}\${chg.toFixed(2)}%</div>\`:\`<div style="font-size:11px;color:var(--muted2);margin-top:2px">marché fermé</div>\`);
-    if($('vl-'+p.ticker))$('vl-'+p.ticker).innerHTML=\`<span class="mono">\${fE(ve)}</span>\`;
-    if($('pl-'+p.ticker))$('pl-'+p.ticker).innerHTML=\`<span class="mono \${pnl>=0?'c-green':'c-red' excavation}">\${pnl>=0?'+':''}\${fE(pnl)}</span>\`;
-    if($('pp-'+p.ticker))$('pp-'+p.ticker).innerHTML=\`<span class="mono \${pct>=0?'c-green':'c-red'}">\ push(\${pct>=0?'+':''}\${pct.toFixed(2)}%)</span>\`;
+    const showChg=Math.abs(chg)>=0.01;if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<span class="mono">`+(usd?'$':'€')+`${fN(d.price)}</span>`+(showChg?`<div style="font-size:11px;color:${chg>=0?'var(--green)':'var(--red)'};margin-top:2px">${chg>=0?'+':''}${chg.toFixed(2)}%</div>`:`<div style="font-size:11px;color:var(--muted2);margin-top:2px">marché fermé</div>`);
+    if($('vl-'+p.ticker))$('vl-'+p.ticker).innerHTML=`<span class="mono">${fE(ve)}</span>`;
+    if($('pl-'+p.ticker))$('pl-'+p.ticker).innerHTML=`<span class="mono ${pnl>=0?'c-green':'c-red'}">${pnl>=0?'+':''}${fE(pnl)}</span>`;
+    if($('pp-'+p.ticker))$('pp-'+p.ticker).innerHTML=`<span class="mono ${pct>=0?'c-green':'c-red'}">${pct>=0?'+':''}${pct.toFixed(2)}%</span>`;
   }catch(err){
     if(err?.name!=='AbortError'&&document.getElementById('px-'+p.ticker))
-      document.getElementById('px-'+p.ticker).innerHTML=\`<button class="manual-btn" onclick="setManualPrice('\${p.ticker}')">Saisir prix ✎</button>\`;
+      document.getElementById('px-'+p.ticker).innerHTML=`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix ✎</button>`;
   }
 }
 
@@ -664,6 +662,9 @@ async function fetchPrices(pos){
     updateKPIs(pos);
     if(i+BATCH<pos.length)await new Promise(r=>setTimeout(r,DELAY));
   }
+  // NE PAS appeler renderPosBody ici.
+  // fetchOneTicker met à jour les cellules directement dans le DOM — un re-render les écraserait.
+  // Le tri (clickSort) re-render correctement via posTblRows smart.
   S.enrichedPos=[...pos];
   updateKPIs(pos);
   renderDonut();
@@ -673,11 +674,11 @@ function updateKPIs(pos){
   const ld=pos.filter(p=>p.valueEur!=null);const tv=ld.reduce((s,p)=>s+p.valueEur,0),tc=pos.reduce((s,p)=>s+p.totalCostEur,0),pnl=tv-tc,pct=tc>0?(pnl/tc)*100:0;const sg=v=>v>=0?'+':'';
   const el=document.getElementById('kpi-grid');if(!el)return;
   el.innerHTML=[
-    {l:'Valeur totale',v:fE(tv),s:\`sur \${fE(tc)} investis\`},
-    {l:'Montant investi',v:fE(tc),s:\`\${pos.length} position\${pos.length>1?'s':''}\`},
-    {l:'Plus-value latente',v:\`<span class="\${pnl>=0?'c-green':'c-red'}">\${sg(pnl)}\${fE(pnl)}</span>\`,s:\`<span class="badge \${pnl>=0?'badge-green':'badge-red'}">\${sg(pct)}\${pct.toFixed(2)}%</span>\`},
-    {l:'Performance',v:\`<span class="\${pct>=0?'c-green':'c-red'}" style="font-size:28px">\${sg(pct)}\${pct.toFixed(2)}%</span>\`,s:ld.length<pos.length?\`<span style="color:var(--yellow)">⏳ \${pos.length-ld.length} prix en cours…</span>\`:''}
-  ].map(k=>`<div class="kpi-card"><div class="kpi-label">\${k.l}</div><div class="kpi-value">\${k.v}</div><div class="kpi-sub">\${k.s}</div></div>`).join('');
+    {l:'Valeur totale',v:fE(tv),s:`sur ${fE(tc)} investis`},
+    {l:'Montant investi',v:fE(tc),s:`${pos.length} position${pos.length>1?'s':''}`},
+    {l:'Plus-value latente',v:`<span class="${pnl>=0?'c-green':'c-red'}">${sg(pnl)}${fE(pnl)}</span>`,s:`<span class="badge ${pnl>=0?'badge-green':'badge-red'}">${sg(pct)}${pct.toFixed(2)}%</span>`},
+    {l:'Performance',v:`<span class="${pct>=0?'c-green':'c-red'}" style="font-size:28px">${sg(pct)}${pct.toFixed(2)}%</span>`,s:ld.length<pos.length?`<span style="color:var(--yellow)">⏳ ${pos.length-ld.length} prix en cours…</span>`:'vs prix de revient moyen'}
+  ].map(k=>`<div class="kpi-card"><div class="kpi-label">${k.l}</div><div class="kpi-value">${k.v}</div><div class="kpi-sub">${k.s}</div></div>`).join('');
 }
 
 // ═══ CHART ENGINE ═══
@@ -721,12 +722,14 @@ function buildChartData(){
     const getSubSect=ep=>ep._isEtfSlice?(ep.name+' (expo.)'):(TICKER_SUBSECTOR[ep.ticker]||ep.name);
     const getSect=ep=>ep._etfKey||(getProfile(ep.ticker).sector||'Non défini');
     if(drill.length===0){
+      // Niveau 1 : secteurs (ETFs ventilés)
       const exp=explodeForMode(pos,'secteur');
       const m={};exp.forEach(ep=>{const k=getSect(ep);m[k]=(m[k]||0)+(ep.valueEur||0);});
       const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
       return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((_,i)=>PALETTE[i%PALETTE.length]),clickable:true};
     }
     if(drill.length===1){
+      // Niveau 2 : sous-secteurs dans le secteur sélectionné
       const sel=drill[0];
       const exp=explodeForMode(pos,'secteur');
       const filt=exp.filter(ep=>getSect(ep)===sel);
@@ -734,6 +737,7 @@ function buildChartData(){
       const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
       return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((_,i)=>PALETTE[i%PALETTE.length]),clickable:true};
     }
+    // Niveau 3 : titres dans le sous-secteur sélectionné
     const [selSect,selSub]=drill;
     const exp=explodeForMode(pos,'secteur');
     const filt=exp.filter(ep=>getSect(ep)===selSect&&getSubSect(ep)===selSub);
@@ -792,7 +796,7 @@ function renderDonut(){
   S.chart=new Chart(cv,{type:'doughnut',
     data:{labels,datasets:[{data:values,backgroundColor:colors,borderColor:'rgba(0,0,0,.12)',borderWidth:1,hoverOffset:8}]},
     options:{cutout:'68%',onClick:(_,els)=>{if(els.length)handleDrill(labels[els[0].index]);},
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const pct=((ctx.raw/total)*100).toFixed(1);return ctx.label+': '+fN(ctx.raw)+'\\u00a0€ ('+pct+'%)';},title:ctx=>ctx[0]?.label||''}}},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const pct=((ctx.raw/total)*100).toFixed(1);return ctx.label+': '+fN(ctx.raw)+'\u00a0€ ('+pct+'%)';},title:ctx=>ctx[0]?.label||''}}},
     }});
   cv.style.cursor = clickable ? 'pointer' : 'default';
   renderLegend();
@@ -806,23 +810,23 @@ function renderLegend(){
   el.innerHTML=labels.map((l,i)=>{
     const pct=((values[i]/total)*100).toFixed(1);
     const cls=clickable?'legend-clickable':'';
-    const click=clickable?\`onclick="handleDrill('\${l.replace(/'/g,"\\\\'")}')"\` : '';
-    return\`<div class="\${cls}" \${click} style="display:flex;align-items:center;gap:6px;padding:2px 4px">
-      <div style="width:9px;height:9px;border-radius:50%;background:\${colors[i]};flex-shrink:0"></div>
-      <span style="font-size:12px;white-space:nowrap">\${l}</span>
-      <span style="font-size:11px;color:var(--muted)">\text \${pct}%</span>
-    </div>\`;
+    const click=clickable?`onclick="handleDrill('${l.replace(/'/g,"\\'")}')"` :'';
+    return`<div class="${cls}" ${click} style="display:flex;align-items:center;gap:6px;padding:2px 4px">
+      <div style="width:9px;height:9px;border-radius:50%;background:${colors[i]};flex-shrink:0"></div>
+      <span style="font-size:12px;white-space:nowrap">${l}</span>
+      <span style="font-size:11px;color:var(--muted)">${pct}%</span>
+    </div>`;
   }).join('');
 }
 
 function renderBreadcrumb(){
   const el=document.getElementById('chart-bc');if(!el)return;
   if(!chartDrill.length){el.innerHTML='';return;}
-  let html=\`<span class="bc-link" onclick="chartDrill=[];renderDonut()">Tout</span>\`;
+  let html=`<span class="bc-link" onclick="chartDrill=[];renderDonut()">Tout</span>`;
   chartDrill.forEach((d,i)=>{
-    html+=\`<span class="bc-sep"> › </span>\`;
-    if(i<chartDrill.length-1)html+=\`<span class="bc-link" onclick="chartDrill=chartDrill.slice(0,\${i+1});renderDonut()">\${d}</span>\`;
-    else html+=\`<span>\${d}</span>\`;
+    html+=`<span class="bc-sep"> › </span>`;
+    if(i<chartDrill.length-1)html+=`<span class="bc-link" onclick="chartDrill=chartDrill.slice(0,${i+1});renderDonut()">${d}</span>`;
+    else html+=`<span>${d}</span>`;
   });
   el.innerHTML=html;
 }
@@ -831,6 +835,7 @@ function handleDrill(label){
   const {clickable}=buildChartData();
   if(clickable){chartDrill.push(label);renderDonut();}
   else{
+    // Tous les modes non-clickable ont des tickers comme labels → ouvre la fiche
     const pos=(S.enrichedPos.length?S.enrichedPos:computePositions());
     const p=pos.find(x=>x.ticker===label);
     if(p||label.match(/^[A-Z0-9.]{1,7}$/)) openCompanyDetail(label, p?.name||label);
@@ -860,8 +865,8 @@ async function loadRatios(){
   }));
   function wavg(key){let sum=0,w=0;pos.forEach(p=>{const f=S.fundamentals[p.ticker];const v=p.valueEur||0;if(f&&f[key]!=null&&!isNaN(f[key])&&isFinite(f[key])&&v>0){sum+=f[key]*v;w+=v;}});return w>0?sum/w:null;}
   function mrow(label,val,fmt,colorFn){
-    if(val==null)return\`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border2)"><span style="font-size:12px;color:var(--muted)">\${label}</span><span style="font-size:12px;color:var(--muted)">—</span></div>\`;
-    return\`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border2)"><span style="font-size:12px;color:var(--muted)">\${label}</span><span class="mono" style="font-size:12px;color:\${colorFn(val)}">\text \${fmt(val)}</span></div>\`;
+    if(val==null)return`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border2)"><span style="font-size:12px;color:var(--muted)">${label}</span><span style="font-size:12px;color:var(--muted)">—</span></div>`;
+    return`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border2)"><span style="font-size:12px;color:var(--muted)">${label}</span><span class="mono" style="font-size:12px;color:${colorFn(val)}">${fmt(val)}</span></div>`;
   }
   const pe=wavg('trailingPE'),fpe=wavg('forwardPE'),peg=wavg('pegRatio'),mg=wavg('profitMarginPct'),roe=wavg('returnOnEquity'),debt=wavg('netDebtToEBITDA');
   el.innerHTML=
@@ -871,11 +876,12 @@ async function loadRatios(){
     mrow('Marge nette',mg,v=>v.toFixed(1)+'%',v=>v>20?'var(--green)':v>10?'var(--yellow)':'var(--red)')+
     mrow('ROE',roe,v=>v.toFixed(1)+'%',v=>v>20?'var(--green)':v>10?'var(--yellow)':'var(--red)')+
     mrow('Dette/EBITDA',debt,v=>v.toFixed(2)+'x',v=>v<1?'var(--green)':v<2?'var(--yellow)':'var(--red)')+
-    \`<div style="font-size:10px;color:var(--muted2);margin-top:6px">Moyennes pondérées par valeur · actions uniquement</div>\`;
+    `<div style="font-size:10px;color:var(--muted2);margin-top:6px">Moyennes pondérées par valeur · actions uniquement</div>`;
   saveCache();if(btn)btn.disabled=false;
 }
 
 function renderRatios(){
+  // Affiche le screener dans #page (déjà montré par navigate)
   renderScreener();
 }
 
@@ -890,6 +896,7 @@ function sortWL(col){
 function sortSC(col){
   if(scSort.col===col)scSort.dir=scSort.dir==='desc'?'asc':'desc';
   else{scSort.col=col;scSort.dir='desc';}
+  // Re-render screener rows with sort
   renderScreenerTable(scSort);
 }
 function getSortVal(ticker, col){
@@ -911,7 +918,7 @@ function sortItems(items, sort){
 }
 function thSort(label,col,sortState,fn){
   var arrow=sortState.col===col?(sortState.dir==='desc'?'▼':'▲'):'↕';
-  return '<th data-sortcol="'+col+'" style="cursor:pointer;user-select:none" onclick="'+fn+'(\''+col+'\')">'+(label)+' <span style="font-size:9px;opacity:.5">'+arrow+'</span></th>';
+  return '<th style="cursor:pointer;user-select:none" onclick="'+fn+'(\''+col+'\')">'+(label)+' <span style="font-size:9px;opacity:.5">'+arrow+'</span></th>';
 }
 // ═══ WATCHLIST ═══
 var watchlistItems = [];
@@ -952,6 +959,7 @@ function renderWatchlistTable(){
     el.innerHTML='<div style="text-align:center;padding:60px;color:var(--muted)">Aucun titre en watchlist.<br>Clique "+ Ajouter un titre" pour commencer.</div>';
     return;
   }
+// rows will be built inside the sort block below
   var sorted=sortItems(watchlistItems.slice(),wlSort);
   var rows=sorted.map(function(w){
     var d=S.prices[w.ticker];
@@ -963,7 +971,7 @@ function renderWatchlistTable(){
       mkLogoCell(w.ticker)+
       '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+w.ticker+'">'+w.name+'</div><div class="ticker-sym">'+w.ticker+'</div></div></div></td>'+
       '<td>'+priceStr+'</td>'+
-      ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','debt'].map(function(k){return '<td id="wl-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
+      ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','debt'].map(function(k){return '<td id="wr-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '<td><button class="btn btn-danger btn-sm" onclick="removeWatch(this)" data-id="'+w.id+'" data-ticker="'+w.ticker+'">✕</button></td>'+
       '</tr>';
   }).join('');
@@ -983,7 +991,8 @@ function renderWatchlistTable(){
     '</tr></thead><tbody>'+rows+'</tbody></table></div></div>'+
     '<div style="margin-top:12px;display:flex;justify-content:flex-end">'+
     '<button class="btn btn-primary" onclick="loadWatchRatios()">⟳ Charger les ratios</button></div>';
-  sorted.forEach(function(w){ if(S.fundamentals[w.ticker]) updateRatioRowById('wl',w.ticker); });
+  // Restaurer les ratios depuis le cache (S.fundamentals)
+  sorted.forEach(function(w){ if(S.fundamentals[w.ticker]) updateRatioRowById('wr',w.ticker); });
 }
 
 async function loadWatchRatios(){
@@ -995,7 +1004,7 @@ async function loadWatchRatios(){
         S.fundamentalsAttempted.add(w.ticker);
         try{var r=await fetch(API+'?symbol='+encodeURIComponent(w.ticker)+'&type=fundamentals',{signal:AbortSignal.timeout(10000)});var d=await r.json();if(d&&!d.error)S.fundamentals[w.ticker]=d;}catch(e){}
       }
-      updateRatioRowById('wl',w.ticker);
+      updateRatioRowById('wr',w.ticker);
     }));
     if(i+BATCH<watchlistItems.length) await new Promise(function(r){setTimeout(r,DELAY);});
   }
@@ -1060,15 +1069,17 @@ async function renderScreener(){
     '<p style="color:var(--muted);font-size:13px;margin-top:3px">Portefeuille + Watchlist — tous tes titres, triables par ratio</p>'+
     '</div><div id="sc-content"><div style="text-align:center;padding:40px"><div class="spinner"></div></div></div>';
 
+  // Charger la watchlist si nécessaire, avec timeout de sécurité
   if(!watchlistItems.length){
     try { await Promise.race([loadWatchlist(), new Promise((_,r)=>setTimeout(()=>r(new Error('timeout')),8000))]); }
-    catch(e){ }
+    catch(e){ /* continuer même si la watchlist échoue */ }
   }
 
   var pfPos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p);});
   var wlOnly=watchlistItems.filter(function(w){return !pfPos.find(function(p){return p.ticker===w.ticker;});});
   var allItems=pfPos.concat(wlOnly.map(function(w){return {ticker:w.ticker,name:w.name,_isWatch:true};}));
 
+  // Charger les prix manquants pour les items de la watchlist
   await Promise.all(allItems.filter(function(p){return p._isWatch && !S.prices[p.ticker];}).map(async function(p){
     try{var r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker));var d=await r.json();if(d&&d.price)S.prices[p.ticker]=d;}catch(e){}
   }));
@@ -1081,7 +1092,7 @@ async function renderScreener(){
     return '<tr>'+
       '<td style="text-align:left;padding-left:20px"><div class="ticker-cell">'+
       mkLogoCell(p.ticker)+
-      '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+p.ticker+'">'+(p.name||p.ticker)+badge+'</div><div class="ticker-sym">'+p.ticker+'</div></div></div></td>'+
+      '<div><div class="ticker-name">'+p.name+badge+'</div><div class="ticker-sym">'+p.ticker+(TICKER_SUBSECTOR[p.ticker]?' · <span style="color:var(--muted2);font-size:10px">'+TICKER_SUBSECTOR[p.ticker]+'</span>':'')+'</div></div></div></td>'+
       '<td>'+priceStr+'</td>'+
       ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '</tr>';
@@ -1126,6 +1137,7 @@ function openCompanyDetail(ticker, name) {
   _prevPage = S.page || 'ratios';
   S.page = 'company';
   document.querySelectorAll('.nav-item').forEach(function(el){ el.classList.remove('active'); });
+  // Toujours afficher #page (peut être caché si on vient du portfolio)
   document.getElementById('page-portfolio').style.display = 'none';
   document.getElementById('page').style.display = '';
   renderCompanyDetail(ticker, name || ticker);
@@ -1139,6 +1151,7 @@ async function renderCompanyDetail(ticker, name) {
     '</div>' +
     '<div id="cd-content"><div style="text-align:center;padding:60px"><div class="spinner"></div> Chargement des données…</div></div>';
 
+  // Get fundamentals (use cache if available)
   var f = S.fundamentals[ticker];
   if (!f) {
     try {
@@ -1148,6 +1161,7 @@ async function renderCompanyDetail(ticker, name) {
     } catch(e) {}
   }
 
+  // Toujours re-fetcher le prix pour avoir les données graphique fraîches
   try {
     var rp = await fetch(API+'?symbol='+encodeURIComponent(ticker));
     var dp = await rp.json();
@@ -1158,6 +1172,7 @@ async function renderCompanyDetail(ticker, name) {
   var cd = document.getElementById('cd-content');
   if (!f && !price) { cd.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px">Données indisponibles pour '+ticker+'</div>'; return; }
 
+  // Price header
   var isUsd = !(price && price.currency === 'EUR');
   var sym = isUsd ? '$' : '€';
   var priceStr = price && price.price ? sym+fN(price.price) : '—';
@@ -1180,10 +1195,12 @@ async function renderCompanyDetail(ticker, name) {
   function col_roe(v) { return v > 20 ? 'var(--green)' : v > 10 ? 'var(--yellow)' : 'var(--red)'; }
   function col_debt(v) { return v < 1 ? 'var(--green)' : v < 2 ? 'var(--yellow)' : v < 3.5 ? '#f97316' : 'var(--red)'; }
 
+  // Performance badges
   var perf1m = price && price.change1M != null ? (price.change1M >= 0 ? '+' : '')+price.change1M.toFixed(1)+'%' : '—';
   var perfYTD = price && price.changeYTD != null ? (price.changeYTD >= 0 ? '+' : '')+price.changeYTD.toFixed(1)+'%' : '—';
   var perf1y = price && price.change1Y != null ? (price.change1Y >= 0 ? '+' : '')+price.change1Y.toFixed(1)+'%' : '—';
 
+  // Fetch fresh price data for chart if not available
   if (!price || !price.chartData) {
     try {
       var r2 = await fetch(API+'?symbol='+encodeURIComponent(ticker));
@@ -1193,8 +1210,10 @@ async function renderCompanyDetail(ticker, name) {
   }
 
   cd.innerHTML =
+    // Layout 2 colonnes : gauche = ratios, droite = graphique
     '<div style="display:grid;grid-template-columns:minmax(320px,2fr) 3fr;gap:20px;align-items:start">' +
-    '<div>' + 
+    '<div>' + // Colonne gauche
+    // Prix + perf
     '<div class="card" style="margin-bottom:16px">' +
       '<div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap">' +
         '<div><div style="font-size:32px;font-weight:800">'+priceStr+'</div>' +
@@ -1207,7 +1226,9 @@ async function renderCompanyDetail(ticker, name) {
         '</div>' +
       '</div>' +
     '</div>' +
+    // Grille ratios
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px">' +
+      // Valorisation
       '<div class="card"><div class="stats-section-title" style="margin-bottom:12px">Valorisation</div>' +
         metric('P/E Trailing', f && f.trailingPE, xs, col_pe) +
         metric('P/E Forward', f && f.forwardPE, xs, col_fpe) +
@@ -1215,6 +1236,7 @@ async function renderCompanyDetail(ticker, name) {
         metric('P/FCF', f && f.pfcf, xs, function(v){return v<20?'var(--green)':v<35?'var(--yellow)':'var(--red)';}) +
         metric('P/OCF', f && f.pocf, xs, function(v){return v<20?'var(--green)':v<35?'var(--yellow)':'var(--red)';}) +
       '</div>' +
+      // Rentabilité
       '<div class="card"><div class="stats-section-title" style="margin-bottom:12px">Rentabilité</div>' +
         metric('Marge brute', f && f.grossMarginPct, function(v){return v.toFixed(1)+'%';}, function(v){return v>40?'var(--green)':v>20?'var(--yellow)':'var(--red)';}) +
         metric('Marge opérationnelle', f && f.operatingMarginPct, function(v){return v.toFixed(1)+'%';}, col_mg) +
@@ -1222,20 +1244,22 @@ async function renderCompanyDetail(ticker, name) {
         metric('ROE', f && f.returnOnEquity, function(v){return v.toFixed(1)+'%';}, col_roe) +
         metric('ROA', f && f.returnOnAssets, function(v){return v.toFixed(1)+'%';}, function(v){return v>10?'var(--green)':v>5?'var(--yellow)':'var(--red)';}) +
       '</div>' +
+      // Croissance
       '<div class="card"><div class="stats-section-title" style="margin-bottom:12px">Croissance</div>' +
         metric('CA 1A', f && f.revenueGrowthYoY, pct, col_grw) +
         metric('EPS 1A', f && f.epsGrowth1Y, pct, col_grw) +
         metric('FCF Growth', f && f.fcfGrowth, pct, col_grw) +
       '</div>' +
+      // Santé financière
       '<div class="card"><div class="stats-section-title" style="margin-bottom:12px">Santé financière</div>' +
         metric('Dette / EBITDA', f && f.netDebtToEBITDA, xs, col_debt) +
         metric('Current Ratio', f && f.currentRatio, xs, function(v){return v>2?'var(--green)':v>1?'var(--yellow)':'var(--red)';}) +
         (f && f.freeCashflow ? metric('Free Cash Flow', f.freeCashflow/1e9, function(v){return v.toFixed(2)+' Md $';}, function(v){return v>0?'var(--green)':'var(--red)';}) : '') +
         (f && f.mktCap ? metric('Market Cap', f.mktCap/1e9, function(v){return v.toFixed(0)+' Md $';}, function(){return 'var(--text)';}) : '') +
       '</div>' +
-    '</div>' + 
-    '</div>' + 
-    '<div>' + 
+    '</div>' + // Fin grille gauche
+    '</div>' + // Fin colonne gauche
+    '<div>' + // Colonne droite : graphique
       '<div class="card" style="margin-bottom:16px">' +
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">' +
           '<div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em" id="cd-chart-label">Cours — 5 ans</div>' +
@@ -1246,8 +1270,9 @@ async function renderCompanyDetail(ticker, name) {
         '<div style="position:relative;width:100%;height:280px"><canvas id="company-price-chart"></canvas></div>' +
       '</div>' +
     '</div>' +
-    '</div>';
+    '</div>'; // Fin grid 2 colonnes
 
+  // Charger données graphique via endpoint dédié (5 ans par défaut)
   var chartPts = [];
   try {
     var rc = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=chart&range=5y');
@@ -1255,12 +1280,14 @@ async function renderCompanyDetail(ticker, name) {
     chartPts = dc.chartData || [];
   } catch(e) {}
 
+  // Dessiner le graphique
   drawCdChart(chartPts, price, ticker);
 }
 
 function drawCdChart(pts, price, ticker) {
   var currSym = (price && price.currency === 'EUR') ? '€' : '$';
   var _ticker = ticker || (price && price.symbol) || '';
+  // Store pts+ticker for period switching
   window._cdLastPrice = price;
   window._cdLastTicker = _ticker;
   setTimeout(function(){
@@ -1270,8 +1297,10 @@ function drawCdChart(pts, price, ticker) {
       canvas.parentNode.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px;font-size:13px">Graphique indisponible.<br><span style="font-size:11px">Yahoo Finance ne retourne pas de données historiques.</span></div>';
       return;
     }
+    // Thin out if too many points
     var data = pts;
     if(data.length > 400){ var step=Math.ceil(data.length/400); data=data.filter(function(_,i){return i%step===0;}); }
+    // Store timestamps for tooltip
     var timestamps = data.map(function(p){ return p.t; });
     var values = data.map(function(p){ return p.c; });
     var labels = data.map(function(p){
@@ -1326,6 +1355,7 @@ async function changeCdPeriod(btn, ticker) {
 }
 
 function renderScreenerTable(sort){
+  // Re-sort and re-render screener rows only
   var tbody=document.querySelector('#sc-content table tbody');
   if(!tbody) return;
   var pfPos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p);});
@@ -1346,6 +1376,7 @@ function renderScreenerTable(sort){
       '</tr>';
   }).join('');
   allItems.forEach(function(p){ updateRatioRowById('sc',p.ticker); });
+  // Update sort arrows
   document.querySelectorAll('#sc-content thead th').forEach(function(th){
     var s=th.querySelector('span');if(!s)return;
     var col=th.getAttribute('data-sortcol');
@@ -1355,81 +1386,84 @@ function renderScreenerTable(sort){
 // ═══ ACCOUNTS PAGE ═══
 function renderAccounts(){
   const pg=document.getElementById('page');
-  if(!S.accounts.length){pg.innerHTML=\`<div class="empty-state"><div class="icon">💳</div><h3>Aucun compte</h3><p>Crée tes comptes pour commencer</p><button class="btn btn-primary" style="width:auto" onclick="openAddAccount()">+ Créer un compte</button></div>\`;return;}
-  pg.innerHTML=\`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;flex-wrap:wrap;gap:10px">
-    <div><h2 style="font-size:18px;font-weight:700">Mes comptes</h2><p style="color:var(--muted);font-size:13px;margin-top:3px">\${S.accounts.length} compte\${S.accounts.length>1?'s':''} · \${S.transactions.length} transaction\${S.transactions.length!==1?'s':''}</p></div>
+  if(!S.accounts.length){pg.innerHTML=`<div class="empty-state"><div class="icon">💳</div><h3>Aucun compte</h3><p>Crée tes comptes pour commencer</p><button class="btn btn-primary" style="width:auto" onclick="openAddAccount()">+ Créer un compte</button></div>`;return;}
+  pg.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;flex-wrap:wrap;gap:10px">
+    <div><h2 style="font-size:18px;font-weight:700">Mes comptes</h2><p style="color:var(--muted);font-size:13px;margin-top:3px">${S.accounts.length} compte${S.accounts.length>1?'s':''} · ${S.transactions.length} transaction${S.transactions.length!==1?'s':''}</p></div>
     <div style="display:flex;gap:10px"><button class="btn btn-ghost" onclick="openAddTransaction()">+ Transaction</button><button class="btn btn-primary" onclick="openAddAccount()">+ Compte</button></div>
-  </div>\${S.accounts.map(a=>renderAcctCard(a)).join('')}\`;
+  </div>${S.accounts.map(a=>renderAcctCard(a)).join('')}`;
 }
 
 function renderAcctCard(a){
   const txs=S.transactions.filter(t=>t.account_id===a.id).sort((x,y)=>new Date(y.transaction_date)-new Date(x.transaction_date));
   const ic={PEA:'🏦',CTO:'💼',PER:'🔒',AV:'📋',AUTRE:'💳'};const c=acctColor(a.name);
-  return\`<div class="account-card">
+  return`<div class="account-card">
     <div class="account-header">
-      <div class="account-icon">\${ic[a.type]||'💳'}</div>
-      <div style="flex:1;min-width:100px"><div style="font-size:16px;font-weight:700">\${a.name}</div><div style="font-size:12px;color:var(--muted);margin-top:2px">\text \${txs.length} transaction\${txs.length!==1?'s':''} · \${a.currency}</div></div>
-      <span class="type-badge" style="background:\${c.bg};color:\${c.color}">\${a.type}</span>
-      <button class="btn btn-ghost btn-sm" onclick="openAddTransaction('\${a.id}')">+ Transaction</button>
-      <button class="btn btn-danger btn-sm" onclick="deleteAccount('\${a.id}','\${a.name}')">Supprimer</button>
+      <div class="account-icon">${ic[a.type]||'💳'}</div>
+      <div style="flex:1;min-width:100px"><div style="font-size:16px;font-weight:700">${a.name}</div><div style="font-size:12px;color:var(--muted);margin-top:2px">${txs.length} transaction${txs.length!==1?'s':''} · ${a.currency}</div></div>
+      <span class="type-badge" style="background:${c.bg};color:${c.color}">${a.type}</span>
+      <button class="btn btn-ghost btn-sm" onclick="openAddTransaction('${a.id}')">+ Transaction</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteAccount('${a.id}','${a.name}')">Supprimer</button>
     </div>
-    \${txs.length===0?\`<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">Aucune transaction · <span style="color:var(--blue);cursor:pointer" onclick="openAddTransaction('\${a.id}')">Ajouter la première</span></div>\`:
-    \`<div class="tbl-wrap"><table>
+    ${txs.length===0?`<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">Aucune transaction · <span style="color:var(--blue);cursor:pointer" onclick="openAddTransaction('${a.id}')">Ajouter la première</span></div>`:
+    `<div class="tbl-wrap"><table>
       <thead><tr><th style="text-align:left">Titre</th><th>Date</th><th>Type</th><th>Qté</th><th>Prix unit.</th><th>Frais</th><th>Total</th><th>Actions</th></tr></thead>
-      <tbody>\${txs.map(tx=>\`<tr>
-        <td style="text-align:left"><div class="ticker-name">\${tx.name}</div><div class="ticker-sym">\${tx.ticker}</div></td>
-        <td class="mono c-muted" style="font-size:12px">\${fD(tx.transaction_date)}</td>
-        <td><span class="badge \${tx.transaction_type==='buy'?'badge-green':'badge-red'}">\${tx.transaction_type==='buy'?'▲ Achat':'▼ Vente'}</span></td>
-        <td class="mono">\${fQ(tx.quantity)}</td><td class="mono">\text \${fN(tx.price)} \text \${cS(tx.currency)}</td>
-        <td class="mono c-muted">\${(tx.fees||0)>0?fN(tx.fees)+' '+cS(tx.currency):'—'}</td>
-        <td class="mono"><strong>\${fN(tx.quantity*tx.price+(tx.fees||0))} \${cS(tx.currency)}</strong></td>
-        <td style="white-space:nowrap"><button class="btn btn-edit btn-sm" style="margin-right:4px" onclick="openEditTx('\${tx.id}')">✏️</button><button class="btn btn-danger btn-sm" onclick="deleteTx('\${tx.id}')">✕</button></td>
-      </tr>\`).join('')}</tbody>
-    </table></div>\`}
-  </div>\`;
+      <tbody>${txs.map(tx=>`<tr>
+        <td style="text-align:left"><div class="ticker-name">${tx.name}</div><div class="ticker-sym">${tx.ticker}</div></td>
+        <td class="mono c-muted" style="font-size:12px">${fD(tx.transaction_date)}</td>
+        <td><span class="badge ${tx.transaction_type==='buy'?'badge-green':'badge-red'}">${tx.transaction_type==='buy'?'▲ Achat':'▼ Vente'}</span></td>
+        <td class="mono">${fQ(tx.quantity)}</td><td class="mono">${fN(tx.price)} ${cS(tx.currency)}</td>
+        <td class="mono c-muted">${(tx.fees||0)>0?fN(tx.fees)+' '+cS(tx.currency):'—'}</td>
+        <td class="mono"><strong>${fN(tx.quantity*tx.price+(tx.fees||0))} ${cS(tx.currency)}</strong></td>
+        <td style="white-space:nowrap"><button class="btn btn-edit btn-sm" style="margin-right:4px" onclick="openEditTx('${tx.id}')">✏️</button><button class="btn btn-danger btn-sm" onclick="deleteTx('${tx.id}')">✕</button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>`}
+  </div>`;
 }
 
 // ═══ MODALS ═══
 function showModal(h){document.getElementById('modal-content').innerHTML=h;document.getElementById('modal-overlay').classList.add('open');}
 function closeModal(){document.getElementById('modal-overlay').classList.remove('open');}
 function closeModalOutside(e){if(e.target===document.getElementById('modal-overlay'))closeModal();}
-function openAddAccount(){showModal(\`<div class="modal-hd"><h2>Créer un compte</h2><button class="modal-close" onclick="closeModal()">✕</button></div>
+function openAddAccount(){showModal(`<div class="modal-hd"><h2>Créer un compte</h2><button class="modal-close" onclick="closeModal()">✕</button></div>
     <div class="form-group"><label class="form-label">Nom *</label><input type="text" id="m-name" class="form-input" placeholder="ex: PEA BoursoBank"></div>
     <div class="form-row"><div class="form-group"><label class="form-label">Type *</label><select id="m-type" class="form-input"><option value="PEA">PEA</option><option value="CTO">CTO</option><option value="PER">PER</option><option value="AV">Assurance-vie</option><option value="AUTRE">Autre</option></select></div>
     <div class="form-group"><label class="form-label">Devise</label><select id="m-curr" class="form-input"><option value="EUR">EUR €</option><option value="USD">USD $</option></select></div></div>
-    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveAccount()">Créer</button></div>\`);}
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveAccount()">Créer</button></div>`);}
 async function saveAccount(){const name=document.getElementById('m-name').value.trim(),type=document.getElementById('m-type').value,currency=document.getElementById('m-curr').value;if(!name)return showToast('❌ Donne un nom');try{const d=await dbPost('accounts',{user_id:getUser().id,name,type,currency});S.accounts.push(d);closeModal();showToast('✅ Compte créé');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
-async function deleteAccount(id,name){if(!confirm(\`Supprimer "\${name}" et toutes ses transactions ?\`))return;try{await dbDel('accounts','id=eq.'+id);S.accounts=S.accounts.filter(a=>a.id!==id);S.transactions=S.transactions.filter(t=>t.account_id!==id);showToast('✅ Supprimé');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
-function txForm(pre=null,tx=null){const ie=!!tx;return\`<div class="modal-hd"><h2>\${ie?'Modifier':'Ajouter une transaction'}</h2><button class="modal-close" onclick="closeModal()">✕</button></div>
-    <div class="form-group"><label class="form-label">Compte *</label><select id="m-acct" class="form-input" onchange="onAcctChange()">\${S.accounts.map(a=>\`<option value="\${a.id}" \${a.id===(tx?.account_id||pre)?'selected':''}>\${a.name} (\${a.type})</option>\`).join('')}</select></div>
-    <div class="form-row"><div class="form-group"><label class="form-label">Ticker *</label><input type="text" id="m-ticker" class="form-input" placeholder="ex: NVDA" value="\${tx?.ticker||''}" oninput="this.value=this.value.toUpperCase()"></div><div class="form-group"><label class="form-label">Nom *</label><input type="text" id="m-aname" class="form-input" placeholder="ex: Nvidia" value="\${tx?.name||''}"></div></div>
-    <div class="form-row"><div class="form-group"><label class="form-label">Type d'actif</label><select id="m-asset" class="form-input"><option value="stock" \${tx?.asset_type==='stock'||!tx?'selected':''}>Action</option><option value="etf" \${tx?.asset_type==='etf'?'selected':''}>ETF</option><option value="crypto" \${tx?.asset_type==='crypto'?'selected':''}>Crypto</option></select></div><div class="form-group"><label class="form-label">Transaction</label><select id="m-txtype" class="form-input"><option value="buy" \${tx?.transaction_type!=='sell'?'selected':''}>Achat ▲</option><option value="sell" \${tx?.transaction_type==='sell'?'selected':''}>Vente ▼</option></select></div></div>
-    <div class="form-row"><div class="form-group"><label class="form-label">Quantité *</label><input type="number" id="m-qty" class="form-input" value="\${tx?.quantity||''}" min="0.000001" step="any" oninput="updTotal()"></div><div class="form-group"><label class="form-label">Prix unitaire *</label><input type="number" id="m-price" class="form-input" value="\${tx?.price||''}" min="0.000001" step="any" oninput="updTotal()"></div></div>
-    <div class="form-row"><div class="form-group"><label class="form-label">Devise *</label><select id="m-currency" class="form-input" onchange="updTotal()"><option value="EUR" \${tx?.currency==='EUR'||!tx?'selected':''}>EUR €</option><option value="USD" \${tx?.currency==='USD'?'selected':''}>USD $</option><option value="GBP" \${tx?.currency==='GBP'?'selected':''}>GBP £</option><option value="JPY" \${tx?.currency==='JPY'?'selected':''}>JPY ¥</option><option value="HKD" \${tx?.currency==='HKD'?'selected':''}>HKD</option></select></div><div class="form-group"><label class="form-label">Frais</label><input type="number" id="m-fees" class="form-input" value="\${tx?.fees||0}" min="0" step="any" oninput="updTotal()"></div></div>
-    <div class="form-group"><label class="form-label">Date *</label><input type="date" id="m-date" class="form-input" value="\${tx?.transaction_date||new Date().toISOString().split('T')[0]}"></div>
-    <div class="form-group"><label class="form-label">Notes (optionnel)</label><input type="text" id="m-notes" class="form-input" placeholder="ex: DCA mensuel…" value="\${tx?.notes||''}"></div>
+async function deleteAccount(id,name){if(!confirm(`Supprimer "${name}" et toutes ses transactions ?`))return;try{await dbDel('accounts','id=eq.'+id);S.accounts=S.accounts.filter(a=>a.id!==id);S.transactions=S.transactions.filter(t=>t.account_id!==id);showToast('✅ Supprimé');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
+function txForm(pre=null,tx=null){const ie=!!tx;return`<div class="modal-hd"><h2>${ie?'Modifier':'Ajouter une transaction'}</h2><button class="modal-close" onclick="closeModal()">✕</button></div>
+    <div class="form-group"><label class="form-label">Compte *</label><select id="m-acct" class="form-input" onchange="onAcctChange()">${S.accounts.map(a=>`<option value="${a.id}" ${a.id===(tx?.account_id||pre)?'selected':''}>${a.name} (${a.type})</option>`).join('')}</select></div>
+    <div class="form-row"><div class="form-group"><label class="form-label">Ticker *</label><input type="text" id="m-ticker" class="form-input" placeholder="ex: NVDA" value="${tx?.ticker||''}" oninput="this.value=this.value.toUpperCase()"></div><div class="form-group"><label class="form-label">Nom *</label><input type="text" id="m-aname" class="form-input" placeholder="ex: Nvidia" value="${tx?.name||''}"></div></div>
+    <div class="form-row"><div class="form-group"><label class="form-label">Type d'actif</label><select id="m-asset" class="form-input"><option value="stock" ${tx?.asset_type==='stock'||!tx?'selected':''}>Action</option><option value="etf" ${tx?.asset_type==='etf'?'selected':''}>ETF</option><option value="crypto" ${tx?.asset_type==='crypto'?'selected':''}>Crypto</option></select></div><div class="form-group"><label class="form-label">Transaction</label><select id="m-txtype" class="form-input"><option value="buy" ${tx?.transaction_type!=='sell'?'selected':''}>Achat ▲</option><option value="sell" ${tx?.transaction_type==='sell'?'selected':''}>Vente ▼</option></select></div></div>
+    <div class="form-row"><div class="form-group"><label class="form-label">Quantité *</label><input type="number" id="m-qty" class="form-input" value="${tx?.quantity||''}" min="0.000001" step="any" oninput="updTotal()"></div><div class="form-group"><label class="form-label">Prix unitaire *</label><input type="number" id="m-price" class="form-input" value="${tx?.price||''}" min="0.000001" step="any" oninput="updTotal()"></div></div>
+    <div class="form-row"><div class="form-group"><label class="form-label">Devise *</label><select id="m-currency" class="form-input" onchange="updTotal()"><option value="EUR" ${tx?.currency==='EUR'||!tx?'selected':''}>EUR €</option><option value="USD" ${tx?.currency==='USD'?'selected':''}>USD $</option><option value="GBP" ${tx?.currency==='GBP'?'selected':''}>GBP £</option><option value="JPY" ${tx?.currency==='JPY'?'selected':''}>JPY ¥</option><option value="HKD" ${tx?.currency==='HKD'?'selected':''}>HKD</option></select></div><div class="form-group"><label class="form-label">Frais</label><input type="number" id="m-fees" class="form-input" value="${tx?.fees||0}" min="0" step="any" oninput="updTotal()"></div></div>
+    <div class="form-group"><label class="form-label">Date *</label><input type="date" id="m-date" class="form-input" value="${tx?.transaction_date||new Date().toISOString().split('T')[0]}"></div>
+    <div class="form-group"><label class="form-label">Notes (optionnel)</label><input type="text" id="m-notes" class="form-input" placeholder="ex: DCA mensuel…" value="${tx?.notes||''}"></div>
     <div class="tx-total-box" id="tx-total">Remplis la quantité et le prix pour voir le total.</div>
-    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="\${ie?\`saveEditTx('\${tx.id}')\`:'saveTx()'\}">\${ie?'Modifier':'Enregistrer'}</button></div>\`;}
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="${ie?`saveEditTx('${tx.id}')`:'saveTx()'}">${ie?'Modifier':'Enregistrer'}</button></div>`;}
 function openAddTransaction(pre=null){if(!S.accounts.length)return showToast("❌ Crée d'abord un compte");showModal(txForm(pre,null));setTimeout(()=>onAcctChange(),50);}
 function openEditTx(id){const tx=S.transactions.find(t=>t.id===id);if(!tx)return showToast('❌ Introuvable');showModal(txForm(null,tx));}
 function onAcctChange(){const id=document.getElementById('m-acct')?.value;const a=S.accounts.find(x=>x.id===id);if(!a)return;const el=document.getElementById('m-currency');if(!el)return;const n=a.name.toLowerCase();if(n.includes('ibkr')||n.includes('interactive')||a.currency==='USD')el.value='USD';else el.value='EUR';}
-function updTotal(){const q=parseFloat(document.getElementById('m-qty')?.value)||0,p=parseFloat(document.getElementById('m-price')?.value)||0,f=parseFloat(document.getElementById('m-fees')?.value)||0,c=document.getElementById('m-currency')?.value||'EUR';const el=document.getElementById('tx-total');if(el&&q>0&&p>0)el.innerHTML=\`<strong>Total : \${fN(q*p+f)} \${cS(c)}</strong> · \text \${fQ(q)} × \${fN(p)} + \${fN(f)} frais\`;}
+function updTotal(){const q=parseFloat(document.getElementById('m-qty')?.value)||0,p=parseFloat(document.getElementById('m-price')?.value)||0,f=parseFloat(document.getElementById('m-fees')?.value)||0,c=document.getElementById('m-currency')?.value||'EUR';const el=document.getElementById('tx-total');if(el&&q>0&&p>0)el.innerHTML=`<strong>Total : ${fN(q*p+f)} ${cS(c)}</strong> · ${fQ(q)} × ${fN(p)} + ${fN(f)} frais`;}
 function readForm(){return{account_id:document.getElementById('m-acct').value,ticker:document.getElementById('m-ticker').value.trim().toUpperCase(),name:document.getElementById('m-aname').value.trim(),asset_type:document.getElementById('m-asset').value,transaction_type:document.getElementById('m-txtype').value,quantity:parseFloat(document.getElementById('m-qty').value),price:parseFloat(document.getElementById('m-price').value),fees:parseFloat(document.getElementById('m-fees').value)||0,currency:document.getElementById('m-currency').value,transaction_date:document.getElementById('m-date').value,notes:document.getElementById('m-notes').value.trim()||null};}
 async function saveTx(){const d=readForm();if(!d.ticker||!d.name||!d.quantity||!d.price||!d.transaction_date)return showToast('❌ Champs obligatoires manquants');try{const ins=await dbPost('transactions',d);const full=await dbGet('transactions','id=eq.'+ins.id+'&select=*,accounts(name,type)');S.transactions.unshift(full?.[0]||ins);closeModal();showToast('✅ Transaction enregistrée');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
 async function saveEditTx(id){const d=readForm();if(!d.ticker||!d.name||!d.quantity||!d.price||!d.transaction_date)return showToast('❌ Champs obligatoires manquants');try{await dbPatch('transactions','id=eq.'+id,d);const i=S.transactions.findIndex(t=>t.id===id);if(i>=0){const a=S.accounts.find(x=>x.id===d.account_id);S.transactions[i]={...S.transactions[i],...d,accounts:{name:a?.name,type:a?.type}};}closeModal();showToast('✅ Modifié');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
 async function deleteTx(id){if(!confirm('Supprimer cette transaction ?'))return;try{await dbDel('transactions','id=eq.'+id);S.transactions=S.transactions.filter(t=>t.id!==id);showToast('✅ Supprimée');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
 
 // ═══ HELPERS ═══
+// Prix manuel EN EUROS (pour les titres sur Trade Republic)
 function setManualPrice(ticker){
   const cur=manualPrices[ticker];
   const prev=cur?fN(cur.price):'';
-  const val=prompt(\`Prix manuel pour \${ticker} en EUR :\\n(ex: 1850,50 pour Samsung)\\nLaisse vide pour annuler\`,prev);
+  const val=prompt(`Prix manuel pour ${ticker} en EUR :\n(ex: 1850,50 pour Samsung)\nLaisse vide pour annuler`,prev);
   if(val===null||val.trim()==='')return;
-  const cleaned=val.replace(/[\\s\\u00a0]/g,'').replace('€','').replace(',','.');
+  // Parse nombres français : supprimer espaces, €, puis virgule → point
+  const cleaned=val.replace(/[\s\u00a0]/g,'').replace('€','').replace(',','.');
   const p=parseFloat(cleaned);
   if(isNaN(p)||p<=0)return showToast('❌ Prix invalide (ex: 1850,50)');
   manualPrices[ticker]={price:p,currency:'EUR',changePct:0,_t:Date.now(),manual:true};
   showToast('✅ Prix enregistré pour '+ticker+' : '+fN(p)+' €');
+  // Mettre à jour l'UI sans recharger toute la page
   S.enrichedPos=[];
   if(S.page==='portfolio'){
     const pos=computePositions();
@@ -1438,7 +1472,7 @@ function setManualPrice(ticker){
   }
 }
 function acctColor(n){const s=(n||'').toLowerCase();if(s.includes('ibkr')||s.includes('interactive'))return{bg:'rgba(239,68,68,.18)',color:'#f87171'};if(s.includes('bourso'))return{bg:'rgba(91,126,245,.2)',color:'#7b9ef7'};if(s.includes('trade')||s.includes('republic'))return{bg:'rgba(220,220,220,.1)',color:'#d0d0e0'};return{bg:'rgba(91,126,245,.12)',color:'#5b7ef5'};}
-function acctTag(n){const c=acctColor(n);const w=n.split(' ');const s=w.length<=1?n:w[0]+' '+w.slice(1).map(x=>x[0]).join('');return\`<span class="acct-tag" style="background:\${c.bg};color:\${c.color}">\${s}</span>\`;}
+function acctTag(n){const c=acctColor(n);const w=n.split(' ');const s=w.length<=1?n:w[0]+' '+w.slice(1).map(x=>x[0]).join('');return`<span class="acct-tag" style="background:${c.bg};color:${c.color}">${s}</span>`;}
 function fE(v){if(v==null||isNaN(v))return '—';return v.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';}
 function fN(v){if(v==null||isNaN(v))return '—';return v.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function fQ(v){if(v==null)return '—';return Number.isInteger(v)?String(v):v.toLocaleString('fr-FR',{maximumFractionDigits:6});}
@@ -1446,13 +1480,11 @@ function fD(d){return new Date(d+'T00:00:00').toLocaleDateString('fr-FR',{day:'2
 function cS(c){return{EUR:'€',USD:'$',GBP:'£',JPY:'¥',HKD:'HK$',CHF:'CHF'}[c]||c;}
 function showToast(m,ms=3500){document.querySelector('.toast')?.remove();const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),ms);}
 
+// Délégation d'événement pour ouvrir la fiche société
 document.addEventListener('click', function(e){
   var el = e.target.closest ? e.target.closest('.cd-link') : null;
   if(el) openCompanyDetail(el.dataset.ticker, el.textContent.trim());
 });
 </script>
 </body>
-</html>\`;
-
-fs.writeFileSync(path.join(__dirname, 'index.html'), content, 'utf-8');
-console.log('✅ index.html de 2165 lignes généré avec succès sans coupure !');
+</html>
