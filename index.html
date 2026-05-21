@@ -949,7 +949,8 @@ async function loadRatios(){
       style="margin-top:8px;font-size:11px;color:var(--blue);background:none;border:none;cursor:pointer;padding:0">▼ Voir le détail par société</button>`;
 
   const excludedList=[...RATIO_EXCLUDE].join(', ');
-  el.innerHTML=summaryHTML+
+  var screenerLink='<div style="margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--border)"><button onclick="navigate(\'ratios\')" style="font-size:11px;color:var(--blue);background:none;border:none;cursor:pointer;padding:0">📋 Voir le Screener complet →</button></div>';
+  el.innerHTML=screenerLink+summaryHTML+
     `<div style="font-size:10px;color:var(--muted2);margin-top:6px">Moyennes pondérées par valeur · actions uniquement · exclus : ${excludedList}</div>`+
     detailHTML;
   saveCache();if(btn)btn.disabled=false;
@@ -975,6 +976,7 @@ function sortSC(col){
   renderScreenerTable(scSort);
 }
 function getSortVal(ticker, col){
+  if(col==='poids'){var ep=S.enrichedPos.find(function(x){return x.ticker===ticker;});return ep?(ep.valueEur||0):0;}
   if(col==='price') return (S.prices[ticker]&&S.prices[ticker].price)||0;
   var f=S.fundamentals[ticker]; if(!f) return null;
   var map={per:'trailingPE',fwdpe:'forwardPE',peg:'pegRatio',pocf:'pocf',marge:'profitMarginPct',ca1a:'revenueGrowthYoY',eps1a:'epsGrowth1Y',epsfwd:'epsGrowthFwd1Y',debt:'netDebtToEBITDA'};
@@ -1159,16 +1161,20 @@ async function renderScreener(){
   await Promise.all(allItems.filter(function(p){return p._isWatch && !S.prices[p.ticker];}).map(async function(p){
     try{var r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker));var d=await r.json();if(d&&d.price)S.prices[p.ticker]=d;}catch(e){}
   }));
+  var _totalPf = S.enrichedPos.reduce(function(s,p){return s+(p.valueEur||0);},0);
   var rows=allItems.map(function(p){
     var d=S.prices[p.ticker];
     var isUsd=!(d && d.currency==='EUR');
     var priceStr=d && d.price ? '<span class="mono">'+(isUsd?'$':'€')+fN(d.price)+'</span>' : '—';
     var tid=p.ticker.replace(/[^a-zA-Z0-9]/g,'_');
     var badge=p._isWatch?'<span style="font-size:10px;background:rgba(245,158,11,.15);color:#f59e0b;padding:2px 5px;border-radius:4px;margin-left:4px">WATCH</span>':'';
+    var ep=S.enrichedPos.find(function(x){return x.ticker===p.ticker;});
+    var poidsStr=ep&&_totalPf>0?'<span class="mono" style="color:var(--blue)">'+(ep.valueEur/_totalPf*100).toFixed(1)+'%</span>':'<span style="color:var(--muted)">—</span>';
     return '<tr>'+
       '<td style="text-align:left;padding-left:20px"><div class="ticker-cell">'+
       mkLogoCell(p.ticker)+
-      '<div><div class="ticker-name">'+p.name+badge+'</div><div class="ticker-sym">'+p.ticker+(TICKER_SUBSECTOR[p.ticker]?' · <span style="color:var(--muted2);font-size:10px">'+TICKER_SUBSECTOR[p.ticker]+'</span>':'')+'</div></div></div></td>'+
+      '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+p.ticker+'">'+p.name+badge+'</div><div class="ticker-sym">'+p.ticker+(TICKER_SUBSECTOR[p.ticker]?' · <span style="color:var(--muted2);font-size:10px">'+TICKER_SUBSECTOR[p.ticker]+'</span>':'')+'</div></div></div></td>'+
+      '<td>'+poidsStr+'</td>'+
       '<td>'+priceStr+'</td>'+
       ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','epsfwd','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '</tr>';
@@ -1179,7 +1185,7 @@ async function renderScreener(){
     '<button class="btn btn-primary" onclick="loadScreenerRatios()">⟳ Charger les ratios</button></div>'+
     '<div class="card"><div class="tbl-wrap"><table>'+
     '<thead><tr>'+
-    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+thSort('Cours','price',scSort,'sortSC')+thSort('PER','per',scSort,'sortSC')+thSort('Fwd PER','fwdpe',scSort,'sortSC')+thSort('PEG','peg',scSort,'sortSC')+thSort('P/OCF','pocf',scSort,'sortSC')+thSort('M. Nette','marge',scSort,'sortSC')+thSort('CA 1A','ca1a',scSort,'sortSC')+thSort('EPS 1A','eps1a',scSort,'sortSC')+thSort('EPS Fwd','epsfwd',scSort,'sortSC')+thSort('D/EBITDA','debt',scSort,'sortSC')+
+    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+thSort('Poids','poids',scSort,'sortSC')+thSort('Cours','price',scSort,'sortSC')+thSort('PER','per',scSort,'sortSC')+thSort('Fwd PER','fwdpe',scSort,'sortSC')+thSort('PEG','peg',scSort,'sortSC')+thSort('P/OCF','pocf',scSort,'sortSC')+thSort('M. Nette','marge',scSort,'sortSC')+thSort('CA 1A','ca1a',scSort,'sortSC')+thSort('EPS 1A','eps1a',scSort,'sortSC')+thSort('EPS Fwd','epsfwd',scSort,'sortSC')+thSort('D/EBITDA','debt',scSort,'sortSC')+
     '</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
 
   allItems.forEach(function(p){ updateRatioRowById('sc',p.ticker); });
@@ -1345,6 +1351,7 @@ async function renderCompanyDetail(ticker, name) {
         '</div>' +
         '<div style="position:relative;width:100%;height:280px"><canvas id="company-price-chart"></canvas></div>' +
       '</div>' +
+      '<div id="cd-fin-right" style="margin-top:14px"></div>' +
     '</div>' +
     '</div>'; // Fin grid 2 colonnes
 
@@ -1497,10 +1504,14 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
   var netMargins   = fin.years.map(function(_,i){ return margin(fin.netIncome[i], fin.revenue[i]); });
 
   // ROE, ROIC approx
-  var roe  = fin.years.map(function(_,i){ return fin.equity[i]&&fin.equity[i]>0 ? fin.netIncome[i]/fin.equity[i]*100 : null; });
+  var roe  = fin.years.map(function(_,i){
+    var eq=fin.equity[i]; var ni=fin.netIncome[i];
+    return eq&&eq>0&&ni!=null ? ni/eq*100 : null;
+  });
   var roic = fin.years.map(function(_,i){
-    var ic = (fin.equity[i]||0)+(fin.totalDebt[i]||0);
-    return ic>0&&fin.operatingIncome[i]!=null ? fin.operatingIncome[i]*0.79/ic*100 : null;
+    var eq=fin.equity[i]||0; var debt=fin.totalDebt[i]||0;
+    var ic=eq+debt; var op=fin.operatingIncome[i];
+    return ic>0&&op!=null ? op*0.79/ic*100 : null;
   });
 
   // Valuation history (annual P/E, P/FCF, P/OCF)
@@ -1517,16 +1528,17 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
     return {avg:py.avg/eps, hi:py.high/eps, lo:py.low/eps};
   });
   var curPrice = price&&price.price;
+  // Compute shares outstanding from mktCap/price for historical ratio calculation
+  var currShares = (f&&f.mktCap&&curPrice) ? f.mktCap/curPrice : null;
   var pfcfVals = buildValSeries(function(i,py){
-    var fcf=fin.freeCF[i]; if(!fcf||fcf<=0) return null;
-    var curRat = f&&f.pfcf, cp=curPrice;
-    if(!curRat||!cp) return null;
-    return {avg:py.avg/cp*curRat, hi:py.high/cp*curRat, lo:py.low/cp*curRat};
+    var fcf=fin.freeCF[i]; if(!fcf||fcf<=0||!py||!currShares) return null;
+    var fcfPerShare = fcf*1e9/currShares; if(fcfPerShare<=0) return null;
+    return {avg:py.avg/fcfPerShare, hi:py.high/fcfPerShare, lo:py.low/fcfPerShare};
   });
   var pocfVals = buildValSeries(function(i,py){
-    var curRat = f&&f.pocf, cp=curPrice;
-    if(!curRat||!cp) return null;
-    return {avg:py.avg/cp*curRat, hi:py.high/cp*curRat, lo:py.low/cp*curRat};
+    var ocf=fin.operatingCF[i]; if(!ocf||ocf<=0||!py||!currShares) return null;
+    var ocfPerShare = ocf*1e9/currShares; if(ocfPerShare<=0) return null;
+    return {avg:py.avg/ocfPerShare, hi:py.high/ocfPerShare, lo:py.low/ocfPerShare};
   });
 
   // Latest year waterfall data
@@ -1540,6 +1552,27 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
     other: fin.operatingIncome[ly]!=null&&fin.netIncome[ly]!=null ? fin.operatingIncome[ly]-fin.netIncome[ly] : null,
     netIncome: fin.netIncome[ly],
   };
+
+  // Fill right column with compact financial KPIs
+  var finRight = document.getElementById('cd-fin-right');
+  if(finRight && fin.years.length) {
+    var lyr = fin.years.length-1;
+    function kpiBadge(lbl, val, fmt, colorFn){
+      if(val==null) return '';
+      var col=colorFn?colorFn(val):'var(--text)';
+      return '<div style="text-align:center;padding:8px 10px;background:var(--card2);border-radius:8px">'+
+        '<div style="font-size:10px;color:var(--muted);margin-bottom:3px">'+lbl+'</div>'+
+        '<div style="font-size:13px;font-weight:700;color:'+col+'">'+fmt(val)+'</div></div>';
+    }
+    var revYoY=fin.revenue[lyr]&&lyr>0&&fin.revenue[lyr-1]?(fin.revenue[lyr]-fin.revenue[lyr-1])/Math.abs(fin.revenue[lyr-1])*100:null;
+    var niYoY=fin.netIncome[lyr]&&lyr>0&&fin.netIncome[lyr-1]&&fin.netIncome[lyr-1]>0?(fin.netIncome[lyr]-fin.netIncome[lyr-1])/Math.abs(fin.netIncome[lyr-1])*100:null;
+    finRight.innerHTML='<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">'+
+      kpiBadge('CA '+fin.years[lyr], fin.revenue[lyr], function(v){return v.toFixed(1)+'Md'+sym;}, null)+
+      kpiBadge('▲ CA YoY', revYoY, function(v){return (v>=0?'+':'')+v.toFixed(1)+'%';}, function(v){return v>15?'var(--green)':v>=0?'var(--yellow)':'var(--red)';})+
+      kpiBadge('Rés. net '+fin.years[lyr], fin.netIncome[lyr], function(v){return v.toFixed(1)+'Md'+sym;}, function(v){return v>0?'var(--green)':'var(--red)';})+
+      kpiBadge('▲ RN YoY', niYoY, function(v){return (v>=0?'+':'')+v.toFixed(1)+'%';}, function(v){return v>15?'var(--green)':v>=0?'var(--yellow)':'var(--red)';})+
+      '</div>';
+  }
 
   var grids3 = 'display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:16px';
   var grids2 = 'display:grid;grid-template-columns:1fr 2fr;gap:16px;margin-bottom:16px';
