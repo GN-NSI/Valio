@@ -1473,6 +1473,7 @@ function setManualPrice(ticker){
   }
   if(S.page==='portfolio'){
     if(document.getElementById('pos-body')&&S.enrichedPos.length) renderPosBody(sortPos(S.enrichedPos));
+    updateKPIs(S.enrichedPos);
     renderDonut();
   }
 }
