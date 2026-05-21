@@ -1463,11 +1463,16 @@ function setManualPrice(ticker){
   if(isNaN(p)||p<=0)return showToast('❌ Prix invalide (ex: 1850,50)');
   manualPrices[ticker]={price:p,currency:'EUR',changePct:0,_t:Date.now(),manual:true};
   showToast('✅ Prix enregistré pour '+ticker+' : '+fN(p)+' €');
-  // Mettre à jour l'UI sans recharger toute la page
-  S.enrichedPos=[];
+  // Patcher uniquement la position concernée dans S.enrichedPos (ne pas vider le cache)
+  const ep=S.enrichedPos.find(x=>x.ticker===ticker);
+  if(ep){
+    ep.priceEur=p;
+    ep.valueEur=p*ep.quantity;
+    ep.pnlEur=ep.valueEur-ep.totalCostEur;
+    ep.pnlPct=ep.totalCostEur>0?(ep.pnlEur/ep.totalCostEur)*100:0;
+  }
   if(S.page==='portfolio'){
-    const pos=computePositions();
-    if(document.getElementById('pos-body')) renderPosBody(sortPos(pos));
+    if(document.getElementById('pos-body')&&S.enrichedPos.length) renderPosBody(sortPos(S.enrichedPos));
     renderDonut();
   }
 }
