@@ -856,12 +856,20 @@ async function loadRatios(){
   if(btn)btn.disabled=true;
   el.innerHTML='<div class="spinner"></div>';
 
-  // Tickers exclus des ratios (sociétés non-analysables avec métriques standard)
-  const RATIO_EXCLUDE=new Set(['NVTS']);
+  const RATIO_EXCLUDE=new Set(['NVTS','LYFT']); // EPS TTM aberrant (transition perte→profit)
+  const METRICS=[
+    {key:'trailingPE',  label:'PER trail.', fmt:v=>v.toFixed(1)+'x', opts:{min:0,max:150}, color:v=>v<15?'var(--green)':v<30?'var(--yellow)':'var(--red)'},
+    {key:'forwardPE',   label:'PER fwd.',   fmt:v=>v.toFixed(1)+'x', opts:{min:0,max:100}, color:v=>v<20?'var(--green)':v<25?'var(--yellow)':'var(--red)'},
+    {key:'pegRatio',    label:'PEG',        fmt:v=>v.toFixed(2)+'x', opts:{min:0,max:20},  color:v=>v<1?'var(--green)':v<2?'var(--yellow)':'var(--red)'},
+    {key:'profitMarginPct',  label:'Marge nette', fmt:v=>v.toFixed(1)+'%', opts:{}, color:v=>v>20?'var(--green)':v>10?'var(--yellow)':'var(--red)'},
+    {key:'returnOnEquity',   label:'ROE',         fmt:v=>v.toFixed(1)+'%', opts:{min:-100,max:300}, color:v=>v>20?'var(--green)':v>10?'var(--yellow)':'var(--red)'},
+    {key:'revenueGrowthYoY', label:'Crois. CA',   fmt:v=>(v>=0?'+':'')+v.toFixed(1)+'%', opts:{}, color:v=>v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)'},
+    {key:'epsGrowth1Y',      label:'Crois. EPS',  fmt:v=>(v>=0?'+':'')+v.toFixed(1)+'%', opts:{}, color:v=>v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)'},
+  ];
 
   const pos=(S.enrichedPos.length?S.enrichedPos:computePositions())
     .filter(p=>!isETF(p) && !RATIO_EXCLUDE.has(p.ticker));
-  if(!pos.length){el.innerHTML='<span style="color:var(--muted)">Aucune action en portefeuille.</span>';if(btn)btn.disabled=false;return;}
+  if(!pos.length){el.innerHTML='<span style="color:var(--muted)">Aucune action.</span>';if(btn)btn.disabled=false;return;}
 
   await Promise.all(pos.map(async p=>{
     if(!S.fundamentals[p.ticker]&&!S.fundamentalsAttempted.has(p.ticker)){
@@ -870,41 +878,80 @@ async function loadRatios(){
     }
   }));
 
-  // Moyenne pondérée par valeur — avec garde-fous sur les valeurs aberrantes
-  function wavg(key, opts={}){
-    const {min=-Infinity, max=Infinity}=opts;
+  const totalVal=pos.reduce((s,p)=>s+(p.valueEur||0),0);
+
+  // Moyenne pondérée avec bornes
+  function wavg(key,opts={}){
+    const {min=-Infinity,max=Infinity}=opts;
     let sum=0,w=0;
-    pos.forEach(p=>{
-      const f=S.fundamentals[p.ticker];const v=p.valueEur||0;
-      const val=f?.[key];
-      if(val!=null&&!isNaN(val)&&isFinite(val)&&v>0&&val>=min&&val<=max){sum+=val*v;w+=v;}
-    });
+    pos.forEach(p=>{const f=S.fundamentals[p.ticker];const v=p.valueEur||0;const val=f?.[key];
+      if(val!=null&&!isNaN(val)&&isFinite(val)&&v>0&&val>=min&&val<=max){sum+=val*v;w+=v;}});
     return w>0?sum/w:null;
   }
-  function mrow(label,val,fmt,colorFn){
-    if(val==null)return`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border2)"><span style="font-size:12px;color:var(--muted)">${label}</span><span style="font-size:12px;color:var(--muted)">—</span></div>`;
-    return`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border2)"><span style="font-size:12px;color:var(--muted)">${label}</span><span class="mono" style="font-size:12px;color:${colorFn(val)}">${fmt(val)}</span></div>`;
+
+  // ── Ligne résumé ──
+  function mrow(label,val,fmt,color){
+    const v=val==null?'<span style="color:var(--muted)">—</span>':`<span class="mono" style="color:${color(val)}">${fmt(val)}</span>`;
+    return`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border2)">
+      <span style="font-size:12px;color:var(--muted)">${label}</span>${v}</div>`;
   }
 
-  // Forward PE : exclure les valeurs négatives et > 100 (trop spéculatif)
-  const pe  = wavg('trailingPE',  {min:0, max:150});
-  const fpe = wavg('forwardPE',   {min:0, max:100});
-  const peg = wavg('pegRatio',    {min:0, max:20});
-  const mg  = wavg('profitMarginPct');
-  const roe = wavg('returnOnEquity', {min:-100, max:300});
-  const ca  = wavg('revenueGrowthYoY');
-  const eps = wavg('epsGrowth1Y');
+  const avgs=METRICS.map(m=>wavg(m.key,m.opts));
+  let summaryHTML=METRICS.map((m,i)=>mrow(m.label,avgs[i],m.fmt,m.color)).join('');
+
+  // ── Tableau détail par société ──
+  const thStyle='padding:4px 8px;font-size:10px;color:var(--muted2);text-align:right;white-space:nowrap;font-weight:500';
+  const tdStyle='padding:4px 8px;font-size:11px;text-align:right;white-space:nowrap';
+  const tdName='padding:4px 8px;font-size:11px;font-weight:600;white-space:nowrap;color:var(--text)';
+
+  let thead=`<tr><th style="${thStyle};text-align:left">Société</th><th style="${thStyle}">Poids</th>`+
+    METRICS.map(m=>`<th style="${thStyle}">${m.label}</th>`).join('')+'</tr>';
+
+  let tbody=pos.map(p=>{
+    const f=S.fundamentals[p.ticker]||{};
+    const w=totalVal>0?((p.valueEur||0)/totalVal*100):0;
+    const cells=METRICS.map((m,i)=>{
+      const val=f[m.key];
+      const {min=-Infinity,max=Infinity}=m.opts;
+      const excluded=val!=null&&(val<min||val>max);
+      if(val==null||isNaN(val)||!isFinite(val)){
+        return`<td style="${tdStyle};color:var(--muted)">—</td>`;
+      }
+      if(excluded){
+        return`<td style="${tdStyle};color:var(--muted)" title="Exclu (hors bornes)">${m.fmt(val)} ⚠</td>`;
+      }
+      return`<td style="${tdStyle};color:${m.color(val)}">${m.fmt(val)}</td>`;
+    }).join('');
+    return`<tr style="border-bottom:1px solid var(--border2)">
+      <td style="${tdName}">${p.name||p.ticker}<br><span style="font-size:9px;color:var(--muted)">${p.ticker}</span></td>
+      <td style="${tdStyle};color:var(--muted)">${w.toFixed(1)}%</td>
+      ${cells}</tr>`;
+  }).join('');
+
+  // Ligne moyenne pondérée dans le tableau
+  const avgRow=`<tr style="border-top:2px solid var(--border);background:rgba(255,255,255,0.03)">
+    <td style="${tdName};color:var(--muted2)">Moy. pondérée</td>
+    <td style="${tdStyle}">—</td>`+
+    METRICS.map((m,i)=>avgs[i]==null
+      ?`<td style="${tdStyle};color:var(--muted)">—</td>`
+      :`<td style="${tdStyle};color:${m.color(avgs[i])};font-weight:700">${m.fmt(avgs[i])}</td>`
+    ).join('')+'</tr>';
+
+  const detailHTML=`
+    <div id="ratios-detail" style="display:none;margin-top:12px;overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;min-width:600px">
+        <thead style="background:rgba(255,255,255,0.03)">${thead}</thead>
+        <tbody>${tbody}${avgRow}</tbody>
+      </table>
+      <div style="font-size:10px;color:var(--muted2);margin-top:4px">⚠ = valeur hors bornes, exclue de la moyenne</div>
+    </div>
+    <button onclick="var d=document.getElementById('ratios-detail');var b=this;if(d.style.display==='none'){d.style.display='';b.textContent='▲ Masquer le détail'}else{d.style.display='none';b.textContent='▼ Voir le détail par société'}"
+      style="margin-top:8px;font-size:11px;color:var(--blue);background:none;border:none;cursor:pointer;padding:0">▼ Voir le détail par société</button>`;
 
   const excludedList=[...RATIO_EXCLUDE].join(', ');
-  el.innerHTML=
-    mrow('PER trailing', pe,  v=>v.toFixed(1)+'x', v=>v<15?'var(--green)':v<30?'var(--yellow)':'var(--red)')+
-    mrow('PER forward',  fpe, v=>v.toFixed(1)+'x', v=>v<20?'var(--green)':v<25?'var(--yellow)':'var(--red)')+
-    mrow('PEG',          peg, v=>v.toFixed(2)+'x', v=>v<1?'var(--green)':v<2?'var(--yellow)':'var(--red)')+
-    mrow('Marge nette',  mg,  v=>v.toFixed(1)+'%', v=>v>20?'var(--green)':v>10?'var(--yellow)':'var(--red)')+
-    mrow('ROE',          roe, v=>v.toFixed(1)+'%', v=>v>20?'var(--green)':v>10?'var(--yellow)':'var(--red)')+
-    mrow('Croissance CA',ca,  v=>(v>=0?'+':'')+v.toFixed(1)+'%', v=>v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)')+
-    mrow('Croissance EPS',eps,v=>(v>=0?'+':'')+v.toFixed(1)+'%', v=>v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)')+
-    `<div style="font-size:10px;color:var(--muted2);margin-top:6px">Moyennes pondérées par valeur · actions uniquement · exclus : ${excludedList}</div>`;
+  el.innerHTML=summaryHTML+
+    `<div style="font-size:10px;color:var(--muted2);margin-top:6px">Moyennes pondérées par valeur · actions uniquement · exclus : ${excludedList}</div>`+
+    detailHTML;
   saveCache();if(btn)btn.disabled=false;
 }
 
@@ -930,7 +977,7 @@ function sortSC(col){
 function getSortVal(ticker, col){
   if(col==='price') return (S.prices[ticker]&&S.prices[ticker].price)||0;
   var f=S.fundamentals[ticker]; if(!f) return null;
-  var map={per:'trailingPE',fwdpe:'forwardPE',peg:'pegRatio',pocf:'pocf',marge:'profitMarginPct',ca1a:'revenueGrowthYoY',eps1a:'epsGrowth1Y',debt:'netDebtToEBITDA'};
+  var map={per:'trailingPE',fwdpe:'forwardPE',peg:'pegRatio',pocf:'pocf',marge:'profitMarginPct',ca1a:'revenueGrowthYoY',eps1a:'epsGrowth1Y',epsfwd:'epsGrowthFwd1Y',debt:'netDebtToEBITDA'};
   return f[map[col]]??null;
 }
 function sortItems(items, sort){
@@ -999,7 +1046,7 @@ function renderWatchlistTable(){
       mkLogoCell(w.ticker)+
       '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+w.ticker+'">'+w.name+'</div><div class="ticker-sym">'+w.ticker+'</div></div></div></td>'+
       '<td>'+priceStr+'</td>'+
-      ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','debt'].map(function(k){return '<td id="wr-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
+      ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','epsfwd','debt'].map(function(k){return '<td id="wr-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '<td><button class="btn btn-danger btn-sm" onclick="removeWatch(this)" data-id="'+w.id+'" data-ticker="'+w.ticker+'">✕</button></td>'+
       '</tr>';
   }).join('');
@@ -1013,7 +1060,7 @@ function renderWatchlistTable(){
     thSort('P/OCF','pocf',wlSort,'sortWL')+
     thSort('M. Nette','marge',wlSort,'sortWL')+
     thSort('CA 1A','ca1a',wlSort,'sortWL')+
-    thSort('EPS 1A','eps1a',wlSort,'sortWL')+
+    thSort('EPS 1A','eps1a',wlSort,'sortWL')+thSort('EPS Fwd','epsfwd',wlSort,'sortWL')+
     thSort('D/EBITDA','debt',wlSort,'sortWL')+
     '<th></th>'+
     '</tr></thead><tbody>'+rows+'</tbody></table></div></div>'+
@@ -1056,6 +1103,7 @@ function updateRatioRowById(prefix,ticker){
   set('marge',f.profitMarginPct,function(v){return v.toFixed(1)+'%';},function(v){return v>20?'var(--green)':v>10?'var(--yellow)':v>5?'#f97316':'var(--red)';});
   set('ca1a',f.revenueGrowthYoY,pct,function(v){return v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)';});
   set('eps1a',f.epsGrowth1Y,pct,function(v){return v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)';});
+  set('epsfwd',f.epsGrowthFwd1Y,pct,function(v){return v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)';});
   set('debt',f.netDebtToEBITDA,xs,function(v){return v<1?'var(--green)':v<2?'var(--yellow)':v<3.5?'#f97316':'var(--red)';});
 }
 
@@ -1122,7 +1170,7 @@ async function renderScreener(){
       mkLogoCell(p.ticker)+
       '<div><div class="ticker-name">'+p.name+badge+'</div><div class="ticker-sym">'+p.ticker+(TICKER_SUBSECTOR[p.ticker]?' · <span style="color:var(--muted2);font-size:10px">'+TICKER_SUBSECTOR[p.ticker]+'</span>':'')+'</div></div></div></td>'+
       '<td>'+priceStr+'</td>'+
-      ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
+      ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','epsfwd','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '</tr>';
   }).join('');
 
@@ -1131,7 +1179,7 @@ async function renderScreener(){
     '<button class="btn btn-primary" onclick="loadScreenerRatios()">⟳ Charger les ratios</button></div>'+
     '<div class="card"><div class="tbl-wrap"><table>'+
     '<thead><tr>'+
-    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+thSort('Cours','price',scSort,'sortSC')+thSort('PER','per',scSort,'sortSC')+thSort('Fwd PER','fwdpe',scSort,'sortSC')+thSort('PEG','peg',scSort,'sortSC')+thSort('P/OCF','pocf',scSort,'sortSC')+thSort('M. Nette','marge',scSort,'sortSC')+thSort('CA 1A','ca1a',scSort,'sortSC')+thSort('EPS 1A','eps1a',scSort,'sortSC')+thSort('D/EBITDA','debt',scSort,'sortSC')+
+    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+thSort('Cours','price',scSort,'sortSC')+thSort('PER','per',scSort,'sortSC')+thSort('Fwd PER','fwdpe',scSort,'sortSC')+thSort('PEG','peg',scSort,'sortSC')+thSort('P/OCF','pocf',scSort,'sortSC')+thSort('M. Nette','marge',scSort,'sortSC')+thSort('CA 1A','ca1a',scSort,'sortSC')+thSort('EPS 1A','eps1a',scSort,'sortSC')+thSort('EPS Fwd','epsfwd',scSort,'sortSC')+thSort('D/EBITDA','debt',scSort,'sortSC')+
     '</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
 
   allItems.forEach(function(p){ updateRatioRowById('sc',p.ticker); });
@@ -1400,7 +1448,7 @@ function renderScreenerTable(sort){
       mkLogoCell(p.ticker)+
       '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+p.ticker+'">'+(p.name||p.ticker)+badge+'</div><div class="ticker-sym">'+p.ticker+'</div></div></div></td>'+
       '<td>'+priceStr+'</td>'+
-      ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
+      ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','epsfwd','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '</tr>';
   }).join('');
   allItems.forEach(function(p){ updateRatioRowById('sc',p.ticker); });
