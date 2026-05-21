@@ -1668,142 +1668,190 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
   }, 120);
 }
 
-// ═══ EARNINGS MANUAL — Saisie données que Yahoo Finance ne fournit pas ══════
-
-async function loadManualEarnings(ticker) {
-  var u = getUser(); if(!u) return [];
-  try {
-    return await dbGet('earnings_manual','user_id=eq.'+u.id+'&ticker=eq.'+encodeURIComponent(ticker)+'&order=period.desc') || [];
-  } catch(e) { return []; }
-}
-
-// Segments prédéfinis par ticker
-var TICKER_SEGMENTS = {
-  NVDA:  ['Data Center','Gaming','Professional Visualization','Automotive','OEM & Other'],
-  MSFT:  ['Productivity & Business','Intelligent Cloud','More Personal Computing'],
-  GOOGL: ['Google Services','Google Cloud','Other Bets'],
-  AMZN:  ['North America','International','AWS'],
-  META:  ['Family of Apps','Reality Labs'],
-  AAPL:  ['iPhone','Mac','iPad','Wearables','Services'],
-  TSM:   ['Advanced','Specialty'],
-  BKNG:  ['Accommodation','Rental Cars','Flights','Attractions'],
-};
-
-function openEarningsForm(ticker, name, editId) {
-  var segs = TICKER_SEGMENTS[ticker] || ['Segment 1','Segment 2'];
-  var yr = new Date().getFullYear();
-  var yearOpts = '';
-  for(var y=yr+1;y>=2018;y--) yearOpts+='<option value="'+y+'"'+(y===yr?' selected':'')+'>'+y+'</option>';
-  var segRows = segs.map(function(s,i){
-    return '<div class="seg-row" style="display:flex;gap:8px;margin-bottom:6px">'+
-      '<input class="form-input seg-name" value="'+s+'" placeholder="Segment" style="flex:2">'+
-      '<input class="form-input seg-val" type="number" step="0.1" placeholder="Md'+'" style="flex:1;text-align:right">'+
-      '<button onclick="this.parentNode.remove()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0 4px">×</button>'+
-      '</div>';
-  }).join('');
-
+// ── Vue liste des résultats ──
+async function openEarningsForm(ticker, name) {
+  showModal('<div class="modal-hd"><h2>✏️ Résultats · '+name+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="text-align:center;padding:20px"><div class="spinner"></div></div><div class="modal-footer"><button class="btn btn-primary" onclick="openEarningsEdit(\''+ticker+'\',\''+name+'\'，null)">＋ Ajouter un résultat</button></div>');
+  var entries = await loadManualEarnings(ticker);
+  var tbody = '';
+  if(!entries.length) {
+    tbody = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">Aucun résultat saisi</td></tr>';
+  } else {
+    tbody = entries.map(function(e){
+      var segsLabel = e.segments&&e.segments.length ? '✓ '+e.segments.length+' seg.' : '—';
+      var rev = e.revenue!=null ? e.revenue.toFixed(1)+'Md' : '—';
+      var ni  = e.net_income!=null ? e.net_income.toFixed(1)+'Md' : '—';
+      var eps = e.eps_diluted!=null ? e.eps_diluted.toFixed(2) : '—';
+      return '<tr style="border-bottom:1px solid var(--border2)">'+
+        '<td style="padding:8px 4px;font-weight:600">'+e.period+'</td>'+
+        '<td style="padding:8px 4px;text-align:right" class="mono">'+rev+'</td>'+
+        '<td style="padding:8px 4px;text-align:right" class="mono">'+ni+'</td>'+
+        '<td style="padding:8px 4px;text-align:right" class="mono">'+eps+'</td>'+
+        '<td style="padding:8px 4px;text-align:center;color:var(--green)">'+segsLabel+'</td>'+
+        '<td style="padding:8px 4px;white-space:nowrap">'+
+          '<button class="btn btn-ghost btn-sm" style="padding:3px 8px" onclick="openEarningsEdit(\''+ticker+'\',\''+name+'\',\''+e.id+'\')">✏️</button> '+
+          '<button class="btn btn-ghost btn-sm" style="padding:3px 8px;color:var(--red)" onclick="deleteEarnings(\''+e.id+'\',\''+ticker+'\',\''+name+'\')">🗑</button>'+
+        '</td>'+
+        '</tr>';
+    }).join('');
+  }
   showModal(
-    '<div class="modal-hd"><h2>✏️ Résultats '+(name||ticker)+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div>'+
-    '<div style="max-height:70vh;overflow-y:auto;padding-right:4px">'+
-
-    '<div style="display:flex;gap:10px;margin-bottom:16px">'+
-      '<div class="form-group" style="flex:1"><label class="form-label">Année fiscale</label><select id="em-year" class="form-input">'+yearOpts+'</select></div>'+
-      '<div class="form-group" style="flex:1"><label class="form-label">Période</label><select id="em-period" class="form-input"><option value="Q1">Q1</option><option value="Q2">Q2</option><option value="Q3">Q3</option><option value="Q4">Q4</option><option value="FY" selected>Annuel (FY)</option></select></div>'+
-      '<div class="form-group" style="flex:1"><label class="form-label">Devise</label><select id="em-currency" class="form-input"><option value="USD" selected>USD $</option><option value="EUR">EUR €</option><option value="TWD">TWD</option><option value="KRW">KRW</option></select></div>'+
-    '</div>'+
-
-    '<div class="stats-section-title" style="margin:12px 0 8px">📊 Segments CA (Md — <em>priorité sur Yahoo Finance</em>)</div>'+
-    '<div id="seg-container">'+segRows+'</div>'+
-    '<button onclick="addEarningsSegment()" class="btn btn-ghost btn-sm" style="margin-bottom:16px">+ Ajouter segment</button>'+
-
-    '<div class="stats-section-title" style="margin:12px 0 8px">🔧 Correctifs financiers <span style="font-weight:400;color:var(--muted);font-size:11px">— laisser vide si Yahoo Finance est correct</span></div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">'+
-      '<div class="form-group"><label class="form-label">CA total (Md)</label><input id="em-rev" class="form-input" type="number" step="0.1" placeholder="ex: 130.5"></div>'+
-      '<div class="form-group"><label class="form-label">Marge brute (Md)</label><input id="em-gp" class="form-input" type="number" step="0.1" placeholder=""></div>'+
-      '<div class="form-group"><label class="form-label">Résultat opé. (Md)</label><input id="em-oi" class="form-input" type="number" step="0.1" placeholder=""></div>'+
-      '<div class="form-group"><label class="form-label">Résultat net (Md)</label><input id="em-ni" class="form-input" type="number" step="0.1" placeholder=""></div>'+
-      '<div class="form-group"><label class="form-label">EPS dilué ($)</label><input id="em-eps" class="form-input" type="number" step="0.01" placeholder=""></div>'+
-      '<div class="form-group"><label class="form-label">OCF (Md)</label><input id="em-ocf" class="form-input" type="number" step="0.1" placeholder=""></div>'+
-      '<div class="form-group"><label class="form-label">Capex (Md)</label><input id="em-capex" class="form-input" type="number" step="0.1" placeholder=""></div>'+
-      '<div class="form-group"><label class="form-label">FCF (Md)</label><input id="em-fcf" class="form-input" type="number" step="0.1" placeholder=""></div>'+
-    '</div>'+
-
-    '<div class="stats-section-title" style="margin:12px 0 8px">🔭 Guidance (optionnel)</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'+
-      '<div class="form-group"><label class="form-label">CA guidé min (Md)</label><input id="em-grev-lo" class="form-input" type="number" step="0.1" placeholder=""></div>'+
-      '<div class="form-group"><label class="form-label">CA guidé max (Md)</label><input id="em-grev-hi" class="form-input" type="number" step="0.1" placeholder=""></div>'+
-      '<div class="form-group"><label class="form-label">EPS guidé ($)</label><input id="em-geps" class="form-input" type="number" step="0.01" placeholder=""></div>'+
-    '</div>'+
-    '<div class="form-group" style="margin-bottom:16px"><label class="form-label">Notes guidance</label><input id="em-gnotes" class="form-input" placeholder="ex: forte demande Data Center attendue Q2..."></div>'+
-
-    '</div>'+
+    '<div class="modal-hd"><h2>✏️ Résultats · '+name+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div>'+
+    '<div style="margin-bottom:12px;overflow-x:auto">'+
+    '<table style="width:100%;border-collapse:collapse">'+
+    '<thead><tr style="border-bottom:1px solid var(--border)">'+
+      '<th style="text-align:left;padding:6px 4px;font-size:11px;color:var(--muted)">Période</th>'+
+      '<th style="text-align:right;padding:6px 4px;font-size:11px;color:var(--muted)">CA</th>'+
+      '<th style="text-align:right;padding:6px 4px;font-size:11px;color:var(--muted)">Rés. net</th>'+
+      '<th style="text-align:right;padding:6px 4px;font-size:11px;color:var(--muted)">EPS</th>'+
+      '<th style="text-align:center;padding:6px 4px;font-size:11px;color:var(--muted)">Segments</th>'+
+      '<th style="padding:6px 4px"></th>'+
+    '</tr></thead>'+
+    '<tbody>'+tbody+'</tbody>'+
+    '</table></div>'+
     '<div class="modal-footer">'+
-      '<button class="btn btn-ghost" onclick="closeModal()">Annuler</button>'+
-      '<button class="btn btn-primary" onclick="saveEarningsForm(\''+ticker+'\')">💾 Enregistrer</button>'+
+    '<button class="btn btn-ghost" onclick="closeModal()">Fermer</button>'+
+    '<button class="btn btn-primary" onclick="openEarningsEdit(\''+ticker+'\',\''+name+'\',null)">＋ Ajouter un résultat</button>'+
     '</div>'
   );
-  // Store editId if editing
-  document.getElementById('em-year')._editId = editId || null;
+}
+
+// ── Formulaire ajout / édition ──
+async function openEarningsEdit(ticker, name, entryId) {
+  var existing = null;
+  if(entryId) {
+    try { var res=await dbGet('earnings_manual','id=eq.'+entryId); existing=res&&res[0]; } catch(e){}
+  }
+  var yr = new Date().getFullYear();
+  var yearOpts=''; for(var y=yr+1;y>=2018;y--) yearOpts+='<option value="'+y+'"'+(y===yr?' selected':'')+'>'+y+'</option>';
+
+  // Parse existing period if editing
+  var defYear=yr, defPer='FY';
+  if(existing&&existing.period) {
+    var m=existing.period.match(/^(\d{4})-(Q\d)$/); // e.g. "2026-Q1"
+    var m2=existing.period.match(/^FY(\d{4})$/);       // e.g. "FY2026"
+    if(m){defYear=parseInt(m[1]);defPer=m[2];}
+    else if(m2){defYear=parseInt(m2[1]);defPer='FY';}
+  }
+  yearOpts=yearOpts.replace('value="'+defYear+'"','value="'+defYear+'" selected');
+
+  var defCur=(existing&&existing.currency)||'USD';
+  var periodOpts=['Q1','Q2','Q3','Q4','FY'].map(function(p){return '<option value="'+p+'"'+(p===defPer?' selected':'')+'>'+p+'</option>';}).join('');
+  var curOpts=['USD','EUR','TWD','KRW'].map(function(c){return '<option value="'+c+'"'+(c===defCur?' selected':'')+'>'+c+'</option>';}).join('');
+
+  // Build segment rows
+  var defSegs=(existing&&existing.segments)||TICKER_SEGMENTS[ticker]||[];
+  var segRows=defSegs.map(function(s){
+    var n=typeof s==='string'?s:s.name;
+    var v=typeof s==='string'?'':s.value||'';
+    return '<div class="seg-row" style="display:flex;gap:8px;margin-bottom:6px">'+
+      '<input class="form-input seg-name" value="'+n+'" placeholder="Segment" style="flex:2">'+
+      '<input class="form-input seg-val" type="number" step="0.1" value="'+v+'" placeholder="Md" style="flex:1;text-align:right">'+
+      '<button onclick="this.parentNode.remove()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0 4px">×</button>'+
+    '</div>';
+  }).join('');
+
+  function fld(id,label,val,step){
+    var v=val!=null?val:'';
+    return '<div class="form-group"><label class="form-label">'+label+'</label><input id="em-'+id+'" class="form-input" type="number" step="'+(step||0.1)+'" value="'+v+'" placeholder=""></div>';
+  }
+  var e2=existing||{};
+
+  showModal(
+    '<div class="modal-hd"><h2>'+(entryId?'Modifier':'Ajouter')+' · '+name+'</h2>'+
+    '<button class="modal-close" onclick="openEarningsForm(\''+ticker+'\',\''+name+'\')">←</button></div>'+
+    '<div style="max-height:66vh;overflow-y:auto;padding-right:4px">'+
+
+    '<div style="display:flex;gap:10px;margin-bottom:16px">'+
+      '<div class="form-group" style="flex:1"><label class="form-label">Année</label><select id="em-year" class="form-input">'+yearOpts+'</select></div>'+
+      '<div class="form-group" style="flex:1"><label class="form-label">Période</label><select id="em-period" class="form-input">'+periodOpts+'</select></div>'+
+      '<div class="form-group" style="flex:1"><label class="form-label">Devise</label><select id="em-currency" class="form-input">'+curOpts+'</select></div>'+
+    '</div>'+
+
+    '<div class="stats-section-title" style="margin:0 0 8px">📊 Segments CA (Md)</div>'+
+    '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Priorité sur Yahoo Finance · laisser vide si non disponible</div>'+
+    '<div id="seg-container">'+segRows+'</div>'+
+    '<button onclick="addEarningsSegment()" class="btn btn-ghost btn-sm" style="margin-bottom:14px">+ Segment</button>'+
+
+    '<div class="stats-section-title" style="margin:10px 0 6px">🔧 Correctifs <span style="font-weight:400;color:var(--muted);font-size:10px">— vide = Yahoo Finance</span></div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">'+
+      fld('rev','CA total (Md)',e2.revenue)+fld('gp','Marge brute (Md)',e2.gross_profit)+
+      fld('oi','Résultat opé. (Md)',e2.operating_income)+fld('ni','Résultat net (Md)',e2.net_income)+
+      fld('eps','EPS dilué',e2.eps_diluted,0.01)+fld('ocf','OCF (Md)',e2.ocf)+
+      fld('capex','Capex (Md)',e2.capex)+fld('fcf','FCF (Md)',e2.fcf)+
+    '</div>'+
+
+    '<div class="stats-section-title" style="margin:10px 0 6px">🔭 Guidance (optionnel)</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'+
+      fld('grev-lo','CA guidé min (Md)',e2.guidance_rev_low)+fld('grev-hi','CA guidé max (Md)',e2.guidance_rev_high)+
+      fld('geps','EPS guidé',e2.guidance_eps,0.01)+
+    '</div>'+
+    '<div class="form-group" style="margin-bottom:4px"><label class="form-label">Notes</label>'+
+    '<input id="em-gnotes" class="form-input" value="'+(e2.guidance_notes||'')+'" placeholder="ex: forte demande Data Center Q2…"></div>'+
+    '</div>'+
+
+    '<div class="modal-footer">'+
+    '<button class="btn btn-ghost" onclick="openEarningsForm(\''+ticker+'\',\''+name+'\')">← Retour</button>'+
+    '<button class="btn btn-primary" onclick="saveEarningsEntry(\''+ticker+'\',\''+name+'\','+(entryId?'\''+entryId+'\'':'null')+')">💾 Enregistrer</button>'+
+    '</div>'
+  );
 }
 
 function addEarningsSegment() {
   var c = document.getElementById('seg-container');
   var row = document.createElement('div');
-  row.className = 'seg-row';
-  row.style.cssText = 'display:flex;gap:8px;margin-bottom:6px';
-  row.innerHTML = '<input class="form-input seg-name" placeholder="Nom segment" style="flex:2"><input class="form-input seg-val" type="number" step="0.1" placeholder="Md" style="flex:1;text-align:right"><button onclick="this.parentNode.remove()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0 4px">×</button>';
+  row.className = 'seg-row'; row.style.cssText='display:flex;gap:8px;margin-bottom:6px';
+  row.innerHTML='<input class="form-input seg-name" placeholder="Segment" style="flex:2"><input class="form-input seg-val" type="number" step="0.1" placeholder="Md" style="flex:1;text-align:right"><button onclick="this.parentNode.remove()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0 4px">×</button>';
   c.appendChild(row);
 }
 
-async function saveEarningsForm(ticker) {
+async function saveEarningsEntry(ticker, name, entryId) {
   var yr  = document.getElementById('em-year').value;
   var per = document.getElementById('em-period').value;
-  var period = per === 'FY' ? 'FY'+yr : yr+'-'+per;
+  var period = per==='FY' ? 'FY'+yr : yr+'-'+per;
   var cur = document.getElementById('em-currency').value;
-
-  // Collect segments (non-empty only)
-  var segs = [];
+  var segs=[];
   document.querySelectorAll('.seg-row').forEach(function(row){
-    var n = row.querySelector('.seg-name').value.trim();
-    var v = parseFloat(row.querySelector('.seg-val').value);
-    if(n && !isNaN(v) && v > 0) segs.push({name:n, value:v});
+    var n=row.querySelector('.seg-name').value.trim();
+    var v=parseFloat(row.querySelector('.seg-val').value);
+    if(n&&!isNaN(v)&&v>0) segs.push({name:n,value:v});
   });
-
-  function fv(id){ var v=parseFloat(document.getElementById(id).value); return isNaN(v)?null:v; }
-
-  var u = getUser(); if(!u) return;
-  var data = {
-    user_id: u.id, ticker, period, currency: cur,
-    segments: segs.length ? segs : null,
-    revenue: fv('em-rev'), gross_profit: fv('em-gp'),
-    operating_income: fv('em-oi'), net_income: fv('em-ni'),
-    eps_diluted: fv('em-eps'), ocf: fv('em-ocf'),
-    capex: fv('em-capex'), fcf: fv('em-fcf'),
-    guidance_rev_low: fv('em-grev-lo'), guidance_rev_high: fv('em-grev-hi'),
-    guidance_eps: fv('em-geps'),
-    guidance_notes: document.getElementById('em-gnotes').value.trim()||null,
-    updated_at: new Date().toISOString(),
+  function fv(id){var v=parseFloat(document.getElementById('em-'+id).value);return isNaN(v)?null:v;}
+  var u=getUser(); if(!u) return;
+  var data={
+    user_id:u.id, ticker, period, currency:cur,
+    segments:segs.length?segs:null,
+    revenue:fv('rev'), gross_profit:fv('gp'), operating_income:fv('oi'), net_income:fv('ni'),
+    eps_diluted:fv('eps'), ocf:fv('ocf'), capex:fv('capex'), fcf:fv('fcf'),
+    guidance_rev_low:fv('grev-lo'), guidance_rev_high:fv('grev-hi'), guidance_eps:fv('geps'),
+    guidance_notes:document.getElementById('em-gnotes').value.trim()||null,
+    updated_at:new Date().toISOString(),
   };
-
   try {
-    // Upsert: update si période existe déjà, sinon insert
-    var existing = await dbGet('earnings_manual','user_id=eq.'+u.id+'&ticker=eq.'+encodeURIComponent(ticker)+'&period=eq.'+encodeURIComponent(period));
-    if(existing && existing.length) {
-      await dbPatch('earnings_manual','id=eq.'+existing[0].id, data);
+    if(entryId) {
+      await dbPatch('earnings_manual','id=eq.'+entryId, data);
+      showToast('✅ Modifié · '+ticker+' '+period);
     } else {
-      await dbPost('earnings_manual', data);
+      var ex=await dbGet('earnings_manual','user_id=eq.'+u.id+'&ticker=eq.'+encodeURIComponent(ticker)+'&period=eq.'+encodeURIComponent(period));
+      if(ex&&ex.length) await dbPatch('earnings_manual','id=eq.'+ex[0].id,data);
+      else await dbPost('earnings_manual',data);
+      showToast('✅ Enregistré · '+ticker+' '+period);
     }
-    closeModal();
-    showToast('✅ Résultats '+ticker+' '+period+' enregistrés');
-    // Recharger les graphiques
-    if(S.page === 'company') {
-      var price2 = S.prices[ticker];
-      loadCdFinancials(ticker, price2, window._cdChartPts||[], S.fundamentals[ticker]);
-    }
-  } catch(e) { showToast('❌ Erreur: '+e.message); }
+    // Retour à la liste
+    openEarningsForm(ticker, name);
+    // Refresh graphiques
+    if(S.page==='company') loadCdFinancials(ticker,S.prices[ticker],window._cdChartPts||[],S.fundamentals[ticker]);
+  } catch(e2){showToast('❌ '+e2.message);}
 }
 
-
+async function deleteEarnings(id, ticker, name) {
+  if(!confirm('Supprimer cette entrée ?')) return;
+  try {
+    await dbDel('earnings_manual','id=eq.'+id);
+    showToast('✅ Supprimé');
+    openEarningsForm(ticker, name);
+    if(S.page==='company') loadCdFinancials(ticker,S.prices[ticker],window._cdChartPts||[],S.fundamentals[ticker]);
+  } catch(e){showToast('❌ '+e.message);}
+}
 
 function hasData(datasets){ return datasets.some(function(ds){return ds.data&&ds.data.some(function(v){return v!=null&&v!==0;});}); }
 function cdBarChart(id, labels, datasets) {
