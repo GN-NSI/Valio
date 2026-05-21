@@ -855,28 +855,56 @@ async function loadRatios(){
   if(!el)return;
   if(btn)btn.disabled=true;
   el.innerHTML='<div class="spinner"></div>';
-  const pos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(p=>!isETF(p));
+
+  // Tickers exclus des ratios (sociétés non-analysables avec métriques standard)
+  const RATIO_EXCLUDE=new Set(['NVTS']);
+
+  const pos=(S.enrichedPos.length?S.enrichedPos:computePositions())
+    .filter(p=>!isETF(p) && !RATIO_EXCLUDE.has(p.ticker));
   if(!pos.length){el.innerHTML='<span style="color:var(--muted)">Aucune action en portefeuille.</span>';if(btn)btn.disabled=false;return;}
+
   await Promise.all(pos.map(async p=>{
     if(!S.fundamentals[p.ticker]&&!S.fundamentalsAttempted.has(p.ticker)){
       S.fundamentalsAttempted.add(p.ticker);
       try{const r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker)+'&type=fundamentals',{signal:AbortSignal.timeout(10000)});const d=await r.json();if(d&&!d.error)S.fundamentals[p.ticker]=d;}catch(e){}
     }
   }));
-  function wavg(key){let sum=0,w=0;pos.forEach(p=>{const f=S.fundamentals[p.ticker];const v=p.valueEur||0;if(f&&f[key]!=null&&!isNaN(f[key])&&isFinite(f[key])&&v>0){sum+=f[key]*v;w+=v;}});return w>0?sum/w:null;}
+
+  // Moyenne pondérée par valeur — avec garde-fous sur les valeurs aberrantes
+  function wavg(key, opts={}){
+    const {min=-Infinity, max=Infinity}=opts;
+    let sum=0,w=0;
+    pos.forEach(p=>{
+      const f=S.fundamentals[p.ticker];const v=p.valueEur||0;
+      const val=f?.[key];
+      if(val!=null&&!isNaN(val)&&isFinite(val)&&v>0&&val>=min&&val<=max){sum+=val*v;w+=v;}
+    });
+    return w>0?sum/w:null;
+  }
   function mrow(label,val,fmt,colorFn){
     if(val==null)return`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border2)"><span style="font-size:12px;color:var(--muted)">${label}</span><span style="font-size:12px;color:var(--muted)">—</span></div>`;
     return`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border2)"><span style="font-size:12px;color:var(--muted)">${label}</span><span class="mono" style="font-size:12px;color:${colorFn(val)}">${fmt(val)}</span></div>`;
   }
-  const pe=wavg('trailingPE'),fpe=wavg('forwardPE'),peg=wavg('pegRatio'),mg=wavg('profitMarginPct'),roe=wavg('returnOnEquity'),debt=wavg('netDebtToEBITDA');
+
+  // Forward PE : exclure les valeurs négatives et > 100 (trop spéculatif)
+  const pe  = wavg('trailingPE',  {min:0, max:150});
+  const fpe = wavg('forwardPE',   {min:0, max:100});
+  const peg = wavg('pegRatio',    {min:0, max:20});
+  const mg  = wavg('profitMarginPct');
+  const roe = wavg('returnOnEquity', {min:-100, max:300});
+  const ca  = wavg('revenueGrowthYoY');
+  const eps = wavg('epsGrowth1Y');
+
+  const excludedList=[...RATIO_EXCLUDE].join(', ');
   el.innerHTML=
-    mrow('PER trailing',pe,v=>v.toFixed(1)+'x',v=>v<15?'var(--green)':v<30?'var(--yellow)':'var(--red)')+
-    mrow('PER forward',fpe,v=>v.toFixed(1)+'x',v=>v<20?'var(--green)':v<25?'var(--yellow)':'var(--red)')+
-    mrow('PEG',peg,v=>v.toFixed(2)+'x',v=>v<1?'var(--green)':v<2?'var(--yellow)':'var(--red)')+
-    mrow('Marge nette',mg,v=>v.toFixed(1)+'%',v=>v>20?'var(--green)':v>10?'var(--yellow)':'var(--red)')+
-    mrow('ROE',roe,v=>v.toFixed(1)+'%',v=>v>20?'var(--green)':v>10?'var(--yellow)':'var(--red)')+
-    mrow('Dette/EBITDA',debt,v=>v.toFixed(2)+'x',v=>v<1?'var(--green)':v<2?'var(--yellow)':'var(--red)')+
-    `<div style="font-size:10px;color:var(--muted2);margin-top:6px">Moyennes pondérées par valeur · actions uniquement</div>`;
+    mrow('PER trailing', pe,  v=>v.toFixed(1)+'x', v=>v<15?'var(--green)':v<30?'var(--yellow)':'var(--red)')+
+    mrow('PER forward',  fpe, v=>v.toFixed(1)+'x', v=>v<20?'var(--green)':v<25?'var(--yellow)':'var(--red)')+
+    mrow('PEG',          peg, v=>v.toFixed(2)+'x', v=>v<1?'var(--green)':v<2?'var(--yellow)':'var(--red)')+
+    mrow('Marge nette',  mg,  v=>v.toFixed(1)+'%', v=>v>20?'var(--green)':v>10?'var(--yellow)':'var(--red)')+
+    mrow('ROE',          roe, v=>v.toFixed(1)+'%', v=>v>20?'var(--green)':v>10?'var(--yellow)':'var(--red)')+
+    mrow('Croissance CA',ca,  v=>(v>=0?'+':'')+v.toFixed(1)+'%', v=>v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)')+
+    mrow('Croissance EPS',eps,v=>(v>=0?'+':'')+v.toFixed(1)+'%', v=>v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)')+
+    `<div style="font-size:10px;color:var(--muted2);margin-top:6px">Moyennes pondérées par valeur · actions uniquement · exclus : ${excludedList}</div>`;
   saveCache();if(btn)btn.disabled=false;
 }
 
