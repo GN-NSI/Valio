@@ -173,23 +173,27 @@ module.exports = async (req, res) => {
   // ── FINANCIALS (income statement, cashflow, bilan annuels) ──────────────
   if (type === 'financials') {
     const finKey = symbol + '_fin';
-    const FIN_V = 2;
+    const FIN_V = 3; // bumped: separate requests + grossProfit fallback
     try {
       const cachedFin = await getCache(finKey);
       if (cachedFin && cachedFin._v === FIN_V && cachedFin.years && cachedFin.years.length)
         return res.json({ ...cachedFin, _fromCache: true });
     } catch(e) {}
     try {
-      const yf = await yfSummary(symbol,
-        'incomeStatementHistory,cashflowStatementHistory,balanceSheetHistory');
-      if (!yf) return res.status(404).json({ error: 'No financial data' });
+      // Requêtes séparées en parallèle — plus fiable que le module combiné
+      const [yf_is, yf_cf, yf_bs] = await Promise.all([
+        yfSummary(symbol, 'incomeStatementHistory'),
+        yfSummary(symbol, 'cashflowStatementHistory'),
+        yfSummary(symbol, 'balanceSheetHistory'),
+      ]);
+      if (!yf_is) return res.status(404).json({ error: 'No financial data' });
 
       const raw = v => v?.raw ?? null;
       const sc  = v => v != null ? Math.round(v / 1e8) / 10 : null; // → Md$, 1 déc.
 
-      const stmt = [...(yf?.incomeStatementHistory?.incomeStatementHistory || [])].reverse();
-      const cf   = [...(yf?.cashflowStatementHistory?.cashflowStatements  || [])].reverse();
-      const bs   = [...(yf?.balanceSheetHistory?.balanceSheetStatements   || [])].reverse();
+      const stmt = [...(yf_is?.incomeStatementHistory?.incomeStatementHistory || [])].reverse();
+      const cf   = [...(yf_cf?.cashflowStatementHistory?.cashflowStatements   || [])].reverse();
+      const bs   = [...(yf_bs?.balanceSheetHistory?.balanceSheetStatements    || [])].reverse();
 
       const years = stmt.map(s => {
         const ts = raw(s.endDate);
@@ -200,16 +204,30 @@ module.exports = async (req, res) => {
       const result = {
         symbol, _v: FIN_V, years,
         revenue:         m(stmt, s => sc(raw(s.totalRevenue))),
-        grossProfit:     m(stmt, s => sc(raw(s.grossProfit))),
-        operatingIncome: m(stmt, s => sc(raw(s.operatingIncome) ?? raw(s.ebit))),
+        // grossProfit: fallback sur costOfRevenue si null ou 0
+        grossProfit:     m(stmt, s => {
+          const gp = raw(s.grossProfit);
+          if(gp != null && gp !== 0) return sc(gp);
+          const rev = raw(s.totalRevenue), cogs = raw(s.costOfRevenue);
+          return (rev != null && cogs != null) ? sc(rev - cogs) : null;
+        }),
+        // operatingIncome: plusieurs fallbacks
+        operatingIncome: m(stmt, s => {
+          const oi = raw(s.operatingIncome) ?? raw(s.ebit);
+          if(oi != null && oi !== 0) return sc(oi);
+          const gp  = raw(s.grossProfit) ?? (raw(s.totalRevenue) && raw(s.costOfRevenue) ? raw(s.totalRevenue) - raw(s.costOfRevenue) : null);
+          const rd  = raw(s.researchDevelopment) || 0;
+          const sga = raw(s.sellingGeneralAdministrative) || 0;
+          return gp != null ? sc(gp - rd - sga) : null;
+        }),
         netIncome:       m(stmt, s => sc(raw(s.netIncome))),
         eps:             m(stmt, s => raw(s.dilutedEps) ?? raw(s.basicEps)),
         rd:              m(stmt, s => sc(raw(s.researchDevelopment))),
         sga:             m(stmt, s => sc(raw(s.sellingGeneralAdministrative))),
-        operatingCF:     m(cf,   s => sc(raw(s.totalCashFromOperatingActivities))),
+        operatingCF:     m(cf,   s => sc(raw(s.totalCashFromOperatingActivities) ?? raw(s.operatingCashflow))),
         capex:           m(cf,   s => sc(raw(s.capitalExpenditures))),
         freeCF:          m(cf,   s => {
-          const ocf = raw(s.totalCashFromOperatingActivities);
+          const ocf = raw(s.totalCashFromOperatingActivities) ?? raw(s.operatingCashflow);
           const cx  = raw(s.capitalExpenditures);
           return ocf != null ? sc(ocf + (cx ?? 0)) : null;
         }),
@@ -223,8 +241,7 @@ module.exports = async (req, res) => {
           raw(s.longTermDebt) ??
           raw(s.longTermDebtAndCapitalLeaseObligation) ??
           raw(s.totalDebt) ??
-          (raw(s.totalLiab) && raw(s.totalCurrentLiabilities)
-            ? raw(s.totalLiab) - raw(s.totalCurrentLiabilities) : null)
+          (raw(s.totalLiab) && raw(s.totalCurrentLiabilities) ? raw(s.totalLiab) - raw(s.totalCurrentLiabilities) : null)
         )),
       };
       await setCache(finKey, result);
