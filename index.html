@@ -1668,52 +1668,81 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
   }, 120);
 }
 
-// ── Vue liste des résultats ──
+// ═══ EARNINGS MANUAL ════════════════════════════════════════════════════════
+
+var TICKER_SEGMENTS = {
+  NVDA:['Data Center','Gaming','Professional Visualization','Automotive','OEM & Other'],
+  MSFT:['Productivity & Business','Intelligent Cloud','More Personal Computing'],
+  GOOGL:['Google Services','Google Cloud','Other Bets'],
+  AMZN:['North America','International','AWS'],
+  META:['Family of Apps','Reality Labs'],
+  AAPL:['iPhone','Mac','iPad','Wearables','Services'],
+  TSM:['Advanced','Specialty'],
+  BKNG:['Accommodation','Rental Cars','Flights','Attractions'],
+};
+
+async function loadManualEarnings(ticker) {
+  var u = getUser(); if(!u) return [];
+  try {
+    var result = await Promise.race([
+      dbGet('earnings_manual','user_id=eq.'+u.id+'&ticker=eq.'+encodeURIComponent(ticker)+'&order=period.desc'),
+      new Promise(function(_,rej){setTimeout(function(){rej(new Error('timeout'));},5000);})
+    ]);
+    return result || [];
+  } catch(e) { return []; }
+}
+
 async function openEarningsForm(ticker, name) {
-  showModal('<div class="modal-hd"><h2>✏️ Résultats · '+name+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="text-align:center;padding:20px"><div class="spinner"></div></div><div class="modal-footer"><button class="btn btn-primary" onclick="openEarningsEdit(\''+ticker+'\',\''+name+'\'，null)">＋ Ajouter un résultat</button></div>');
-  var entries = await loadManualEarnings(ticker);
-  var tbody = '';
-  if(!entries.length) {
-    tbody = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">Aucun résultat saisi</td></tr>';
-  } else {
-    tbody = entries.map(function(e){
-      var segsLabel = e.segments&&e.segments.length ? '✓ '+e.segments.length+' seg.' : '—';
-      var rev = e.revenue!=null ? e.revenue.toFixed(1)+'Md' : '—';
-      var ni  = e.net_income!=null ? e.net_income.toFixed(1)+'Md' : '—';
-      var eps = e.eps_diluted!=null ? e.eps_diluted.toFixed(2) : '—';
+  var sn = name.replace(/'/g,"\\'");
+  window._emTicker=ticker; window._emName=name;
+  window._emAdd=function(){openEarningsEdit(window._emTicker,window._emName,null);};
+  showModal(
+    '<div class="modal-hd"><h2>✏️ Résultats · '+name+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div>'+
+    '<div id="em-list-body" style="text-align:center;padding:30px"><div class="spinner"></div></div>'+
+    '<div class="modal-footer">'+
+      '<button class="btn btn-ghost" onclick="closeModal()">Fermer</button>'+
+      '<button class="btn btn-primary" onclick="_emAdd()">＋ Ajouter un résultat</button>'+
+    '</div>'
+  );
+  loadManualEarnings(ticker).then(function(entries){
+    var el = document.getElementById('em-list-body');
+    if(!el) return;
+    if(!entries||!entries.length){
+      el.innerHTML='<p style="text-align:center;color:var(--muted);padding:20px">Aucun résultat saisi — clique &laquo; Ajouter &raquo; pour commencer</p>';
+      return;
+    }
+    // Store entries for id lookup
+    window._emEntries = entries;
+    var rows=entries.map(function(e,i){
+      var segs=e.segments&&e.segments.length?'<span style="color:var(--green)">✓ '+e.segments.length+'</span>':'—';
+      var rev=e.revenue!=null?e.revenue.toFixed(1)+'Md':'—';
+      var ni=e.net_income!=null?e.net_income.toFixed(1)+'Md':'—';
+      var eps=e.eps_diluted!=null?e.eps_diluted.toFixed(2):'—';
       return '<tr style="border-bottom:1px solid var(--border2)">'+
-        '<td style="padding:8px 4px;font-weight:600">'+e.period+'</td>'+
+        '<td style="padding:8px 6px;font-weight:600">'+e.period+'</td>'+
         '<td style="padding:8px 4px;text-align:right" class="mono">'+rev+'</td>'+
         '<td style="padding:8px 4px;text-align:right" class="mono">'+ni+'</td>'+
         '<td style="padding:8px 4px;text-align:right" class="mono">'+eps+'</td>'+
-        '<td style="padding:8px 4px;text-align:center;color:var(--green)">'+segsLabel+'</td>'+
+        '<td style="padding:8px 4px;text-align:center">'+segs+'</td>'+
         '<td style="padding:8px 4px;white-space:nowrap">'+
-          '<button class="btn btn-ghost btn-sm" style="padding:3px 8px" onclick="openEarningsEdit(\''+ticker+'\',\''+name+'\',\''+e.id+'\')">✏️</button> '+
-          '<button class="btn btn-ghost btn-sm" style="padding:3px 8px;color:var(--red)" onclick="deleteEarnings(\''+e.id+'\',\''+ticker+'\',\''+name+'\')">🗑</button>'+
-        '</td>'+
-        '</tr>';
+          '<button class="btn btn-ghost btn-sm" style="padding:3px 8px" data-idx="'+i+'" onclick="openEarningsEdit(window._emTicker,window._emName,window._emEntries[this.dataset.idx].id)">&#x270f;&#xfe0f;</button> '+
+          '<button class="btn btn-ghost btn-sm" style="padding:3px 8px;color:var(--red)" data-idx="'+i+'" onclick="deleteEarnings(window._emEntries[this.dataset.idx].id,window._emTicker,window._emName)">&#x1f5d1;</button>'+
+        '</td></tr>';
     }).join('');
-  }
-  showModal(
-    '<div class="modal-hd"><h2>✏️ Résultats · '+name+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div>'+
-    '<div style="margin-bottom:12px;overflow-x:auto">'+
-    '<table style="width:100%;border-collapse:collapse">'+
-    '<thead><tr style="border-bottom:1px solid var(--border)">'+
-      '<th style="text-align:left;padding:6px 4px;font-size:11px;color:var(--muted)">Période</th>'+
-      '<th style="text-align:right;padding:6px 4px;font-size:11px;color:var(--muted)">CA</th>'+
-      '<th style="text-align:right;padding:6px 4px;font-size:11px;color:var(--muted)">Rés. net</th>'+
-      '<th style="text-align:right;padding:6px 4px;font-size:11px;color:var(--muted)">EPS</th>'+
-      '<th style="text-align:center;padding:6px 4px;font-size:11px;color:var(--muted)">Segments</th>'+
-      '<th style="padding:6px 4px"></th>'+
-    '</tr></thead>'+
-    '<tbody>'+tbody+'</tbody>'+
-    '</table></div>'+
-    '<div class="modal-footer">'+
-    '<button class="btn btn-ghost" onclick="closeModal()">Fermer</button>'+
-    '<button class="btn btn-primary" onclick="openEarningsEdit(\''+ticker+'\',\''+name+'\',null)">＋ Ajouter un résultat</button>'+
-    '</div>'
-  );
+    el.innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'+
+      '<thead><tr style="border-bottom:1px solid var(--border)">'+
+      '<th style="text-align:left;padding:6px;font-size:11px;color:var(--muted)">Période</th>'+
+      '<th style="text-align:right;padding:6px;font-size:11px;color:var(--muted)">CA</th>'+
+      '<th style="text-align:right;padding:6px;font-size:11px;color:var(--muted)">Rés. net</th>'+
+      '<th style="text-align:right;padding:6px;font-size:11px;color:var(--muted)">EPS</th>'+
+      '<th style="text-align:center;padding:6px;font-size:11px;color:var(--muted)">Seg.</th>'+
+      '<th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }).catch(function(){
+    var el=document.getElementById('em-list-body');
+    if(el) el.innerHTML='<p style="text-align:center;color:var(--red);padding:20px">Erreur — vérifie que la table Supabase est créée</p>';
+  });
 }
+
 
 // ── Formulaire ajout / édition ──
 async function openEarningsEdit(ticker, name, entryId) {
