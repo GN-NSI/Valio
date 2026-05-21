@@ -470,7 +470,7 @@ function navigate(page){
   S.page=page;
   document.querySelectorAll('.nav-item:not(.disabled)').forEach(e=>e.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes'}[page]||page;
+  document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes',ratios:'Screener',watchlist:'Watchlist',screener:'Screener'}[page]||page;
   const pfDiv=document.getElementById('page-portfolio');
   const pgDiv=document.getElementById('page');
   if(page==='portfolio'){
@@ -1356,16 +1356,34 @@ async function renderCompanyDetail(ticker, name) {
     chartPts = dc.chartData || [];
   } catch(e) {}
 
+  // Find user position for PRU line
+  var pos = S.enrichedPos.find(function(p){return p.ticker===ticker;});
+  window._cdLastPos = pos;
+
+  // Fin section placeholder (chargement asynchrone)
+  var finEl = document.getElementById('cd-fin-section');
+  if(!finEl){
+    finEl = document.createElement('div');
+    finEl.id = 'cd-fin-section';
+    finEl.style.marginTop='20px';
+    finEl.innerHTML='<div style="text-align:center;padding:16px"><div class="spinner"></div> <span style="color:var(--muted);font-size:12px">Chargement des analyses…</span></div>';
+    document.getElementById('page').appendChild(finEl);
+  }
+
   // Dessiner le graphique
-  drawCdChart(chartPts, price, ticker);
+  drawCdChart(chartPts, price, ticker, pos);
+
+  // Charger données financières (async, sans bloquer)
+  loadCdFinancials(ticker, price, chartPts, f);
 }
 
-function drawCdChart(pts, price, ticker) {
+function drawCdChart(pts, price, ticker, pos) {
   var currSym = (price && price.currency === 'EUR') ? '€' : '$';
   var _ticker = ticker || (price && price.symbol) || '';
   // Store pts+ticker for period switching
   window._cdLastPrice = price;
   window._cdLastTicker = _ticker;
+  if(pos !== undefined) window._cdLastPos = pos;
   setTimeout(function(){
     var canvas = document.getElementById('company-price-chart');
     if(!canvas) return;
@@ -1386,14 +1404,25 @@ function drawCdChart(pts, price, ticker) {
     var isUp = values[values.length-1] >= values[0];
     var col = isUp ? '#22c55e' : '#ef4444';
     var bg = isUp ? 'rgba(34,197,94,0.07)' : 'rgba(239,68,68,0.07)';
+    // PRU line
+    var _pos = window._cdLastPos;
+    var _isUsd = !(price && price.currency === 'EUR');
+    var pruVal = null;
+    if(_pos && _pos.pruEur){
+      pruVal = _isUsd ? _pos.pruEur * (S.eurUsd||1.10) : _pos.pruEur;
+    }
+    var datasets = [{ data: values, borderColor: col, backgroundColor: bg, fill: true, tension: 0.2, pointRadius: 0, pointHoverRadius: 5, borderWidth: 2, label: 'Cours' }];
+    if(pruVal){
+      datasets.push({ data: Array(values.length).fill(Math.round(pruVal*100)/100), borderColor:'rgba(245,158,11,0.9)', borderWidth:1.5, borderDash:[6,3], pointRadius:0, pointHoverRadius:0, fill:false, label:'PRU '+(_isUsd?'$':'€')+pruVal.toFixed(2), tension:0 });
+    }
     if(window._companyChart){ try{ window._companyChart.destroy(); }catch(e){} window._companyChart=null; }
     window._companyChart = new Chart(canvas, {
       type: 'line',
-      data: { labels: labels, datasets: [{ data: values, borderColor: col, backgroundColor: bg, fill: true, tension: 0.2, pointRadius: 0, pointHoverRadius: 5, borderWidth: 2 }] },
+      data: { labels: labels, datasets: datasets },
       options: {
         responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
         plugins: {
-          legend: { display: false },
+          legend: { display: pruVal!=null, labels:{color:'#6b7280',font:{size:10},boxWidth:10,padding:8} },
           tooltip: {
             mode: 'index', intersect: false,
             callbacks: {
@@ -1429,6 +1458,229 @@ async function changeCdPeriod(btn, ticker) {
     drawCdChart(dc.chartData||[], window._cdLastPrice, ticker);
   } catch(e){}
 }
+
+// ═══ COMPANY DETAIL — FINANCIAL ANALYSIS ═══════════════════════════════════
+
+async function loadCdFinancials(ticker, price, chartPts, f) {
+  var el = document.getElementById('cd-fin-section');
+  if(!el) return;
+  var fin = null;
+  try {
+    var r = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=financials', {signal:AbortSignal.timeout(15000)});
+    var d = await r.json();
+    if(d && !d.error && d.years && d.years.length) fin = d;
+  } catch(e) {}
+  if(!fin || !fin.revenue || !fin.revenue.some(function(v){return v!=null;})) { el.innerHTML=''; return; }
+
+  var isUsd = !(price && price.currency === 'EUR');
+  var sym = isUsd ? '$' : '€';
+
+  // Compute price ranges per calendar year from chartPts
+  var priceByYear = {};
+  (chartPts||[]).forEach(function(pt){
+    var yr = new Date(pt.t*1000).getFullYear();
+    if(!priceByYear[yr]) priceByYear[yr]={sum:0,count:0,high:-Infinity,low:Infinity};
+    priceByYear[yr].sum+=pt.c; priceByYear[yr].count++;
+    if(pt.c>priceByYear[yr].high) priceByYear[yr].high=pt.c;
+    if(pt.c<priceByYear[yr].low)  priceByYear[yr].low=pt.c;
+  });
+  Object.keys(priceByYear).forEach(function(yr){
+    priceByYear[yr].avg = priceByYear[yr].sum / priceByYear[yr].count;
+  });
+
+  // Compute margins
+  function margin(num, denom) {
+    return num!=null && denom && denom>0 ? num/denom*100 : null;
+  }
+  var grossMargins = fin.years.map(function(_,i){ return margin(fin.grossProfit[i], fin.revenue[i]); });
+  var opMargins    = fin.years.map(function(_,i){ return margin(fin.operatingIncome[i], fin.revenue[i]); });
+  var netMargins   = fin.years.map(function(_,i){ return margin(fin.netIncome[i], fin.revenue[i]); });
+
+  // ROE, ROIC approx
+  var roe  = fin.years.map(function(_,i){ return fin.equity[i]&&fin.equity[i]>0 ? fin.netIncome[i]/fin.equity[i]*100 : null; });
+  var roic = fin.years.map(function(_,i){
+    var ic = (fin.equity[i]||0)+(fin.totalDebt[i]||0);
+    return ic>0&&fin.operatingIncome[i]!=null ? fin.operatingIncome[i]*0.79/ic*100 : null;
+  });
+
+  // Valuation history (annual P/E, P/FCF, P/OCF)
+  function buildValSeries(ratioFn) {
+    return fin.years.map(function(yr, i){
+      var year = parseInt(yr.replace('FY',''));
+      var py = priceByYear[year]||priceByYear[year-1]||priceByYear[year+1];
+      if(!py) return null;
+      return ratioFn(i, py);
+    });
+  }
+  var peVals = buildValSeries(function(i,py){
+    var eps=fin.eps[i]; if(!eps||eps<=0) return null;
+    return {avg:py.avg/eps, hi:py.high/eps, lo:py.low/eps};
+  });
+  var curPrice = price&&price.price;
+  var pfcfVals = buildValSeries(function(i,py){
+    var fcf=fin.freeCF[i]; if(!fcf||fcf<=0) return null;
+    var curRat = f&&f.pfcf, cp=curPrice;
+    if(!curRat||!cp) return null;
+    return {avg:py.avg/cp*curRat, hi:py.high/cp*curRat, lo:py.low/cp*curRat};
+  });
+  var pocfVals = buildValSeries(function(i,py){
+    var curRat = f&&f.pocf, cp=curPrice;
+    if(!curRat||!cp) return null;
+    return {avg:py.avg/cp*curRat, hi:py.high/cp*curRat, lo:py.low/cp*curRat};
+  });
+
+  // Latest year waterfall data
+  var ly = fin.years.length-1;
+  var wf = {
+    revenue: fin.revenue[ly],
+    cogs: fin.revenue[ly]!=null&&fin.grossProfit[ly]!=null ? fin.revenue[ly]-fin.grossProfit[ly] : null,
+    grossProfit: fin.grossProfit[ly],
+    opex: fin.grossProfit[ly]!=null&&fin.operatingIncome[ly]!=null ? fin.grossProfit[ly]-fin.operatingIncome[ly] : null,
+    operatingIncome: fin.operatingIncome[ly],
+    other: fin.operatingIncome[ly]!=null&&fin.netIncome[ly]!=null ? fin.operatingIncome[ly]-fin.netIncome[ly] : null,
+    netIncome: fin.netIncome[ly],
+  };
+
+  var grids3 = 'display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:16px';
+  var grids2 = 'display:grid;grid-template-columns:1fr 2fr;gap:16px;margin-bottom:16px';
+  var cH = '190px'; // chart height
+
+  el.innerHTML =
+    '<div style="margin-top:4px;padding-top:24px;border-top:1px solid var(--border)">' +
+    '<h3 style="font-size:15px;font-weight:700;margin-bottom:16px">📊 Historique financier</h3>' +
+    '<div style="'+grids3+'">' +
+      '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Revenus & Bénéfices (Md'+sym+')</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-rev"></canvas></div></div>' +
+      '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Marges</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-margins"></canvas></div></div>' +
+      '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Retours sur capitaux</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-returns"></canvas></div></div>' +
+    '</div>' +
+    '<div style="'+grids2+'">' +
+      '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Résultat '+fin.years[ly]+'</div><div id="cdchart-waterfall"></div></div>' +
+      '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Cash Flow (Md'+sym+')</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-cf"></canvas></div></div>' +
+    '</div>' +
+    '<h3 style="font-size:15px;font-weight:700;margin:4px 0 16px">📈 Valorisation historique</h3>' +
+    '<div style="'+grids3+'">' +
+      '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">P/E</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-pe"></canvas></div></div>' +
+      '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">P/FCF</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-pfcf"></canvas></div></div>' +
+      '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">P/OCF</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-pocf"></canvas></div></div>' +
+    '</div>' +
+    '</div>';
+
+  // Draw all charts (setTimeout for DOM settle)
+  setTimeout(function(){
+    cdBarChart('cdchart-rev', fin.years, [
+      {label:'CA',       data:fin.revenue,   color:'#5b7ef5'},
+      {label:'Rés. net', data:fin.netIncome, color:'#22c55e'},
+      {label:'FCF',      data:fin.freeCF,    color:'#06b6d4'},
+    ]);
+    cdLineChart('cdchart-margins', fin.years, [
+      {label:'Brute', data:grossMargins, color:'#5b7ef5'},
+      {label:'Opé.',  data:opMargins,   color:'#22c55e'},
+      {label:'Nette', data:netMargins,  color:'#f59e0b'},
+    ], '%');
+    cdLineChart('cdchart-returns', fin.years, [
+      {label:'ROE',  data:roe,  color:'#5b7ef5'},
+      {label:'ROIC', data:roic, color:'#22c55e'},
+    ], '%');
+    cdBarChart('cdchart-cf', fin.years, [
+      {label:'FCF',  data:fin.freeCF,    color:'#22c55e'},
+      {label:'OCF',  data:fin.operatingCF, color:'#5b7ef5'},
+      {label:'Capex',data:fin.capex,     color:'#ef4444'},
+    ]);
+    cdWaterfall('cdchart-waterfall', wf, sym);
+    cdValChart('cdchart-pe',   fin.years, peVals,   f&&f.trailingPE, 'P/E');
+    cdValChart('cdchart-pfcf', fin.years, pfcfVals, f&&f.pfcf,       'P/FCF');
+    cdValChart('cdchart-pocf', fin.years, pocfVals, f&&f.pocf,       'P/OCF');
+  }, 120);
+}
+
+function cdBarChart(id, labels, datasets) {
+  var c = document.getElementById(id); if(!c) return;
+  var k='_cdc_'+id; if(window[k]){try{window[k].destroy();}catch(e){}} 
+  window[k] = new Chart(c, {
+    type:'bar',
+    data:{ labels:labels, datasets:datasets.map(function(ds){return {label:ds.label,data:ds.data,backgroundColor:ds.color+'bb',borderColor:ds.color,borderWidth:1,borderRadius:3};}) },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:true,labels:{color:'#6b7280',font:{size:9},boxWidth:8,padding:6}}, tooltip:{callbacks:{label:function(ctx){return ctx.dataset.label+': '+(ctx.raw!=null?ctx.raw.toFixed(1):'—');}}  } },
+      scales:{ x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',font:{size:9}}}, y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',font:{size:9}},position:'right'} }
+    }
+  });
+}
+
+function cdLineChart(id, labels, datasets, unit) {
+  var c = document.getElementById(id); if(!c) return;
+  var k='_cdc_'+id; if(window[k]){try{window[k].destroy();}catch(e){}}
+  window[k] = new Chart(c, {
+    type:'line',
+    data:{ labels:labels, datasets:datasets.map(function(ds){return {label:ds.label,data:ds.data,borderColor:ds.color,backgroundColor:'transparent',borderWidth:2,pointRadius:4,pointBackgroundColor:ds.color,tension:0.3};}) },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:true,labels:{color:'#6b7280',font:{size:9},boxWidth:8,padding:6}}, tooltip:{callbacks:{label:function(ctx){return ctx.dataset.label+': '+(ctx.raw!=null?ctx.raw.toFixed(1)+(unit||''):'—');}}}  },
+      scales:{ x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',font:{size:9}}}, y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',font:{size:9},callback:function(v){return v.toFixed(0)+(unit||'');}},position:'right'} }
+    }
+  });
+}
+
+function cdValChart(id, years, vals, currentRatio, label) {
+  var c = document.getElementById(id); if(!c) return;
+  var k='_cdc_'+id; if(window[k]){try{window[k].destroy();}catch(e){}}
+
+  var avgs  = vals.map(function(v){return v?v.avg:null;});
+  var highs = vals.map(function(v){return v?v.hi:null;});
+  var lows  = vals.map(function(v){return v?v.lo:null;});
+
+  var valid = avgs.filter(function(v){return v!=null&&isFinite(v)&&v>0&&v<500;});
+  var med   = valid.length ? valid.slice().sort(function(a,b){return a-b;})[Math.floor(valid.length/2)] : null;
+
+  var allLabels = years.concat(['Actuel']);
+  var allAvgs   = avgs.concat([currentRatio||null]);
+  var allHi     = highs.concat([currentRatio||null]);
+  var allLo     = lows.concat([currentRatio||null]);
+
+  var datasets = [
+    {label:label,      data:allAvgs,  borderColor:'#5b7ef5', backgroundColor:'rgba(91,126,245,0.08)', fill:false, borderWidth:2, pointRadius:4, pointBackgroundColor:'#5b7ef5', tension:0.3},
+    {label:'Haut',     data:allHi,    borderColor:'rgba(239,68,68,0.5)',   backgroundColor:'transparent', fill:false, borderWidth:1, borderDash:[3,3], pointRadius:2, tension:0.3},
+    {label:'Bas',      data:allLo,    borderColor:'rgba(34,197,94,0.5)',   backgroundColor:'rgba(34,197,94,0.05)', fill:'-1', borderWidth:1, borderDash:[3,3], pointRadius:2, tension:0.3},
+  ];
+  if(med){ datasets.push({label:'Médiane', data:Array(allLabels.length).fill(Math.round(med*10)/10), borderColor:'#f59e0b', borderWidth:1.5, borderDash:[5,4], pointRadius:0, fill:false, tension:0}); }
+
+  window[k] = new Chart(c, {
+    type:'line',
+    data:{labels:allLabels, datasets:datasets},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:true,labels:{color:'#6b7280',font:{size:9},boxWidth:8,padding:4}}, tooltip:{callbacks:{label:function(ctx){return ctx.dataset.label+': '+(ctx.raw!=null?ctx.raw.toFixed(1)+'x':'—');}}}  },
+      scales:{ x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',font:{size:9}}}, y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',font:{size:9},callback:function(v){return v.toFixed(0)+'x';}},position:'right'} }
+    }
+  });
+}
+
+function cdWaterfall(containerId, d, sym) {
+  var el = document.getElementById(containerId); if(!el||!d.revenue) return;
+  var rev = d.revenue;
+  function bar(label, val, type) {
+    if(val==null) return '';
+    var pct = Math.min(Math.abs(val/rev*100), 100);
+    var color = type==='pos'?'#22c55e': type==='neg'?'#ef4444':'#5b7ef5';
+    var prefix = type==='neg' ? '−' : '';
+    return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">' +
+      '<div style="width:120px;text-align:right;font-size:11px;color:var(--muted);flex-shrink:0">'+label+'</div>' +
+      '<div style="flex:1;background:rgba(255,255,255,0.05);border-radius:3px;height:20px">' +
+        '<div style="width:'+pct+'%;height:100%;background:'+color+';border-radius:3px;display:flex;align-items:center;padding:0 6px;min-width:60px">' +
+          '<span style="font-size:10px;font-weight:600;color:#fff;white-space:nowrap">'+prefix+sym+Math.abs(val).toFixed(1)+'Md</span>' +
+        '</div></div></div>';
+  }
+  var sep = '<div style="height:1px;background:var(--border);margin:6px 0 6px 128px"></div>';
+  el.innerHTML =
+    bar('Chiffre d\'affaires', d.revenue, 'total') +
+    bar('Coût des ventes',     d.cogs,    'neg') + sep +
+    bar('Marge brute',         d.grossProfit,    'pos') +
+    bar('Dép. opérationnelles',d.opex,    'neg') + sep +
+    bar('Résultat opé.',       d.operatingIncome,'pos') +
+    bar('Impôts & Autres',     d.other,   'neg') + sep +
+    bar('Résultat net',        d.netIncome,      'pos');
+}
+
 
 function renderScreenerTable(sort){
   // Re-sort and re-render screener rows only
