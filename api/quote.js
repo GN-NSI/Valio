@@ -166,6 +166,57 @@ module.exports = async (req, res) => {
     } catch (e) { return res.status(500).json({ error: e.message }); }
   }
 
+
+  // ── FINANCIALS (income statement, cashflow, bilan annuels) ──────────────
+  if (type === 'financials') {
+    const finKey = symbol + '_fin';
+    try {
+      const cachedFin = await getCache(finKey);
+      if (cachedFin && cachedFin.years && cachedFin.years.length)
+        return res.json({ ...cachedFin, _fromCache: true });
+    } catch(e) {}
+    try {
+      const yf = await yfSummary(symbol,
+        'incomeStatementHistory,cashflowStatementHistory,balanceSheetHistory');
+      if (!yf) return res.status(404).json({ error: 'No financial data' });
+
+      const raw = v => v?.raw ?? null;
+      const sc  = v => v != null ? Math.round(v / 1e8) / 10 : null; // → Md$, 1 déc.
+
+      const stmt = [...(yf?.incomeStatementHistory?.incomeStatementHistory || [])].reverse();
+      const cf   = [...(yf?.cashflowStatementHistory?.cashflowStatements  || [])].reverse();
+      const bs   = [...(yf?.balanceSheetHistory?.balanceSheetStatements   || [])].reverse();
+
+      const years = stmt.map(s => {
+        const ts = raw(s.endDate);
+        return ts ? 'FY' + new Date(ts * 1000).getFullYear() : '?';
+      });
+      const m = (arr, fn) => arr.map(fn);
+
+      const result = {
+        symbol, years,
+        revenue:         m(stmt, s => sc(raw(s.totalRevenue))),
+        grossProfit:     m(stmt, s => sc(raw(s.grossProfit))),
+        operatingIncome: m(stmt, s => sc(raw(s.operatingIncome) ?? raw(s.ebit))),
+        netIncome:       m(stmt, s => sc(raw(s.netIncome))),
+        eps:             m(stmt, s => raw(s.dilutedEps) ?? raw(s.basicEps)),
+        rd:              m(stmt, s => sc(raw(s.researchDevelopment))),
+        sga:             m(stmt, s => sc(raw(s.sellingGeneralAdministrative))),
+        operatingCF:     m(cf,   s => sc(raw(s.totalCashFromOperatingActivities))),
+        capex:           m(cf,   s => sc(raw(s.capitalExpenditures))),
+        freeCF:          m(cf,   s => {
+          const ocf = raw(s.totalCashFromOperatingActivities);
+          const cx  = raw(s.capitalExpenditures);
+          return ocf != null ? sc(ocf + (cx ?? 0)) : null;
+        }),
+        equity:          m(bs,   s => sc(raw(s.totalStockholderEquity))),
+        totalDebt:       m(bs,   s => sc(raw(s.longTermDebt) ?? raw(s.totalDebt))),
+      };
+      await setCache(finKey, result);
+      return res.json(result);
+    } catch(e) { return res.status(500).json({ error: e.message }); }
+  }
+
   // ── CHART (données brutes pour fiche société, range paramétrable) ────────
   if (type === 'chart') {
     try {
