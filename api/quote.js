@@ -101,10 +101,12 @@ module.exports = async (req, res) => {
   if (type === 'fundamentals') {
     try {
       // Cache Supabase → réponse instantanée si données < 24h
+      const CACHE_V = 3; // Incrémenter pour invalider tous les caches
       const cached = await getCache(symbol);
       const cacheValid = cached
+        && cached._v === CACHE_V
         && cached.grossMarginPct !== undefined
-        && cached.epsGrowthFwd1Y !== undefined; // invalider si champ prévisionnel absent
+        && cached.epsGrowthFwd1Y !== undefined;
       if (cacheValid) return res.json({ ...cached, _fromCache: true });
 
       // Sinon : Yahoo Finance quoteSummary
@@ -141,7 +143,7 @@ module.exports = async (req, res) => {
         ? trend5y.earningsEstimate.growth.raw * 100 : null;
 
       const result = {
-        symbol,
+        symbol, _v: CACHE_V,
         trailingPE:      raw(sd.trailingPE),
         forwardPE:       raw(sd.forwardPE),
         pegRatio:        raw(ks.pegRatio),
@@ -150,6 +152,7 @@ module.exports = async (req, res) => {
         grossMarginPct:     pct(fd.grossMargins),
         operatingMarginPct: pct(fd.operatingMargins),
         returnOnEquity:     pct(fd.returnOnEquity),
+        returnOnAssets:     pct(fd.returnOnAssets),
         currentRatio:       raw(fd.currentRatio),
         netDebtToEBITDA,
         revenueGrowthYoY:   pct(fd.revenueGrowth),
@@ -170,9 +173,10 @@ module.exports = async (req, res) => {
   // ── FINANCIALS (income statement, cashflow, bilan annuels) ──────────────
   if (type === 'financials') {
     const finKey = symbol + '_fin';
+    const FIN_V = 2;
     try {
       const cachedFin = await getCache(finKey);
-      if (cachedFin && cachedFin.years && cachedFin.years.length)
+      if (cachedFin && cachedFin._v === FIN_V && cachedFin.years && cachedFin.years.length)
         return res.json({ ...cachedFin, _fromCache: true });
     } catch(e) {}
     try {
@@ -194,7 +198,7 @@ module.exports = async (req, res) => {
       const m = (arr, fn) => arr.map(fn);
 
       const result = {
-        symbol, years,
+        symbol, _v: FIN_V, years,
         revenue:         m(stmt, s => sc(raw(s.totalRevenue))),
         grossProfit:     m(stmt, s => sc(raw(s.grossProfit))),
         operatingIncome: m(stmt, s => sc(raw(s.operatingIncome) ?? raw(s.ebit))),
@@ -209,8 +213,19 @@ module.exports = async (req, res) => {
           const cx  = raw(s.capitalExpenditures);
           return ocf != null ? sc(ocf + (cx ?? 0)) : null;
         }),
-        equity:          m(bs,   s => sc(raw(s.totalStockholderEquity))),
-        totalDebt:       m(bs,   s => sc(raw(s.longTermDebt) ?? raw(s.totalDebt))),
+        equity:          m(bs,   s => {
+          const eq = raw(s.totalStockholderEquity);
+          if(eq != null) return sc(eq);
+          const a = raw(s.totalAssets), l = raw(s.totalLiab);
+          return (a != null && l != null) ? sc(a - l) : null;
+        }),
+        totalDebt:       m(bs,   s => sc(
+          raw(s.longTermDebt) ??
+          raw(s.longTermDebtAndCapitalLeaseObligation) ??
+          raw(s.totalDebt) ??
+          (raw(s.totalLiab) && raw(s.totalCurrentLiabilities)
+            ? raw(s.totalLiab) - raw(s.totalCurrentLiabilities) : null)
+        )),
       };
       await setCache(finKey, result);
       return res.json(result);
