@@ -1687,13 +1687,13 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
     '<div style="margin-top:4px;padding-top:24px;border-top:1px solid var(--border)">' +
     '<h3 style="font-size:15px;font-weight:700;margin-bottom:16px">📊 Historique financier</h3>' +
     '<div style="'+grids3+'">' +
-      '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Revenus & Bénéfices (Md'+sym+')</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-rev"></canvas></div></div>' +
+      '<div class="card"><div id="fin-title-rev" style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Revenus & Bénéfices (Md'+sym+')</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-rev"></canvas></div></div>' +
       '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Marges</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-margins"></canvas></div></div>' +
       '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Retours sur capitaux</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-returns"></canvas></div></div>' +
     '</div>' +
     '<div style="'+grids2+'">' +
       '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Résultat '+fin.years[ly]+'</div><div id="cdchart-waterfall"></div></div>' +
-      '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Cash Flow (Md'+sym+')</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-cf"></canvas></div></div>' +
+      '<div class="card"><div id="fin-title-cf" style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Cash Flow (Md'+sym+')</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-cf"></canvas></div></div>' +
     '</div>' +
     (latestWithSegments ? '<div class="card" style="margin-bottom:16px"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Répartition CA · '+latestWithSegments.period+' <span style="color:var(--green);font-size:10px">● Données manuelles</span></div><div style="position:relative;height:220px"><canvas id="cdchart-segments"></canvas></div></div>' : '') +
     '<h3 style="font-size:15px;font-weight:700;margin:4px 0 16px">📈 Valorisation historique</h3>' +
@@ -1711,7 +1711,7 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
         {label:'CA',       data:fin.revenue,   color:'#5b7ef5'},
         {label:'Rés. net', data:fin.netIncome, color:'#22c55e'},
         {label:'FCF',      data:fin.freeCF,    color:'#06b6d4'},
-      ]);
+      ], 'fin-title-rev', sym);
       cdLineChart('cdchart-margins', fin.years, [
         {label:'Brute', data:grossMargins, color:'#5b7ef5'},
         {label:'Opé.',  data:opMargins,   color:'#22c55e'},
@@ -1725,7 +1725,7 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
         {label:'FCF',  data:fin.freeCF,      color:'#22c55e'},
         {label:'OCF',  data:fin.operatingCF, color:'#5b7ef5'},
         {label:'Capex',data:fin.capex,       color:'#ef4444'},
-      ]);
+      ], 'fin-title-cf', sym);
       cdWaterfall('cdchart-waterfall', wf, sym);
       cdValChart('cdchart-pe',   fin.years, peVals,   f&&f.trailingPE, 'P/E');
       cdValChart('cdchart-pfcf', fin.years, pfcfVals, f&&f.pfcf,       'P/FCF');
@@ -1971,17 +1971,25 @@ async function deleteEarnings(id, ticker, name) {
 }
 
 function hasData(datasets){ return datasets.some(function(ds){return ds.data&&ds.data.some(function(v){return v!=null&&v!==0;});}); }
-function cdBarChart(id, labels, datasets) {
+function cdBarChart(id, labels, datasets, titleId, currSym) {
   var c = document.getElementById(id); if(!c) return;
   if(!hasData(datasets)){ c.parentNode.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:12px">Données indisponibles</div>'; return; }
-  var k='_cdc_'+id; if(window[k]){try{window[k].destroy();}catch(e){}} 
+  var allVals=datasets.reduce(function(arr,ds){return arr.concat(ds.data.filter(function(v){return v!=null;}));}, []);
+  var maxAbs=allVals.reduce(function(m,v){return Math.max(m,Math.abs(v));},0);
+  var useMd=maxAbs>=0.5; var factor=useMd?1:1000; var unitLabel=useMd?'Md':'M'; var sym=currSym||'$';
+  if(titleId){var te=document.getElementById(titleId);if(te){te.textContent=(titleId==='fin-title-rev'?'Revenus & Bénéfices':'Cash Flow')+' ('+unitLabel+sym+')';}}
+  var scaledDs=datasets.map(function(ds){return {label:ds.label,data:ds.data.map(function(v){return v!=null?v*factor:null;}),color:ds.color};});
+  var k='_cdc_'+id; if(window[k]){try{window[k].destroy();}catch(e){}}
   window[k] = new Chart(c, {
     type:'bar',
-    data:{ labels:labels, datasets:datasets.map(function(ds){return {label:ds.label,data:ds.data,backgroundColor:ds.color+'bb',borderColor:ds.color,borderWidth:1,borderRadius:3};}) },
+    data:{ labels:labels, datasets:scaledDs.map(function(ds){return {label:ds.label,data:ds.data,backgroundColor:ds.color+'bb',borderColor:ds.color,borderWidth:1,borderRadius:3};}) },
     options:{
       responsive:true, maintainAspectRatio:false,
-      plugins:{ legend:{display:true,labels:{color:'#6b7280',font:{size:9},boxWidth:8,padding:6}}, tooltip:{callbacks:{label:function(ctx){return ctx.dataset.label+': '+(ctx.raw!=null?ctx.raw.toFixed(1):'—');}}  } },
-      scales:{ x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',font:{size:9}}}, y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',font:{size:9}},position:'right'} }
+      plugins:{
+        legend:{display:true,labels:{color:'#6b7280',font:{size:9},boxWidth:8,padding:6}},
+        tooltip:{callbacks:{label:function(ctx){return ctx.dataset.label+': '+(ctx.raw!=null?ctx.raw.toFixed(useMd?1:0)+' '+unitLabel+sym:'—');}}}
+      },
+      scales:{ x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',font:{size:9}}}, y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',font:{size:9},callback:function(v){return v.toFixed(0)+unitLabel;}},position:'right'} }
     }
   });
 }
@@ -2191,11 +2199,8 @@ async function renderAmis(){
 
     // Load their stats async
     (function(friend, idx){
-      Promise.all([
-        dbGet('accounts','user_id=eq.'+friend.id).catch(()=>[]),
-        dbGet('transactions','user_id=eq.'+friend.id+'&select=*,accounts(name,type)').catch(()=>[])
-      ]).then(function(res){
-        var pos = computePositionsFromData(res[0]||[],res[1]||[]);
+      getFriendTransactions(friend.id).then(function(txns){
+        var pos = computePositionsFromData([],txns||[]);
         var totalCost=0,totalVal=0;
         pos.forEach(function(p){
           totalCost+=p.totalCostEur||0;
@@ -2306,9 +2311,10 @@ function computePositionsFromData(accounts, transactions){
   (transactions||[]).forEach(function(tx){
     var k=tx.ticker; if(!k) return;
     if(!map[k]) map[k]={ticker:k,quantity:0,totalCostEur:0};
-    var sign=tx.type==='buy'?1:tx.type==='sell'?-1:0;
+    var txType=(tx.transaction_type||tx.type||'').toLowerCase();
+    var sign=txType==='buy'?1:txType==='sell'?-1:0;
     map[k].quantity+=sign*(tx.quantity||0);
-    if(tx.type==='buy') map[k].totalCostEur+=(tx.price_eur||0)*(tx.quantity||0);
+    if(txType==='buy') map[k].totalCostEur+=(tx.price_eur||0)*(tx.quantity||0);
   });
   return Object.values(map).filter(function(p){return p.quantity>0.0001;});
 }
@@ -2333,42 +2339,40 @@ async function fetchPriceHistory(ticker, range){
 async function buildPortfolioLineFromTxns(transactions, range){
   if(!transactions||!transactions.length) return [];
 
-  // Tous les tickers jamais détenus
   var allTickers=[...new Set(transactions.map(function(t){return t.ticker;}).filter(Boolean))];
   if(!allTickers.length) return [];
 
-  // Fetch price histories en parallèle
   var hists={};
   await Promise.all(allTickers.map(async function(ticker){
     hists[ticker]=await fetchPriceHistory(ticker,range);
   }));
 
-  // Collecter tous les timestamps de la période
   var tsSet={};
   Object.values(hists).forEach(function(pts){pts.forEach(function(p){tsSet[p.t]=true;});});
   var timestamps=Object.keys(tsSet).map(Number).sort(function(a,b){return a-b;});
   if(timestamps.length<3) return [];
 
-  // Réduire à max 80 points
   var step=Math.max(1,Math.floor(timestamps.length/80));
   timestamps=timestamps.filter(function(_,i){return i%step===0||i===timestamps.length-1;});
 
-  // Trier les transactions par date
-  var sortedTxns=transactions.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);});
+  // Trier par date (supporte transaction_date ET date pour compatibilité)
+  var sortedTxns=transactions.slice().sort(function(a,b){
+    return new Date(a.transaction_date||a.date)-new Date(b.transaction_date||b.date);
+  });
 
-  // Valeur du portefeuille à chaque timestamp
   var rawValues=timestamps.map(function(t){
     var date=new Date(t*1000);
-    // Positions détenues à cette date (à partir des transactions passées)
     var holdings={};
     sortedTxns.forEach(function(tx){
-      if(!tx.ticker||!tx.date) return;
-      if(new Date(tx.date)>date) return;
+      if(!tx.ticker) return;
+      var txDate=new Date(tx.transaction_date||tx.date||0);
+      if(txDate>date) return;
       if(!holdings[tx.ticker]) holdings[tx.ticker]=0;
-      var sign=tx.type==='buy'?1:tx.type==='sell'?-1:0;
+      // Supporte transaction_type ET type pour compatibilité
+      var txType=(tx.transaction_type||tx.type||'').toLowerCase();
+      var sign=txType==='buy'?1:txType==='sell'?-1:0;
       holdings[tx.ticker]+=sign*(tx.quantity||0);
     });
-    // Valorisation à cette date
     var value=Object.keys(holdings).reduce(function(sum,ticker){
       var qty=holdings[ticker]; if(qty<=0.0001) return sum;
       var pts=(hists[ticker]||[]).filter(function(p){return p.t<=t;});
@@ -2380,7 +2384,6 @@ async function buildPortfolioLineFromTxns(transactions, range){
     return {t:t,value:value};
   });
 
-  // Rebase depuis le premier point non-nul
   var startIdx=rawValues.findIndex(function(r){return r.value>0;});
   if(startIdx<0) return [];
   var startVal=rawValues[startIdx].value;
@@ -2389,13 +2392,13 @@ async function buildPortfolioLineFromTxns(transactions, range){
   });
 }
 
-// Helper : fetch transactions d'un ami via account_id (user_id n'est pas sur transactions)
+// Helper : fetch transactions d'un ami via account_id
 async function getFriendTransactions(friendId){
   try{
     var acc=await dbGet('accounts','user_id=eq.'+friendId);
     if(!acc||!acc.length) return [];
     var accIds=acc.map(function(a){return a.id;}).join(',');
-    return await dbGet('transactions','account_id=in.('+accIds+')&order=date') || [];
+    return await dbGet('transactions','account_id=in.('+accIds+')&order=transaction_date') || [];
   }catch(e){return [];}
 }
 
