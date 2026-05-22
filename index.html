@@ -979,7 +979,7 @@ function getSortVal(ticker, col){
   if(col==='poids'){var ep=S.enrichedPos.find(function(x){return x.ticker===ticker;});return ep?(ep.valueEur||0):0;}
   if(col==='price') return (S.prices[ticker]&&S.prices[ticker].price)||0;
   var f=S.fundamentals[ticker]; if(!f) return null;
-  var map={per:'trailingPE',fwdpe:'forwardPE',peg:'pegRatio',pocf:'pocf',marge:'profitMarginPct',ca1a:'revenueGrowthYoY',eps1a:'epsGrowth1Y',epsfwd:'epsGrowthFwd1Y',debt:'netDebtToEBITDA'};
+  var map={per:'trailingPE',fwdpe:'forwardPE',peg:'pegRatio',pocf:'pocf',marge:'profitMarginPct',ca1a:'revenueGrowthYoY',cafwd:'revenueGrowthFwd1Y',eps1a:'epsGrowth1Y',epsfwd:'epsGrowthFwd1Y',debt:'netDebtToEBITDA'};
   return f[map[col]]??null;
 }
 function sortItems(items, sort){
@@ -1048,7 +1048,7 @@ function renderWatchlistTable(){
       mkLogoCell(w.ticker)+
       '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+w.ticker+'">'+w.name+'</div><div class="ticker-sym">'+w.ticker+'</div></div></div></td>'+
       '<td>'+priceStr+'</td>'+
-      ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','epsfwd','debt'].map(function(k){return '<td id="wr-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
+      ['per','fwdpe','peg','pocf','marge','ca1a','cafwd','eps1a','epsfwd','debt'].map(function(k){return '<td id="wr-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '<td><button class="btn btn-danger btn-sm" onclick="removeWatch(this)" data-id="'+w.id+'" data-ticker="'+w.ticker+'">✕</button></td>'+
       '</tr>';
   }).join('');
@@ -1104,6 +1104,7 @@ function updateRatioRowById(prefix,ticker){
   set('pocf',f.pocf,xs,function(v){return v<15?'var(--green)':v<30?'var(--yellow)':'var(--red)';});
   set('marge',f.profitMarginPct,function(v){return v.toFixed(1)+'%';},function(v){return v>20?'var(--green)':v>10?'var(--yellow)':v>5?'#f97316':'var(--red)';});
   set('ca1a',f.revenueGrowthYoY,pct,function(v){return v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)';});
+  set('cafwd',f.revenueGrowthFwd1Y,pct,function(v){return v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)';});
   set('eps1a',f.epsGrowth1Y,pct,function(v){return v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)';});
   set('epsfwd',f.epsGrowthFwd1Y,pct,function(v){return v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)';});
   set('debt',f.netDebtToEBITDA,xs,function(v){return v<1?'var(--green)':v<2?'var(--yellow)':v<3.5?'#f97316':'var(--red)';});
@@ -1176,7 +1177,7 @@ async function renderScreener(){
       '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+p.ticker+'">'+p.name+badge+'</div><div class="ticker-sym">'+p.ticker+(TICKER_SUBSECTOR[p.ticker]?' · <span style="color:var(--muted2);font-size:10px">'+TICKER_SUBSECTOR[p.ticker]+'</span>':'')+'</div></div></div></td>'+
       '<td>'+poidsStr+'</td>'+
       '<td>'+priceStr+'</td>'+
-      ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','epsfwd','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
+      ['per','fwdpe','peg','pocf','marge','ca1a','cafwd','eps1a','epsfwd','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '</tr>';
   }).join('');
 
@@ -1185,7 +1186,7 @@ async function renderScreener(){
     '<button class="btn btn-primary" onclick="loadScreenerRatios()">⟳ Charger les ratios</button></div>'+
     '<div class="card"><div class="tbl-wrap"><table>'+
     '<thead><tr>'+
-    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+thSort('Poids','poids',scSort,'sortSC')+thSort('Cours','price',scSort,'sortSC')+thSort('PER','per',scSort,'sortSC')+thSort('Fwd PER','fwdpe',scSort,'sortSC')+thSort('PEG','peg',scSort,'sortSC')+thSort('P/OCF','pocf',scSort,'sortSC')+thSort('M. Nette','marge',scSort,'sortSC')+thSort('CA 1A','ca1a',scSort,'sortSC')+thSort('EPS 1A','eps1a',scSort,'sortSC')+thSort('EPS Fwd','epsfwd',scSort,'sortSC')+thSort('D/EBITDA','debt',scSort,'sortSC')+
+    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+thSort('Poids','poids',scSort,'sortSC')+thSort('Cours','price',scSort,'sortSC')+thSort('PER','per',scSort,'sortSC')+thSort('Fwd PER','fwdpe',scSort,'sortSC')+thSort('PEG','peg',scSort,'sortSC')+thSort('P/OCF','pocf',scSort,'sortSC')+thSort('M. Nette','marge',scSort,'sortSC')+thSort('CA 1A','ca1a',scSort,'sortSC')+thSort('CA FWD','cafwd',scSort,'sortSC')+thSort('EPS 1A','eps1a',scSort,'sortSC')+thSort('EPS Fwd','epsfwd',scSort,'sortSC')+thSort('D/EBITDA','debt',scSort,'sortSC')+
     '</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
 
   allItems.forEach(function(p){ updateRatioRowById('sc',p.ticker); });
@@ -1997,7 +1998,7 @@ function renderScreenerTable(sort){
       mkLogoCell(p.ticker)+
       '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+p.ticker+'">'+(p.name||p.ticker)+badge+'</div><div class="ticker-sym">'+p.ticker+'</div></div></div></td>'+
       '<td>'+priceStr+'</td>'+
-      ['per','fwdpe','peg','pocf','marge','ca1a','eps1a','epsfwd','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
+      ['per','fwdpe','peg','pocf','marge','ca1a','cafwd','eps1a','epsfwd','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '</tr>';
   }).join('');
   allItems.forEach(function(p){ updateRatioRowById('sc',p.ticker); });
