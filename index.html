@@ -2143,8 +2143,12 @@ async function loadFriends(force){
     var rows=[...(asReq||[]),...(asAddr||[])];
     if(!rows||!rows.length) return (_friendsCache=[]);
     var friendIds = rows.map(function(r){ return r.requester_id===u.id?r.addressee_id:r.requester_id; });
-    var profiles = await dbGet('user_profiles','id=in.('+friendIds.join(',')+')');
-    _friendsCache = (profiles||[]).map(function(p){ return {id:p.id,name:p.display_name}; });
+    var profiles = await dbGet('user_profiles','user_id=in.('+friendIds.join(',')+')')||[];
+    // Fallback : si Juliette n'a pas encore de profil, on affiche quand même la carte
+    _friendsCache = friendIds.map(function(fid){
+      var p = profiles.find(function(x){return x.user_id===fid;});
+      return {id:fid, name:(p&&p.display_name)||'Ami'};
+    });
     return _friendsCache;
   } catch(e){ return []; }
 }
