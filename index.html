@@ -2136,7 +2136,11 @@ async function loadFriends(force){
   if(_friendsCache&&!force) return _friendsCache;
   var u = getUser(); if(!u) return [];
   try {
-    var rows = await dbGet('friends','status=eq.accepted&or=(requester_id.eq.'+u.id+',addressee_id.eq.'+u.id+')');
+    var [asReq,asAddr]=await Promise.all([
+      dbGet('friends','status=eq.accepted&requester_id=eq.'+u.id),
+      dbGet('friends','status=eq.accepted&addressee_id=eq.'+u.id)
+    ]);
+    var rows=[...(asReq||[]),...(asAddr||[])];
     if(!rows||!rows.length) return (_friendsCache=[]);
     var friendIds = rows.map(function(r){ return r.requester_id===u.id?r.addressee_id:r.requester_id; });
     var profiles = await dbGet('user_profiles','id=in.('+friendIds.join(',')+')');
@@ -2332,66 +2336,45 @@ async function fetchPriceHistory(ticker, range){
   }catch(e){return [];}
 }
 
-// ── Performance portfolio (positions actuelles × prix historiques) ─────────
-// ── Performance CORRECTE : reconstruit les positions historiques depuis les transactions ──
-// Contrairement à l'approche "positions actuelles × prix passés" (qui gonfle la perf),
-// cette fonction reconstruit ce que tu détenais vraiment à chaque date.
-async function buildPortfolioLineFromTxns(transactions, range){
-  if(!transactions||!transactions.length) return [];
+// ── Performance portfolio : valeur courante / coût total, normalisé dans le temps ──
+// Approche : on utilise les positions actuelles avec leurs quantités et coûts réels.
+// Pour chaque date historique : valeur(t) / coût_total - 1
+// → Aujourd'hui, ça donne exactement le P&L% affiché sur la page Portefeuille.
+async function buildPortfolioLine(positions, range){
+  var pos=(positions||[]).filter(function(p){return p.quantity>0.0001&&p.ticker;});
+  if(!pos.length) return [];
 
-  var allTickers=[...new Set(transactions.map(function(t){return t.ticker;}).filter(Boolean))];
-  if(!allTickers.length) return [];
+  // Coût total de référence (dénominateur fixe = ce qui a été investi)
+  var totalCost=pos.reduce(function(s,p){return s+(p.totalCostEur||0);},0);
+  if(!totalCost) return [];
 
+  // Fetch historiques en parallèle
   var hists={};
-  await Promise.all(allTickers.map(async function(ticker){
-    hists[ticker]=await fetchPriceHistory(ticker,range);
+  await Promise.all(pos.map(async function(p){
+    hists[p.ticker]=await fetchPriceHistory(p.ticker,range);
   }));
 
+  // Timestamps de la période
   var tsSet={};
   Object.values(hists).forEach(function(pts){pts.forEach(function(p){tsSet[p.t]=true;});});
   var timestamps=Object.keys(tsSet).map(Number).sort(function(a,b){return a-b;});
   if(timestamps.length<3) return [];
-
   var step=Math.max(1,Math.floor(timestamps.length/80));
   timestamps=timestamps.filter(function(_,i){return i%step===0||i===timestamps.length-1;});
 
-  // Trier par date (supporte transaction_date ET date pour compatibilité)
-  var sortedTxns=transactions.slice().sort(function(a,b){
-    return new Date(a.transaction_date||a.date)-new Date(b.transaction_date||b.date);
-  });
-
-  var rawValues=timestamps.map(function(t){
-    var date=new Date(t*1000);
-    var holdings={};
-    sortedTxns.forEach(function(tx){
-      if(!tx.ticker) return;
-      var txDate=new Date(tx.transaction_date||tx.date||0);
-      if(txDate>date) return;
-      if(!holdings[tx.ticker]) holdings[tx.ticker]=0;
-      // Supporte transaction_type ET type pour compatibilité
-      var txType=(tx.transaction_type||tx.type||'').toLowerCase();
-      var sign=txType==='buy'?1:txType==='sell'?-1:0;
-      holdings[tx.ticker]+=sign*(tx.quantity||0);
-    });
-    var value=Object.keys(holdings).reduce(function(sum,ticker){
-      var qty=holdings[ticker]; if(qty<=0.0001) return sum;
-      var pts=(hists[ticker]||[]).filter(function(p){return p.t<=t;});
+  // Pour chaque date : valeur des positions / coût total
+  return timestamps.map(function(t){
+    var value=pos.reduce(function(sum,p){
+      var pts=(hists[p.ticker]||[]).filter(function(q){return q.t<=t;});
       if(!pts.length) return sum;
       var price=pts[pts.length-1].c;
-      var isUsd=!(S.prices[ticker]&&S.prices[ticker].currency==='EUR');
-      return sum+qty*(isUsd?price/(S.eurUsd||1.1):price);
+      var isUsd=!(S.prices[p.ticker]&&S.prices[p.ticker].currency==='EUR');
+      return sum+p.quantity*(isUsd?price/(S.eurUsd||1.1):price);
     },0);
-    return {t:t,value:value};
-  });
-
-  var startIdx=rawValues.findIndex(function(r){return r.value>0;});
-  if(startIdx<0) return [];
-  var startVal=rawValues[startIdx].value;
-  return rawValues.slice(startIdx).map(function(r){
-    return {t:r.t,pct:(r.value/startVal-1)*100};
-  });
+    if(!value) return null;
+    return {t:t,pct:(value/totalCost-1)*100};
+  }).filter(Boolean);
 }
-
 // Helper : fetch transactions d'un ami via account_id
 async function getFriendTransactions(friendId){
   try{
@@ -2505,12 +2488,16 @@ async function refreshBmChart(){
   var lines=await Promise.allSettled(items.map(async function(item){
     if(item.type==='index') return await buildIndexLine(item.symbol,range);
     if(item.type==='portfolio'){
-      // Utiliser l'historique réel des transactions (pas les positions actuelles)
-      return await buildPortfolioLineFromTxns(S.transactions||[],range);
+      // Positions actuelles / coût total → P&L% normalisé dans le temps
+      var pos=S.enrichedPos.filter(function(p){return p.quantity>0;});
+      if(!pos.length) pos=computePositions();
+      return await buildPortfolioLine(pos,range);
     }
     if(item.type==='friend'){
+      // Positions de l'ami reconstituées depuis ses transactions
       var txns=await getFriendTransactions(item.id);
-      return await buildPortfolioLineFromTxns(txns,range);
+      var pos=computePositionsFromData([],txns);
+      return await buildPortfolioLine(pos,range);
     }
     return [];
   }));
