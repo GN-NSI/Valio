@@ -2362,18 +2362,28 @@ async function buildPortfolioLine(positions, range){
   var step=Math.max(1,Math.floor(timestamps.length/80));
   timestamps=timestamps.filter(function(_,i){return i%step===0||i===timestamps.length-1;});
 
-  // Pour chaque date : valeur des positions / coût total
-  return timestamps.map(function(t){
-    var value=pos.reduce(function(sum,p){
+  // Calcul de la valeur à chaque timestamp
+  var rawValues=timestamps.map(function(t){
+    return pos.reduce(function(sum,p){
       var pts=(hists[p.ticker]||[]).filter(function(q){return q.t<=t;});
       if(!pts.length) return sum;
       var price=pts[pts.length-1].c;
       var isUsd=!(S.prices[p.ticker]&&S.prices[p.ticker].currency==='EUR');
       return sum+p.quantity*(isUsd?price/(S.eurUsd||1.1):price);
     },0);
-    if(!value) return null;
-    return {t:t,pct:(value/totalCost-1)*100};
-  }).filter(Boolean);
+  });
+
+  // On démarre seulement quand le portefeuille est ≥30% assemblé
+  // (évite le -80% des premiers mois où peu de positions existent)
+  var finalValue=rawValues[rawValues.length-1]||1;
+  var startIdx=rawValues.findIndex(function(v){return v>0&&v>=finalValue*0.3;});
+  if(startIdx<0) startIdx=rawValues.findIndex(function(v){return v>0;});
+  if(startIdx<0||!rawValues[startIdx]) return [];
+  var startVal=rawValues[startIdx];
+
+  return timestamps.slice(startIdx).map(function(t,i){
+    return {t:t, pct:(rawValues[startIdx+i]/startVal-1)*100};
+  });
 }
 // Helper : fetch transactions d'un ami via account_id
 async function getFriendTransactions(friendId){
