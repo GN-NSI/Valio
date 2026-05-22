@@ -1488,19 +1488,40 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
   if(!hasFin && !manualData.length) { el.innerHTML=''; return; }
   if(!hasFin) fin = {years:[], revenue:[], grossProfit:[], operatingIncome:[], netIncome:[], eps:[], rd:[], sga:[], operatingCF:[], capex:[], freeCF:[], equity:[], totalDebt:[]};
 
-  // Appliquer les overrides manuels sur les données Yahoo Finance
+  // Appliquer les overrides manuels sur les données Yahoo Finance (FY = annuel)
   manualData.filter(function(m){return m.period&&m.period.includes('FY');}).forEach(function(m){
     var yr = m.period; // e.g. "FY2026"
     var idx2 = fin.years.indexOf(yr);
     if(idx2 >= 0) {
       if(m.revenue!=null)          fin.revenue[idx2]         = m.revenue;
+      // gross_profit: direct ou calculé depuis le % de marge
       if(m.gross_profit!=null)     fin.grossProfit[idx2]     = m.gross_profit;
+      else if(m.gross_margin_pct!=null && fin.revenue[idx2]!=null)
+        fin.grossProfit[idx2] = fin.revenue[idx2] * m.gross_margin_pct / 100;
       if(m.operating_income!=null) fin.operatingIncome[idx2] = m.operating_income;
       if(m.net_income!=null)       fin.netIncome[idx2]       = m.net_income;
       if(m.eps_diluted!=null)      fin.eps[idx2]             = m.eps_diluted;
       if(m.ocf!=null)              fin.operatingCF[idx2]     = m.ocf;
       if(m.capex!=null)            fin.capex[idx2]           = m.capex;
       if(m.fcf!=null)              fin.freeCF[idx2]          = m.fcf;
+    }
+  });
+
+  // Agréger les FCF trimestriels si pas de données annuelles
+  // (les trimestres "YYYY-QN" sont sommés par année fiscale)
+  fin.years.forEach(function(yrLabel, i) {
+    if(fin.freeCF[i] != null) return;
+    var fy = yrLabel.replace('FY','');
+    var qFCFs = manualData.filter(function(m){
+      return m.period && m.period.match(/^\d{4}-Q\d$/) && m.period.startsWith(fy+'-Q') && m.fcf!=null;
+    });
+    if(qFCFs.length) fin.freeCF[i] = Math.round(qFCFs.reduce(function(s,m){return s+(m.fcf||0);},0)*10)/10;
+    // Même logique pour OCF
+    if(fin.operatingCF[i] == null) {
+      var qOCF = manualData.filter(function(m){
+        return m.period && m.period.startsWith(fy+'-Q') && m.ocf!=null;
+      });
+      if(qOCF.length) fin.operatingCF[i] = Math.round(qOCF.reduce(function(s,m){return s+(m.ocf||0);},0)*10)/10;
     }
   });
 
@@ -1672,14 +1693,19 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
 // ═══ EARNINGS MANUAL ════════════════════════════════════════════════════════
 
 var TICKER_SEGMENTS = {
-  NVDA:['Data Center','Gaming','Professional Visualization','Automotive','OEM & Other'],
-  MSFT:['Productivity & Business','Intelligent Cloud','More Personal Computing'],
-  GOOGL:['Google Services','Google Cloud','Other Bets'],
+  // NVDA: depuis FY2027 Q1 (fév 2026+) : Data Center + Edge Computing
+  // Pour les périodes antérieures, les segments anciens sont disponibles ci-dessous
+  NVDA:['Data Center','Edge Computing'],
+  NVDA_FY2026:['Data Center','Gaming','Professional Visualization','Automotive','OEM & Other'],
+  MSFT:['Productivity & Business Processes','Intelligent Cloud','More Personal Computing'],
+  GOOGL:['Google Search & Other','YouTube Ads','Google Network','Subscriptions Platforms & Devices','Google Cloud','Other Bets'],
   AMZN:['North America','International','AWS'],
   META:['Family of Apps','Reality Labs'],
-  AAPL:['iPhone','Mac','iPad','Wearables','Services'],
+  AAPL:['iPhone','Mac','iPad','Wearables & Accessories','Services'],
   TSM:['Advanced','Specialty'],
   BKNG:['Accommodation','Rental Cars','Flights','Attractions'],
+  COIN:['Transaction Revenue','Subscription & Services'],
+  RDDT:['Advertising','Other'],
 };
 
 async function loadManualEarnings(ticker) {
@@ -1802,10 +1828,13 @@ async function openEarningsEdit(ticker, name, entryId) {
     '<div id="seg-container">'+segRows+'</div>'+
     '<button onclick="addEarningsSegment()" class="btn btn-ghost btn-sm" style="margin-bottom:14px">+ Segment</button>'+
 
-    '<div class="stats-section-title" style="margin:10px 0 6px">🔧 Correctifs <span style="font-weight:400;color:var(--muted);font-size:10px">— vide = Yahoo Finance</span></div>'+
+    '<div class="stats-section-title" style="margin:10px 0 6px">🔧 Correctifs <span style="font-weight:400;color:var(--muted);font-size:10px">— vide = Yahoo Finance · non-GAAP OK</span></div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">'+
-      fld('rev','CA total (Md)',e2.revenue)+fld('gp','Marge brute (Md)',e2.gross_profit)+
-      fld('oi','Résultat opé. (Md)',e2.operating_income)+fld('ni','Résultat net (Md)',e2.net_income)+
+      fld('rev','CA total (Md)',e2.revenue)+
+      fld('gm-pct','Marge brute (%)',e2.gross_margin_pct,0.1)+''+
+      fld('gp','Marge brute (Md) <span style="font-size:9px;color:var(--muted2)">ou calc. depuis %</span>',e2.gross_profit)+
+      fld('oi','Résultat opé. (Md)',e2.operating_income)+
+      fld('ni','Résultat net (Md)',e2.net_income)+
       fld('eps','EPS dilué',e2.eps_diluted,0.01)+fld('ocf','OCF (Md)',e2.ocf)+
       fld('capex','Capex (Md)',e2.capex)+fld('fcf','FCF (Md)',e2.fcf)+
     '</div>'+
@@ -1845,12 +1874,16 @@ async function saveEarningsEntry(ticker, name, entryId) {
     var v=parseFloat(row.querySelector('.seg-val').value);
     if(n&&!isNaN(v)&&v>0) segs.push({name:n,value:v});
   });
-  function fv(id){var v=parseFloat(document.getElementById('em-'+id).value);return isNaN(v)?null:v;}
+  function fv(id){var v=parseFloat(document.getElementById('em-'+id)?.value);return isNaN(v)?null:v;}
   var u=getUser(); if(!u) return;
+  var rev_val=fv('rev'), gm_pct=fv('gm-pct'), gp_val=fv('gp');
+  // Si % marge saisi mais pas la valeur absolue → calculer
+  if(gp_val==null && gm_pct!=null && rev_val!=null) gp_val=Math.round(rev_val*gm_pct/10)/10;
   var data={
     user_id:u.id, ticker, period, currency:cur,
     segments:segs.length?segs:null,
-    revenue:fv('rev'), gross_profit:fv('gp'), operating_income:fv('oi'), net_income:fv('ni'),
+    revenue:rev_val, gross_profit:gp_val, gross_margin_pct:gm_pct,
+    operating_income:fv('oi'), net_income:fv('ni'),
     eps_diluted:fv('eps'), ocf:fv('ocf'), capex:fv('capex'), fcf:fv('fcf'),
     guidance_rev_low:fv('grev-lo'), guidance_rev_high:fv('grev-hi'), guidance_eps:fv('geps'),
     guidance_notes:document.getElementById('em-gnotes').value.trim()||null,
