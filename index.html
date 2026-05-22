@@ -242,6 +242,12 @@ const TICKER_COUNTRY={
   'BESI.AS':'NL',SIV:'SE','2DG':'SE',ASML:'NL','ASML.AS':'NL',SAP:'DE',
   // ETFs (exposition économique, pas domicile)
   'ESE.PA':'US',ESE:'US','PAASI.PA':'CN',PAASI:'CN',CW8:'US',
+  // Actions françaises
+  'GTT.PA':'FR','AI.PA':'FR','OR.PA':'FR','MC.PA':'FR','TTE.PA':'FR',
+  'SAN.PA':'FR','BNP.PA':'FR','ACA.PA':'FR','VIE.PA':'FR',
+  // ETFs européens/émergents
+  'UTI.PA':'EU','PAEEM.PA':'EM','EXA1.DE':'EU',
+  'IWDA.AS':'US','SWDA.L':'US','VWCE.DE':'US',
 };
 
 // ═══ SECTEURS HARDCODÉS (pas besoin de FMP pour les secteurs) ═══
@@ -267,6 +273,15 @@ const TICKER_SECTOR={
   UBER:'Technology',LYFT:'Technology',
   // ETFs
   'ESE.PA':'ETF',ESE:'ETF','PAASI.PA':'ETF',PAASI:'ETF',CW8:'ETF',
+  // Actions françaises
+  'GTT.PA':'Industrials','AI.PA':'Materials',
+  'OR.PA':'Consumer Staples','MC.PA':'Consumer Discretionary',
+  'TTE.PA':'Energy','SAN.PA':'Health Care',
+  'BNP.PA':'Financials','ACA.PA':'Financials',
+  'VIE.PA':'Utilities',
+  // ETFs européens
+  'UTI.PA':'ETF','PAEEM.PA':'ETF','EXA1.DE':'ETF',
+  'IWDA.AS':'ETF','SWDA.L':'ETF','VWCE.DE':'ETF',
 };
 
 // ═══ COMPOSITION DES ETFs (pour répartition sectorielle et géographique précise) ═══
@@ -294,6 +309,27 @@ const ETF_BREAKDOWN={
     countries:{CN:0.35,IN:0.25,KR:0.18,TW:0.12,SG:0.05,Autres:0.05},
     regions:{'Asie':1},
     capi:{'Large (100–1 000 Mds $)':0.55,'Mid (10–100 Mds $)':0.35,'Small (<10 Mds $)':0.10},
+  },
+  // Amundi STOXX Europe 600 Utilities — 100% Utilities Europe
+  'UTI.PA':{
+    sectors:{'Utilities':1.0},
+    countries:{FR:0.22,DE:0.17,GB:0.16,ES:0.12,IT:0.10,CH:0.08,SE:0.07,Autres:0.08},
+    regions:{'Europe':1},
+    capi:{'Large (100–1 000 Mds $)':0.65,'Mid (10–100 Mds $)':0.35},
+  },
+  // Amundi PEA MSCI Emerging Markets
+  'PAEEM.PA':{
+    sectors:{'Information Technology':0.24,'Financials':0.22,'Consumer Discretionary':0.12,'Communication Services':0.10,'Materials':0.07,'Industrials':0.07,'Energy':0.06,'Consumer Staples':0.05,'Health Care':0.04,'Utilities':0.02,'Real Estate':0.01},
+    countries:{CN:0.27,IN:0.22,TW:0.18,KR:0.10,BR:0.06,SA:0.04,Autres:0.13},
+    regions:{'Asie':0.77,'Amérique Latine':0.10,'Moyen-Orient':0.07,'Afrique':0.06},
+    capi:{'Large (100–1 000 Mds $)':0.58,'Mid (10–100 Mds $)':0.35,'Small (<10 Mds $)':0.07},
+  },
+  // iShares Euro Stoxx Banks — 100% Financials Eurozone
+  'EXA1.DE':{
+    sectors:{'Financials':1.0},
+    countries:{ES:0.21,FR:0.19,IT:0.17,DE:0.13,NL:0.09,BE:0.06,AT:0.05,Autres:0.10},
+    regions:{'Europe':1},
+    capi:{'Large (100–1 000 Mds $)':0.70,'Mid (10–100 Mds $)':0.30},
   },
 };
 
@@ -340,10 +376,20 @@ const TICKER_SUBSECTOR={
   VRT:'Infrastructure Datacenter',
   // Technology (Mobilité)
   UBER:'Mobilité à la demande',LYFT:'Mobilité à la demande',
+  // Actions françaises
+  'GTT.PA':'Conception de cuves GNL',
+  'AI.PA':'Gaz industriels & Santé',
+  'OR.PA':'Luxe & Cosmétiques',
+  'MC.PA':'Luxe & Mode',
+  'TTE.PA':'Pétrole & Énergies',
+  'SAN.PA':'Pharma & Vaccins',
+  'BNP.PA':'Banque universelle',
+  'ACA.PA':'Banque universelle',
+  'VIE.PA':'Eau & Déchets',
 };
 
 // ═══ TICKERS ETF CONNUS (override si asset_type incorrect en DB) ═══
-const ETF_TICKERS=new Set(['ESE.PA','ESE','PAASI.PA','PAASI','CW8','LVO.DE','IWDA','VWCE']);
+const ETF_TICKERS=new Set(['ESE.PA','ESE','PAASI.PA','PAASI','CW8','LVO.DE','IWDA','VWCE','UTI.PA','PAEEM.PA','EXA1.DE','IWDA.AS','SWDA.L','VWCE.DE','CW8.PA']);
 function isETF(p){
   if(!p) return false;
   if(ETF_TICKERS.has(p.ticker)) return true;
@@ -432,9 +478,9 @@ function loadCache(){
 }
 // ═══ INIT ═══
 window.addEventListener('load',async()=>{
-  checkInviteToken(); // Check ?invite=TOKEN before anything
+  checkInviteToken();
   loadSess();
-  if(getUser()){showApp();await bootstrap();navigate('portfolio');}
+  if(getUser()){showApp();await bootstrap();await processPendingInvite();navigate('portfolio');}
   else showAuth();
 });
 function showApp(){document.getElementById('auth-screen').style.display='none';document.getElementById('app-screen').style.display='flex';}
