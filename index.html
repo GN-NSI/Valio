@@ -2262,6 +2262,20 @@ async function saveRename(){
 }
 
 // ── Vue portefeuille d'un ami — tabs Portefeuille + Ratios ────────────────
+// Calcule les positions depuis transactions brutes (pour amis)
+function computePositionsFromData(accounts, transactions){
+  var map={};
+  (transactions||[]).forEach(function(tx){
+    var k=tx.ticker; if(!k) return;
+    if(!map[k]) map[k]={ticker:k,quantity:0,totalCostEur:0};
+    var txType=(tx.transaction_type||tx.type||'').toLowerCase();
+    var sign=txType==='buy'?1:txType==='sell'?-1:0;
+    map[k].quantity+=sign*(tx.quantity||0);
+    if(txType==='buy') map[k].totalCostEur+=(tx.price_eur||tx.price||0)*(tx.quantity||0);
+  });
+  return Object.values(map).filter(function(p){return p.quantity>0.0001;});
+}
+
 async function renderFriendPortfolio(friendId, friendName){
   var pg=document.getElementById('page');
   pg.innerHTML='<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">'+
