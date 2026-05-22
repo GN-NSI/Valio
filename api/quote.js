@@ -101,7 +101,7 @@ module.exports = async (req, res) => {
   if (type === 'fundamentals') {
     try {
       // Cache Supabase → réponse instantanée si données < 24h
-      const CACHE_V = 3; // Incrémenter pour invalider tous les caches
+      const CACHE_V = 4; // Incrémenter pour invalider tous les caches
       const cached = await getCache(symbol);
       const cacheValid = cached
         && cached._v === CACHE_V
@@ -141,6 +141,8 @@ module.exports = async (req, res) => {
         ? trend1y.earningsEstimate.growth.raw * 100 : null;
       const epsGrowthFwd5Y = trend5y?.earningsEstimate?.growth?.raw != null
         ? trend5y.earningsEstimate.growth.raw * 100 : null;
+      const revenueGrowthFwd1Y = trend1y?.revenueEstimate?.growth?.raw != null
+        ? trend1y.revenueEstimate.growth.raw * 100 : null;
 
       const result = {
         symbol, _v: CACHE_V,
@@ -159,6 +161,7 @@ module.exports = async (req, res) => {
         epsGrowth1Y:        pct(fd.earningsGrowth),
         epsGrowthFwd1Y,
         epsGrowthFwd5Y,
+        revenueGrowthFwd1Y,
         freeCashflow: fcf, operatingCashFlow: ocf,
         mktCap, fcfGrowth: null, roic: null,
         timestamp: Date.now(),
@@ -173,27 +176,39 @@ module.exports = async (req, res) => {
   // ── FINANCIALS (income statement, cashflow, bilan annuels) ──────────────
   if (type === 'financials') {
     const finKey = symbol + '_fin';
-    const FIN_V = 3; // bumped: separate requests + grossProfit fallback
+    const FIN_V = 4; // requête combinée + fallbacks séquentiels si modules vides
     try {
       const cachedFin = await getCache(finKey);
       if (cachedFin && cachedFin._v === FIN_V && cachedFin.years && cachedFin.years.length)
         return res.json({ ...cachedFin, _fromCache: true });
     } catch(e) {}
     try {
-      // Requêtes séparées en parallèle — plus fiable que le module combiné
-      const [yf_is, yf_cf, yf_bs] = await Promise.all([
-        yfSummary(symbol, 'incomeStatementHistory'),
-        yfSummary(symbol, 'cashflowStatementHistory'),
-        yfSummary(symbol, 'balanceSheetHistory'),
-      ]);
-      if (!yf_is) return res.status(404).json({ error: 'No financial data' });
+      // Requête combinée (rapide) + fallbacks séquentiels si modules manquants
+      const yf = await yfSummary(symbol, 'incomeStatementHistory,cashflowStatementHistory,balanceSheetHistory');
+      if (!yf) return res.status(404).json({ error: 'No financial data' });
 
       const raw = v => v?.raw ?? null;
-      const sc  = v => v != null ? Math.round(v / 1e8) / 10 : null; // → Md$, 1 déc.
+      const sc  = v => v != null ? Math.round(v / 1e8) / 10 : null;
 
-      const stmt = [...(yf_is?.incomeStatementHistory?.incomeStatementHistory || [])].reverse();
-      const cf   = [...(yf_cf?.cashflowStatementHistory?.cashflowStatements   || [])].reverse();
-      const bs   = [...(yf_bs?.balanceSheetHistory?.balanceSheetStatements    || [])].reverse();
+      const stmt = [...(yf?.incomeStatementHistory?.incomeStatementHistory || [])].reverse();
+      let cf     = [...(yf?.cashflowStatementHistory?.cashflowStatements   || [])].reverse();
+      let bs     = [...(yf?.balanceSheetHistory?.balanceSheetStatements    || [])].reverse();
+
+      // Fallbacks individuels si le combiné n'a pas retourné les données
+      if (!cf.length || !cf.some(s => raw(s.totalCashFromOperatingActivities) != null)) {
+        try {
+          const yf2 = await yfSummary(symbol, 'cashflowStatementHistory');
+          const cf2 = [...(yf2?.cashflowStatementHistory?.cashflowStatements || [])].reverse();
+          if (cf2.length) cf = cf2;
+        } catch(e2) {}
+      }
+      if (!bs.length || !bs.some(s => raw(s.totalStockholderEquity) != null)) {
+        try {
+          const yf3 = await yfSummary(symbol, 'balanceSheetHistory');
+          const bs2 = [...(yf3?.balanceSheetHistory?.balanceSheetStatements || [])].reverse();
+          if (bs2.length) bs = bs2;
+        } catch(e3) {}
+      }
 
       const years = stmt.map(s => {
         const ts = raw(s.endDate);
@@ -202,7 +217,7 @@ module.exports = async (req, res) => {
       const m = (arr, fn) => arr.map(fn);
 
       const result = {
-        symbol, _v: FIN_V, years,
+        symbol, _v: FIN_V, years,  // FIN_V=4
         revenue:         m(stmt, s => sc(raw(s.totalRevenue))),
         // grossProfit: fallback sur costOfRevenue si null ou 0
         grossProfit:     m(stmt, s => {
