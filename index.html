@@ -161,7 +161,8 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
         <div class="nav-item" id="nav-watchlist" onclick="navigate('watchlist')"><span class="nav-icon">⭐</span><span>Watchlist</span></div>
         <div class="nav-item disabled"><span class="nav-icon">📓</span><span>Journal</span><span class="nav-soon">BIENTÔT</span></div>
         <div class="nav-section">Social</div>
-        <div class="nav-item disabled"><span class="nav-icon">👥</span><span>Amis</span><span class="nav-soon">BIENTÔT</span></div>
+        <div class="nav-item" id="nav-amis" onclick="navigate('amis')"><span class="nav-icon">👥</span><span>Amis</span></div>
+        <div class="nav-item" id="nav-benchmark" onclick="navigate('benchmark')"><span class="nav-icon">📊</span><span>Benchmark</span></div>
       </nav>
       <div class="sidebar-footer" onclick="logout()">
         <div class="avatar" id="sidebar-avatar">?</div>
@@ -430,7 +431,12 @@ function loadCache(){
   try{const f=localStorage.getItem('folio_fundamentals');if(f)S.fundamentals=JSON.parse(f);}catch{}
 }
 // ═══ INIT ═══
-window.addEventListener('load',async()=>{loadSess();if(getUser()){showApp();await bootstrap();navigate('portfolio');}else showAuth();});
+window.addEventListener('load',async()=>{
+  checkInviteToken(); // Check ?invite=TOKEN before anything
+  loadSess();
+  if(getUser()){showApp();await bootstrap();navigate('portfolio');}
+  else showAuth();
+});
 function showApp(){document.getElementById('auth-screen').style.display='none';document.getElementById('app-screen').style.display='flex';}
 function showAuth(){document.getElementById('auth-screen').style.display='flex';document.getElementById('app-screen').style.display='none';}
 async function bootstrap(){
@@ -458,7 +464,7 @@ async function handleAuth(){
   const email=document.getElementById('auth-email').value.trim(),pwd=document.getElementById('auth-password').value,btn=document.getElementById('auth-btn');
   if(!email||!pwd)return showErr('Remplis tous les champs');
   btn.disabled=true;btn.innerHTML='<div class="spinner"></div>';document.getElementById('auth-error').style.display='none';
-  try{const sess=await authPost(authMode==='signup'?'/auth/v1/signup':'/auth/v1/token?grant_type=password',{email,password:pwd});if(!sess?.access_token)throw new Error('Session invalide');saveSess(sess);showApp();await bootstrap();navigate('portfolio');}
+  try{const sess=await authPost(authMode==='signup'?'/auth/v1/signup':'/auth/v1/token?grant_type=password',{email,password:pwd});if(!sess?.access_token)throw new Error('Session invalide');saveSess(sess);showApp();await bootstrap();initUserProfile();processPendingInvite();navigate('portfolio');}
   catch(e){showErr(xlErr(e.message));btn.disabled=false;btn.textContent=authMode==='login'?'Se connecter':"S'inscrire";}
 }
 function showErr(m){const e=document.getElementById('auth-error');e.textContent=m;e.style.display='block';}
@@ -470,7 +476,7 @@ function navigate(page){
   S.page=page;
   document.querySelectorAll('.nav-item:not(.disabled)').forEach(e=>e.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes',ratios:'Screener',watchlist:'Watchlist',screener:'Screener'}[page]||page;
+  document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes',ratios:'Screener',watchlist:'Watchlist',screener:'Screener',amis:'Amis',benchmark:'Benchmark'}[page]||page;
   const pfDiv=document.getElementById('page-portfolio');
   const pgDiv=document.getElementById('page');
   if(page==='portfolio'){
@@ -484,6 +490,8 @@ function navigate(page){
     else if(page==='ratios')renderRatios();
     else if(page==='watchlist')renderWatchlist();
     else if(page==='screener')renderScreener();
+    else if(page==='amis')renderAmis();
+    else if(page==='benchmark')renderBenchmark();
   }
 }
 
@@ -2010,6 +2018,459 @@ function cdWaterfall(containerId, d, sym) {
     bar('Résultat opé.',       d.operatingIncome,'pos') +
     bar('Impôts & Autres',     d.other,   'neg') + sep +
     bar('Résultat net',        d.netIncome,      'pos');
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ═══ SOCIAL — AMIS & BENCHMARK ═════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+
+var _friendsCache = null;
+var _priceHistCache = {}; // {key: [{t,c}]}
+var BM_COLORS = ['#5b7ef5','#22c55e','#f59e0b','#ef4444','#a855f7','#06b6d4'];
+
+// ── Vérifie le token d'invitation dans l'URL ──────────────────────────────
+function checkInviteToken(){
+  try {
+    var params = new URLSearchParams(window.location.search);
+    var token = params.get('invite');
+    if(token){ sessionStorage.setItem('_pendingInvite', token); window.history.replaceState({}, '', window.location.pathname); }
+  } catch(e) {}
+}
+
+// ── Traite l'invitation en attente (après connexion) ──────────────────────
+async function processPendingInvite(){
+  var token = sessionStorage.getItem('_pendingInvite');
+  if(!token) return;
+  var u = getUser(); if(!u) return;
+  sessionStorage.removeItem('_pendingInvite');
+  try {
+    var inv = await dbGet('friend_invites','token=eq.'+token);
+    if(!inv||!inv.length||inv[0].used_by||inv[0].user_id===u.id) return;
+    var inviterId = inv[0].user_id;
+    // Créer la relation amis (bidirectionnelle)
+    try { await dbPost('friends',{requester_id:inviterId,addressee_id:u.id,status:'accepted'}); } catch(e){}
+    try { await dbPost('friends',{requester_id:u.id,addressee_id:inviterId,status:'accepted'}); } catch(e){}
+    await dbPatch('friend_invites','token=eq.'+token,{used_by:u.id});
+    _friendsCache = null;
+    showToast('✅ Ami ajouté avec succès !');
+  } catch(e){ showToast('❌ Lien invalide ou déjà utilisé'); }
+}
+
+// ── Profil utilisateur ────────────────────────────────────────────────────
+async function initUserProfile(){
+  var u = getUser(); if(!u) return;
+  try {
+    var ex = await dbGet('user_profiles','id=eq.'+u.id);
+    if(!ex||!ex.length){
+      var name = (u.email||'').split('@')[0]||'Investisseur';
+      await dbPost('user_profiles',{id:u.id,display_name:name});
+    }
+  } catch(e){}
+}
+
+async function getMyName(){
+  var u = getUser(); if(!u) return 'Moi';
+  try {
+    var p = await dbGet('user_profiles','id=eq.'+u.id);
+    return (p&&p[0]&&p[0].display_name)||'Moi';
+  } catch(e){ return 'Moi'; }
+}
+
+// ── Chargement des amis ───────────────────────────────────────────────────
+async function loadFriends(force){
+  if(_friendsCache&&!force) return _friendsCache;
+  var u = getUser(); if(!u) return [];
+  try {
+    var rows = await dbGet('friends','status=eq.accepted&or=(requester_id.eq.'+u.id+',addressee_id.eq.'+u.id+')');
+    if(!rows||!rows.length) return (_friendsCache=[]);
+    var friendIds = rows.map(function(r){ return r.requester_id===u.id?r.addressee_id:r.requester_id; });
+    var profiles = await dbGet('user_profiles','id=in.('+friendIds.join(',')+')');
+    _friendsCache = (profiles||[]).map(function(p){ return {id:p.id,name:p.display_name}; });
+    return _friendsCache;
+  } catch(e){ return []; }
+}
+
+// ── Génération du lien d'invitation ──────────────────────────────────────
+async function generateInvite(){
+  var u = getUser(); if(!u) return;
+  try {
+    var inv = await dbPost('friend_invites',{user_id:u.id});
+    var url = window.location.origin+window.location.pathname+'?invite='+inv.token;
+    await navigator.clipboard.writeText(url);
+    showToast('🔗 Lien copié ! Envoie-le à ton ami');
+  } catch(e){ showToast('❌ '+e.message); }
+}
+
+// ── Page Amis ─────────────────────────────────────────────────────────────
+async function renderAmis(){
+  var pg = document.getElementById('page');
+  pg.innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">'+
+    '<div><h2 style="font-size:18px;font-weight:700">Mes amis</h2>'+
+    '<p style="color:var(--muted);font-size:13px;margin-top:3px">Portefeuilles partagés entre amis</p></div>'+
+    '<div style="display:flex;gap:8px">'+
+    '<button class="btn btn-ghost btn-sm" onclick="openRenameModal()">✏️ Mon pseudo</button>'+
+    '<button class="btn btn-primary" onclick="generateInvite()">🔗 Inviter un ami</button>'+
+    '</div></div>'+
+    '<div id="friends-list"><div style="text-align:center;padding:40px"><div class="spinner"></div></div></div>';
+
+  var friends = await loadFriends(true);
+  var el = document.getElementById('friends-list'); if(!el) return;
+
+  if(!friends.length){
+    el.innerHTML='<div style="text-align:center;padding:60px;color:var(--muted)">'+
+      '<div style="font-size:48px;margin-bottom:16px">👥</div>'+
+      '<div style="font-size:16px;font-weight:600;margin-bottom:8px">Aucun ami pour l\'instant</div>'+
+      '<div style="font-size:13px">Clique sur "Inviter un ami" pour générer un lien à partager</div></div>';
+    return;
+  }
+
+  // Render friend cards
+  el.innerHTML='<div style="display:flex;flex-direction:column;gap:12px" id="friend-cards"></div>';
+  var cards = document.getElementById('friend-cards'); if(!cards) return;
+
+  for(var fi=0;fi<friends.length;fi++){
+    var f = friends[fi];
+    var card = document.createElement('div');
+    card.className='card';
+    card.style.cssText='display:flex;align-items:center;gap:16px;padding:16px;cursor:pointer';
+    card.innerHTML=
+      '<div style="width:48px;height:48px;border-radius:50%;background:'+BM_COLORS[fi%BM_COLORS.length]+';display:flex;align-items:center;justify-content:center;font-weight:700;font-size:22px;flex-shrink:0;color:#fff">'+f.name[0].toUpperCase()+'</div>'+
+      '<div style="flex:1"><div style="font-weight:600;font-size:15px">'+f.name+'</div><div style="font-size:12px;color:var(--muted)" id="f-stat-'+fi+'">Chargement…</div></div>'+
+      '<div style="text-align:right"><div style="font-size:20px;font-weight:700" id="f-pnl-'+fi+'">—</div><div style="font-size:11px;color:var(--muted)">P&L global</div></div>'+
+      '<div style="color:var(--muted);font-size:18px">›</div>';
+    card.onclick=(function(fid,fname){ return function(){ renderFriendPortfolio(fid,fname); }; })(f.id,f.name);
+    cards.appendChild(card);
+
+    // Load their stats async
+    (function(friend, idx){
+      Promise.all([
+        dbGet('accounts','user_id=eq.'+friend.id).catch(()=>[]),
+        dbGet('transactions','user_id=eq.'+friend.id+'&select=*,accounts(name,type)').catch(()=>[])
+      ]).then(function(res){
+        var pos = computePositionsFromData(res[0]||[],res[1]||[]);
+        var totalCost=0,totalVal=0;
+        pos.forEach(function(p){
+          totalCost+=p.totalCostEur||0;
+          var px=S.prices[p.ticker];
+          if(px){var pEur=px.currency==='USD'?px.price/(S.eurUsd||1.1):px.price; totalVal+=p.quantity*pEur;}
+        });
+        var pct=totalCost>0?(totalVal/totalCost-1)*100:null;
+        var statEl=document.getElementById('f-stat-'+idx);
+        var pnlEl=document.getElementById('f-pnl-'+idx);
+        if(statEl) statEl.textContent=pos.length+' positions';
+        if(pnlEl&&pct!=null){
+          pnlEl.textContent=(pct>=0?'+':'')+pct.toFixed(1)+'%';
+          pnlEl.style.color=pct>=0?'var(--green)':'var(--red)';
+        }
+      }).catch(function(){
+        var statEl=document.getElementById('f-stat-'+idx);
+        if(statEl) statEl.textContent='Données inaccessibles';
+      });
+    })(f,fi);
+  }
+}
+
+// ── Renommer son pseudo ───────────────────────────────────────────────────
+async function openRenameModal(){
+  var u=getUser(); if(!u) return;
+  var p=await dbGet('user_profiles','id=eq.'+u.id).catch(()=>[]);
+  var cur=(p&&p[0]&&p[0].display_name)||'';
+  showModal('<div class="modal-hd"><h2>Mon pseudo</h2><button class="modal-close" onclick="closeModal()">✕</button></div>'+
+    '<div class="form-group" style="margin:16px 0"><label class="form-label">Nom affiché à tes amis</label>'+
+    '<input id="rename-inp" class="form-input" value="'+cur+'" placeholder="ex: Nathan" maxlength="30"></div>'+
+    '<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button>'+
+    '<button class="btn btn-primary" onclick="saveRename()">Enregistrer</button></div>');
+}
+async function saveRename(){
+  var u=getUser(); if(!u) return;
+  var name=document.getElementById('rename-inp')?.value.trim();
+  if(!name) return;
+  try{
+    await dbPatch('user_profiles','id=eq.'+u.id,{display_name:name});
+    closeModal(); showToast('✅ Pseudo mis à jour');
+    _friendsCache=null;
+  }catch(e){showToast('❌ '+e.message);}
+}
+
+// ── Vue portefeuille d'un ami ─────────────────────────────────────────────
+async function renderFriendPortfolio(friendId, friendName){
+  var pg=document.getElementById('page');
+  pg.innerHTML='<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">'+
+    '<button class="btn btn-ghost btn-sm" onclick="navigate(&quot;amis&quot;)">← Retour</button>'+
+    '<h2 style="font-size:18px;font-weight:700">📊 Portefeuille de '+friendName+'</h2></div>'+
+    '<div style="text-align:center;padding:40px"><div class="spinner"></div></div>';
+  try{
+    var [acc,txns]=await Promise.all([
+      dbGet('accounts','user_id=eq.'+friendId),
+      dbGet('transactions','user_id=eq.'+friendId+'&select=*,accounts(name,type)&order=date')
+    ]);
+    var pos=computePositionsFromData(acc||[],txns||[]);
+    var totalCost=pos.reduce(function(s,p){return s+(p.totalCostEur||0);},0);
+    var totalVal=0;
+    pos.forEach(function(p){var px=S.prices[p.ticker];if(px){var pEur=px.currency==='USD'?px.price/(S.eurUsd||1.1):px.price;totalVal+=p.quantity*pEur;}});
+    var pct=totalCost>0?(totalVal/totalCost-1)*100:null;
+    // KPIs
+    var kpis='<div class="kpi-grid" style="margin-bottom:22px">'+
+      kpiCard('Valeur estimée',fN(totalVal)+' €','(prix temps réel pour les titres connus)')+
+      kpiCard('Investi',fN(totalCost)+' €',pos.length+' positions')+
+      (pct!=null?kpiCard('P&L',(pct>=0?'+':'')+pct.toFixed(2)+'%','Plus-value latente estimée'):'')+'</div>';
+    // Positions table
+    var rows=pos.sort(function(a,b){
+      var va=(S.prices[a.ticker])?a.quantity*(S.prices[a.ticker].currency==='USD'?S.prices[a.ticker].price/(S.eurUsd||1.1):S.prices[a.ticker].price):0;
+      var vb=(S.prices[b.ticker])?b.quantity*(S.prices[b.ticker].currency==='USD'?S.prices[b.ticker].price/(S.eurUsd||1.1):S.prices[b.ticker].price):0;
+      return vb-va;
+    }).map(function(p){
+      var px=S.prices[p.ticker];
+      var valEur=px?(p.quantity*(px.currency==='USD'?px.price/(S.eurUsd||1.1):px.price)):null;
+      var pnlEur=valEur!=null?valEur-p.totalCostEur:null;
+      var pnlPct=p.totalCostEur>0&&pnlEur!=null?pnlEur/p.totalCostEur*100:null;
+      return '<tr style="border-bottom:1px solid var(--border2)">'+
+        '<td style="padding:10px 6px"><div style="font-weight:600">'+p.ticker+'</div></td>'+
+        '<td style="padding:10px 6px;text-align:right" class="mono">'+fN(p.quantity)+'</td>'+
+        '<td style="padding:10px 6px;text-align:right" class="mono">'+(valEur!=null?fN(valEur)+' €':'—')+'</td>'+
+        '<td style="padding:10px 6px;text-align:right" class="mono" style="color:'+(pnlPct!=null&&pnlPct>=0?'var(--green)':'var(--red)')+'">'+
+          (pnlPct!=null?(pnlPct>=0?'+':'')+pnlPct.toFixed(1)+'%':'—')+'</td></tr>';
+    }).join('');
+    pg.innerHTML='<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">'+
+      '<button class="btn btn-ghost btn-sm" onclick="navigate(&quot;amis&quot;)">← Retour</button>'+
+      '<h2 style="font-size:18px;font-weight:700">📊 '+friendName+'</h2></div>'+
+      kpis+
+      '<div class="card"><table style="width:100%;border-collapse:collapse">'+
+      '<thead><tr style="border-bottom:1px solid var(--border)">'+
+      '<th style="padding:8px 6px;text-align:left;font-size:11px;color:var(--muted)">TITRE</th>'+
+      '<th style="padding:8px 6px;text-align:right;font-size:11px;color:var(--muted)">QTÉ</th>'+
+      '<th style="padding:8px 6px;text-align:right;font-size:11px;color:var(--muted)">VALEUR</th>'+
+      '<th style="padding:8px 6px;text-align:right;font-size:11px;color:var(--muted)">P&L %</th>'+
+      '</tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }catch(e){
+    pg.innerHTML='<button class="btn btn-ghost btn-sm" onclick="navigate(&quot;amis&quot;)">← Retour</button>'+
+      '<p style="color:var(--red);margin-top:20px">Impossible de charger le portefeuille : '+e.message+'</p>';
+  }
+}
+
+function kpiCard(title, val, sub){
+  return '<div class="card" style="padding:16px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">'+title+'</div>'+
+    '<div style="font-size:22px;font-weight:700">'+val+'</div>'+
+    '<div style="font-size:11px;color:var(--muted);margin-top:4px">'+sub+'</div></div>';
+}
+
+// ── Calcul positions depuis données arbitraires ───────────────────────────
+function computePositionsFromData(accounts, transactions){
+  var map={};
+  (transactions||[]).forEach(function(tx){
+    var k=tx.ticker; if(!k) return;
+    if(!map[k]) map[k]={ticker:k,quantity:0,totalCostEur:0};
+    var sign=tx.type==='buy'?1:tx.type==='sell'?-1:0;
+    map[k].quantity+=sign*(tx.quantity||0);
+    if(tx.type==='buy') map[k].totalCostEur+=(tx.price_eur||0)*(tx.quantity||0);
+  });
+  return Object.values(map).filter(function(p){return p.quantity>0.0001;});
+}
+
+// ── Historique de prix (cache session) ────────────────────────────────────
+async function fetchPriceHistory(ticker, range){
+  var key=ticker+'_'+range;
+  if(_priceHistCache[key]) return _priceHistCache[key];
+  try{
+    var r=await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=chart&range='+range,{signal:AbortSignal.timeout(8000)});
+    var d=await r.json();
+    var pts=d.chartData||[];
+    _priceHistCache[key]=pts;
+    return pts;
+  }catch(e){return [];}
+}
+
+// ── Performance portfolio (positions actuelles × prix historiques) ─────────
+async function buildPortfolioLine(positions, range){
+  var filtered=positions.filter(function(p){return p.ticker&&p.quantity>0;});
+  if(!filtered.length) return [];
+  // Fetch histories in parallel
+  var hists={};
+  await Promise.all(filtered.map(async function(p){
+    hists[p.ticker]=await fetchPriceHistory(p.ticker,range);
+  }));
+  // Collect weekly timestamps
+  var tsSet={};
+  Object.values(hists).forEach(function(pts){pts.forEach(function(p){tsSet[p.t]=true;});});
+  var timestamps=Object.keys(tsSet).map(Number).sort(function(a,b){return a-b;});
+  if(timestamps.length<3) return [];
+  // Thin to max 60 points for performance
+  var step=Math.max(1,Math.floor(timestamps.length/60));
+  timestamps=timestamps.filter(function(_,i){return i%step===0||i===timestamps.length-1;});
+  // Compute value at each timestamp
+  var values=timestamps.map(function(t){
+    return filtered.reduce(function(sum,pos){
+      var pts=(hists[pos.ticker]||[]).filter(function(p){return p.t<=t;});
+      if(!pts.length) return sum;
+      var price=pts[pts.length-1].c;
+      var isUsd=!(S.prices[pos.ticker]&&S.prices[pos.ticker].currency==='EUR');
+      return sum+pos.quantity*(isUsd?price/(S.eurUsd||1.1):price);
+    },0);
+  });
+  var startVal=values[0]; if(!startVal) return [];
+  return timestamps.map(function(t,i){return {t:t,pct:(values[i]/startVal-1)*100};});
+}
+
+// ── Performance indice ────────────────────────────────────────────────────
+async function buildIndexLine(symbol, range){
+  var pts=await fetchPriceHistory(symbol,range);
+  if(pts.length<2) return [];
+  var startVal=pts[0].c; if(!startVal) return [];
+  var step=Math.max(1,Math.floor(pts.length/60));
+  return pts.filter(function(_,i){return i%step===0||i===pts.length-1;})
+    .map(function(p){return {t:p.t,pct:(p.c/startVal-1)*100};});
+}
+
+// ── Page Benchmark ────────────────────────────────────────────────────────
+var INDICES=[
+  {id:'sp500', label:'S&P 500',    symbol:'^GSPC'},
+  {id:'ndx',   label:'Nasdaq 100', symbol:'^NDX'},
+  {id:'msci',  label:'MSCI World', symbol:'IWDA.AS'},
+  {id:'cac',   label:'CAC 40',     symbol:'^FCHI'},
+];
+
+async function renderBenchmark(){
+  var pg=document.getElementById('page');
+  pg.innerHTML='<div style="margin-bottom:20px"><h2 style="font-size:18px;font-weight:700">Benchmark & Comparaison</h2>'+
+    '<p style="color:var(--muted);font-size:13px;margin-top:3px">Compare ta performance avec tes amis et les grands indices</p></div>'+
+    '<div id="bm-sel-container"><div class="spinner"></div></div>'+
+    '<div style="display:flex;gap:6px;margin:14px 0" id="bm-period-row">'+
+    ['1M','6M','1A','3A'].map(function(p,i){
+      var rng=['1mo','6mo','1y','3y'][i];
+      return '<button class="btn btn-ghost btn-sm bm-period-btn" data-range="'+rng+'" onclick="selectBmPeriod(this)">'+p+'</button>';
+    }).join('')+'</div>'+
+    '<div class="card"><div id="bm-chart-wrap" style="position:relative;height:380px">'+
+    '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted)">Sélectionne des éléments à comparer</div></div></div>';
+
+  // Default period = 1A
+  window._bmRange='1y'; window._bmItems=[];
+  var defBtn=document.querySelector('.bm-period-btn[data-range="1y"]');
+  if(defBtn){defBtn.style.background='var(--card2)';}
+
+  // Build selector
+  var friends=await loadFriends();
+  var myName=await getMyName();
+  var selCont=document.getElementById('bm-sel-container'); if(!selCont) return;
+  selCont.innerHTML=
+    '<div style="font-size:11px;color:var(--muted);margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Choisir jusqu\'à 3 éléments</div>'+
+    '<div style="display:flex;flex-wrap:wrap;gap:8px">'+
+    '<button class="bm-sel-btn" data-id="__me__" data-type="portfolio" onclick="toggleBmItem(this)" style="'+bmBtnStyle(true,BM_COLORS[0])+'">👤 '+myName+'</button>'+
+    friends.map(function(f,i){
+      return '<button class="bm-sel-btn" data-id="'+f.id+'" data-type="friend" data-name="'+f.name+'" onclick="toggleBmItem(this)" style="'+bmBtnStyle(false,'')+'">👤 '+f.name+'</button>';
+    }).join('')+
+    INDICES.map(function(idx){
+      return '<button class="bm-sel-btn" data-id="'+idx.id+'" data-symbol="'+idx.symbol+'" data-type="index" onclick="toggleBmItem(this)" style="'+bmBtnStyle(false,'')+'">'+idx.label+'</button>';
+    }).join('')+'</div>';
+
+  // Auto-select "me"
+  window._bmItems=[{id:'__me__',type:'portfolio',label:myName,color:BM_COLORS[0]}];
+  var meBtn=document.querySelector('.bm-sel-btn[data-id="__me__"]');
+  if(meBtn) meBtn._selected=true;
+  refreshBmChart();
+}
+
+function bmBtnStyle(active, color){
+  if(active) return 'padding:6px 14px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;border:2px solid '+color+';background:'+color+';color:#fff;';
+  return 'padding:6px 14px;border-radius:20px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--muted);';
+}
+
+function toggleBmItem(btn){
+  if(!window._bmItems) window._bmItems=[];
+  var id=btn.dataset.id;
+  var idx=window._bmItems.findIndex(function(x){return x.id===id;});
+  if(idx>=0){
+    window._bmItems.splice(idx,1);
+    btn.style=bmBtnStyle(false,'');
+    btn._selected=false;
+  } else {
+    if(window._bmItems.length>=3){showToast('Maximum 3 éléments');return;}
+    var color=BM_COLORS[window._bmItems.length];
+    var label=btn.dataset.name||btn.textContent.trim();
+    window._bmItems.push({id,type:btn.dataset.type,label,color,symbol:btn.dataset.symbol});
+    btn.style=bmBtnStyle(true,color);
+    btn._selected=true;
+  }
+  refreshBmChart();
+}
+
+function selectBmPeriod(btn){
+  document.querySelectorAll('.bm-period-btn').forEach(function(b){b.style.background='';});
+  btn.style.background='var(--card2)';
+  window._bmRange=btn.dataset.range;
+  refreshBmChart();
+}
+
+async function refreshBmChart(){
+  var items=window._bmItems||[];
+  var range=window._bmRange||'1y';
+  var wrap=document.getElementById('bm-chart-wrap'); if(!wrap) return;
+  if(!items.length){
+    wrap.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted)">Sélectionne au moins un élément</div>';
+    return;
+  }
+  wrap.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%"><div class="spinner"></div></div>';
+  var lines=await Promise.allSettled(items.map(async function(item){
+    if(item.type==='index') return await buildIndexLine(item.symbol,range);
+    if(item.type==='portfolio'){
+      var pos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return p.quantity>0;});
+      return await buildPortfolioLine(pos,range);
+    }
+    if(item.type==='friend'){
+      var acc=await dbGet('accounts','user_id=eq.'+item.id).catch(function(){return [];});
+      var txns=await dbGet('transactions','user_id=eq.'+item.id+'&select=*,accounts(name,type)').catch(function(){return [];});
+      var pos=computePositionsFromData(acc,txns);
+      return await buildPortfolioLine(pos,range);
+    }
+    return [];
+  }));
+  var datasets=[];
+  lines.forEach(function(r,i){
+    if(r.status!=='fulfilled'||!r.value||r.value.length<2) return;
+    var pts=r.value;
+    datasets.push({
+      label:items[i].label,
+      data:pts.map(function(p){return p.pct;}),
+      labels:pts.map(function(p){var d=new Date(p.t*1000);return d.toLocaleDateString('fr-FR',{month:'short',year:'2-digit'});}),
+      borderColor:items[i].color,
+      backgroundColor:'transparent',
+      borderWidth:2.5,pointRadius:0,pointHoverRadius:5,tension:0.2,
+    });
+  });
+  if(!datasets.length){
+    wrap.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted)">Impossible de charger les données pour la période sélectionnée</div>';
+    return;
+  }
+  // Use labels from longest dataset
+  var longestDs=datasets.reduce(function(a,b){return a.data.length>b.data.length?a:b;});
+  wrap.innerHTML='<canvas id="bm-canvas"></canvas>';
+  var cv=document.getElementById('bm-canvas'); if(!cv) return;
+  if(window._bmChart){try{window._bmChart.destroy();}catch(e){}}
+  window._bmChart=new Chart(cv,{
+    type:'line',
+    data:{labels:longestDs.labels, datasets:datasets.map(function(ds){
+      // Align data to longest labels (pad with null)
+      var ratio=longestDs.data.length/ds.data.length;
+      return {...ds,data:ratio>1?longestDs.labels.map(function(_,i){
+        var srcIdx=Math.round(i/ratio);
+        return ds.data[Math.min(srcIdx,ds.data.length-1)]??null;
+      }):ds.data};
+    })},
+    options:{
+      responsive:true,maintainAspectRatio:false,animation:{duration:400},
+      plugins:{
+        legend:{display:true,labels:{color:'#9ca3af',font:{size:12},usePointStyle:true,pointStyleWidth:12,padding:16}},
+        tooltip:{mode:'index',intersect:false,callbacks:{
+          label:function(ctx){var v=ctx.raw;return v==null?null:ctx.dataset.label+': '+(v>=0?'+':'')+v.toFixed(1)+'%';}
+        }}
+      },
+      scales:{
+        x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',font:{size:10},maxTicksLimit:8}},
+        y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',font:{size:10},callback:function(v){return (v>=0?'+':'')+v.toFixed(0)+'%';}},position:'right'}
+      }
+    }
+  });
 }
 
 
