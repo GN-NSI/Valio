@@ -500,6 +500,7 @@ async function bootstrap(){
   if(S.accounts.length){const ids=S.accounts.map(a=>a.id).join(',');S.transactions=await dbGet('transactions','account_id=in.('+ids+')&order=transaction_date.desc&select=*,accounts(name,type)')||[];}
   else S.transactions=[];
   try{const r=await fetch(API+'?symbol=EURUSD%3DX',{signal:AbortSignal.timeout(5000)});const d=await r.json();if(d.price){S.eurUsd=d.price;document.getElementById('eurusd-rate').textContent='1 EUR = '+d.price.toFixed(4)+' USD';}}catch{}
+  await loadManualPrices(); // Charge les prix manuels partagés depuis Supabase
 }
 async function refreshData(){showToast('🔄 Actualisation…');S.prices={};S.profiles={};S.fundamentals={};S.enrichedPos=[];S.portfolioRendered=false;document.getElementById('page-portfolio').innerHTML='';await bootstrap();navigate(S.page);}
 
@@ -2334,9 +2335,15 @@ async function renderFriendPortfolio(friendId, friendName){
 
     // ── Fetch prices pour tous les tickers de l'ami ──
     await Promise.all(pos.map(async function(p){
-      if(S.prices[p.ticker]) return;
+      if(S.prices[p.ticker]||manualPrices[p.ticker]) return;
       try{var r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker));var d=await r.json();if(d&&d.price)S.prices[p.ticker]=d;}catch(e){}
     }));
+    // Appliquer les prix manuels (depuis Supabase, partagés) pour les tickers sans données Yahoo
+    pos.forEach(function(p){
+      if(!S.prices[p.ticker]&&manualPrices[p.ticker]){
+        S.prices[p.ticker]={price:manualPrices[p.ticker].price,currency:'EUR',changePct:0,manual:true};
+      }
+    });
 
     // ── Calcul des métriques ──
     pos.forEach(function(p){
@@ -2500,6 +2507,55 @@ async function getFriendTransactions(friendId){
 }
 
 
+
+// ── Performance portefeuille (positions actuelles × prix historiques) ────────
+// Utilise le coût total comme dénominateur → P&L% cohérent avec la page portefeuille
+async function buildPortfolioLine(positions, range){
+  var pos=(positions||[]).filter(function(p){return p.quantity>0.0001&&p.ticker;});
+  if(!pos.length) return [];
+  var totalCost=pos.reduce(function(s,p){return s+(p.totalCostEur||0);},0);
+  if(!totalCost) return [];
+
+  // Fetch historiques en batch de 4 (évite le rate limit Yahoo Finance)
+  var hists={};
+  var BATCH=4, DELAY=300;
+  for(var i=0;i<pos.length;i+=BATCH){
+    await Promise.all(pos.slice(i,i+BATCH).map(async function(p){
+      hists[p.ticker]=await fetchPriceHistory(p.ticker,range);
+    }));
+    if(i+BATCH<pos.length) await new Promise(function(r){setTimeout(r,DELAY);});
+  }
+
+  // Timestamps de la période
+  var tsSet={};
+  Object.values(hists).forEach(function(pts){pts.forEach(function(p){tsSet[p.t]=true;});});
+  var timestamps=Object.keys(tsSet).map(Number).sort(function(a,b){return a-b;});
+  if(timestamps.length<3) return [];
+  var step=Math.max(1,Math.floor(timestamps.length/60));
+  timestamps=timestamps.filter(function(_,i){return i%step===0||i===timestamps.length-1;});
+
+  // Valeur à chaque timestamp (positions actuelles × prix historiques)
+  var rawValues=timestamps.map(function(t){
+    return pos.reduce(function(sum,p){
+      var pts=(hists[p.ticker]||[]).filter(function(q){return q.t<=t;});
+      if(!pts.length) return sum;
+      var price=pts[pts.length-1].c;
+      var isUsd=!(S.prices[p.ticker]&&S.prices[p.ticker].currency==='EUR');
+      return sum+p.quantity*(isUsd?price/(S.eurUsd||1.1):price);
+    },0);
+  });
+
+  // Démarre quand ≥30% de la valeur finale est présente (évite le -80% du début)
+  var finalValue=rawValues[rawValues.length-1]||1;
+  var startIdx=rawValues.findIndex(function(v){return v>0&&v>=finalValue*0.3;});
+  if(startIdx<0) startIdx=rawValues.findIndex(function(v){return v>0;});
+  if(startIdx<0||!rawValues[startIdx]) return [];
+  var startVal=rawValues[startIdx];
+
+  return timestamps.slice(startIdx).map(function(t,i){
+    return {t:t, pct:(rawValues[startIdx+i]/startVal-1)*100};
+  });
+}
 
 // ── Performance indice ────────────────────────────────────────────────────
 async function buildIndexLine(symbol, range){
@@ -2761,30 +2817,45 @@ async function saveEditTx(id){const d=readForm();if(!d.ticker||!d.name||!d.quant
 async function deleteTx(id){if(!confirm('Supprimer cette transaction ?'))return;try{await dbDel('transactions','id=eq.'+id);S.transactions=S.transactions.filter(t=>t.id!==id);showToast('✅ Supprimée');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
 
 // ═══ HELPERS ═══
-// Prix manuel EN EUROS (pour les titres sur Trade Republic)
-function setManualPrice(ticker){
+
+// ── Prix manuels : chargement depuis Supabase (partagés entre amis) ──
+async function loadManualPrices(){
+  try{
+    var rows=await dbGet('manual_prices','')||[];
+    rows.forEach(function(r){
+      manualPrices[r.ticker]={price:r.price,currency:r.currency||'EUR',label:r.label,changePct:0,_t:Date.now(),manual:true};
+    });
+  }catch(e){}
+}
+
+// Prix manuel — sauvegarde dans Supabase (visible par tous les amis)
+async function setManualPrice(ticker){
   const cur=manualPrices[ticker];
   const prev=cur?fN(cur.price):'';
   const val=prompt(`Prix manuel pour ${ticker} en EUR :\n(ex: 1850,50 pour Samsung)\nLaisse vide pour annuler`,prev);
   if(val===null||val.trim()==='')return;
-  // Parse nombres français : supprimer espaces, €, puis virgule → point
   const cleaned=val.replace(/[\s\u00a0]/g,'').replace('€','').replace(',','.');
   const p=parseFloat(cleaned);
   if(isNaN(p)||p<=0)return showToast('❌ Prix invalide (ex: 1850,50)');
+  // Sauvegarder dans Supabase (upsert : crée ou met à jour)
+  try{
+    var u=getUser();
+    await dbUpsert('manual_prices',{ticker:ticker,price:p,currency:'EUR',updated_at:new Date().toISOString(),updated_by:u?.id},'ticker');
+    showToast('✅ Prix enregistré pour '+ticker+' : '+fN(p)+' €');
+  }catch(e){
+    showToast('⚠️ Sauvegardé localement seulement ('+e.message+')');
+  }
   manualPrices[ticker]={price:p,currency:'EUR',changePct:0,_t:Date.now(),manual:true};
-  showToast('✅ Prix enregistré pour '+ticker+' : '+fN(p)+' €');
-  // Patcher uniquement la position concernée dans S.enrichedPos (ne pas vider le cache)
+  // Mettre à jour la position dans S.enrichedPos sans tout recharger
   const ep=S.enrichedPos.find(x=>x.ticker===ticker);
   if(ep){
-    ep.priceEur=p;
-    ep.valueEur=p*ep.quantity;
+    ep.priceEur=p;ep.valueEur=p*ep.quantity;
     ep.pnlEur=ep.valueEur-ep.totalCostEur;
     ep.pnlPct=ep.totalCostEur>0?(ep.pnlEur/ep.totalCostEur)*100:0;
   }
   if(S.page==='portfolio'){
-    if(document.getElementById('pos-body')&&S.enrichedPos.length) renderPosBody(sortPos(S.enrichedPos));
-    updateKPIs(S.enrichedPos);
-    renderDonut();
+    if(document.getElementById('pos-body')&&S.enrichedPos.length)renderPosBody(sortPos(S.enrichedPos));
+    updateKPIs(S.enrichedPos);renderDonut();
   }
 }
 function acctColor(n){const s=(n||'').toLowerCase();if(s.includes('ibkr')||s.includes('interactive'))return{bg:'rgba(239,68,68,.18)',color:'#f87171'};if(s.includes('bourso'))return{bg:'rgba(91,126,245,.2)',color:'#7b9ef7'};if(s.includes('trade')||s.includes('republic'))return{bg:'rgba(220,220,220,.1)',color:'#d0d0e0'};return{bg:'rgba(91,126,245,.12)',color:'#5b7ef5'};}
