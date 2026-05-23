@@ -264,6 +264,39 @@ module.exports = async (req, res) => {
     } catch(e) { return res.status(500).json({ error: e.message }); }
   }
 
+  // ── FINANCIALS QUARTERLY (résultats trimestriels) ──────────────────────
+  if (type === 'financials_quarterly') {
+    try {
+      const yf = await yfSummary(symbol, 'incomeStatementHistoryQuarterly,cashflowStatementHistoryQuarterly');
+      if (!yf) return res.status(404).json({ error: 'No quarterly data' });
+      const raw = v => v?.raw ?? null;
+      const sc  = v => v != null ? Math.round(v / 1e8) / 10 : null;
+      const stmt = [...(yf?.incomeStatementHistoryQuarterly?.incomeStatementHistory || [])].reverse();
+      const cf   = [...(yf?.cashflowStatementHistoryQuarterly?.cashflowStatements  || [])].reverse();
+      // Build quarter labels: "FY25 Q3" etc.
+      const quarters = stmt.map(s => {
+        const ts = raw(s.endDate);
+        if (!ts) return '?';
+        const d = new Date(ts * 1000);
+        const yr = String(d.getFullYear()).slice(2);
+        const mo = d.getMonth() + 1;
+        const q = mo <= 3 ? 'Q1' : mo <= 6 ? 'Q2' : mo <= 9 ? 'Q3' : 'Q4';
+        return q + "'"+yr;
+      });
+      const m = (arr, fn) => arr.map(fn);
+      return res.json({
+        symbol, quarters,
+        revenue:     m(stmt, s => sc(raw(s.totalRevenue))),
+        grossProfit: m(stmt, s => { const gp=raw(s.grossProfit); if(gp!=null&&gp!==0)return sc(gp); const rev=raw(s.totalRevenue),cogs=raw(s.costOfRevenue); return (rev!=null&&cogs!=null)?sc(rev-cogs):null; }),
+        netIncome:   m(stmt, s => sc(raw(s.netIncome))),
+        eps:         m(stmt, s => raw(s.dilutedEps) ?? raw(s.basicEps)),
+        operatingCF: m(cf,   s => sc(raw(s.totalCashFromOperatingActivities) ?? raw(s.operatingCashflow))),
+        capex:       m(cf,   s => sc(raw(s.capitalExpenditures))),
+        freeCF:      m(cf,   s => { const ocf=raw(s.totalCashFromOperatingActivities)??raw(s.operatingCashflow); const cx=raw(s.capitalExpenditures); return ocf!=null?sc(ocf+(cx??0)):null; }),
+      });
+    } catch(e) { return res.status(500).json({ error: e.message }); }
+  }
+
   // ── CHART (données brutes pour fiche société, range paramétrable) ────────
   if (type === 'chart') {
     try {
