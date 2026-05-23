@@ -1436,6 +1436,14 @@ async function renderCompanyDetail(ticker, name) {
           '</div>' +
         '</div>' +
         '<div style="position:relative;width:100%;height:280px"><canvas id="company-price-chart"></canvas></div>' +
+        '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap" id="cd-compare-row">'+
+          '<span style="font-size:11px;color:var(--muted);align-self:center">Comparer :</span>'+
+          ['S&P 500|^GSPC|#22c55e','Nasdaq 100|^NDX|#f59e0b','Mon portefeuille|__ptf__|#a855f7'].map(function(s){
+            var parts=s.split('|'); var lbl=parts[0],id=parts[1],col=parts[2];
+            return '<button class="cd-cmp-btn" data-cid="'+id+'" data-col="'+col+'" onclick="toggleCdCompare(this,\''+ticker+'\')"+'+
+              ' style="padding:3px 10px;font-size:11px;border:1px solid var(--border2);border-radius:20px;background:transparent;color:var(--muted);cursor:pointer">'+lbl+'</button>';
+          }).join('')+
+        '</div>' +
       '</div>' +
       '<div id="cd-fin-right" style="margin-top:14px"></div>' +
     '</div>' +
@@ -1471,89 +1479,209 @@ async function renderCompanyDetail(ticker, name) {
   loadCdFinancials(ticker, price, chartPts, f);
 }
 
+// ── Comparaison de performance dans la fiche action ─────────────────────
+window._cdCompareActive = {}; // {'^GSPC': true, ...}
+
+async function toggleCdCompare(btn, ticker){
+  var cid=btn.dataset.cid, col=btn.dataset.col;
+  if(window._cdCompareActive[cid]){
+    delete window._cdCompareActive[cid];
+    btn.style.background='transparent'; btn.style.color='var(--muted)'; btn.style.borderColor='var(--border2)';
+  } else {
+    window._cdCompareActive[cid]=col;
+    btn.style.background=col+'22'; btn.style.color=col; btn.style.borderColor=col;
+  }
+  // Redraw chart with/without comparison
+  drawCdChart(window._cdChartPts||[], window._cdLastPrice, ticker, window._cdLastPos);
+}
+
 function drawCdChart(pts, price, ticker, pos) {
   var currSym = (price && price.currency === 'EUR') ? '€' : '$';
   var _ticker = ticker || (price && price.symbol) || '';
-  // Store pts+ticker for period switching
-  window._cdLastPrice = price;
-  window._cdLastTicker = _ticker;
+  window._cdLastPrice = price; window._cdLastTicker = _ticker;
   if(pos !== undefined) window._cdLastPos = pos;
-  setTimeout(function(){
+  var compareIds = Object.keys(window._cdCompareActive||{});
+  var isCompareMode = compareIds.length > 0;
+
+  setTimeout(async function(){
     var canvas = document.getElementById('company-price-chart');
     if(!canvas) return;
     if(!pts || pts.length < 2){
-      canvas.parentNode.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px;font-size:13px">Graphique indisponible.<br><span style="font-size:11px">Yahoo Finance ne retourne pas de données historiques.</span></div>';
+      canvas.parentNode.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px;font-size:13px">Graphique indisponible.</div>';
       return;
     }
-    // Thin out if too many points
     var data = pts;
     if(data.length > 400){ var step=Math.ceil(data.length/400); data=data.filter(function(_,i){return i%step===0;}); }
-    // Store timestamps for tooltip
-    var timestamps = data.map(function(p){ return p.t; });
-    var values = data.map(function(p){ return p.c; });
-    var labels = data.map(function(p){
-      var d = new Date(p.t * 1000);
-      return d.toLocaleDateString('fr-FR', {month:'short', year:'2-digit'});
-    });
-    var isUp = values[values.length-1] >= values[0];
-    var col = isUp ? '#22c55e' : '#ef4444';
-    var bg = isUp ? 'rgba(34,197,94,0.07)' : 'rgba(239,68,68,0.07)';
-    // PRU line
+    var timestamps = data.map(function(p){return p.t;});
+    var labels = data.map(function(p){ var d=new Date(p.t*1000); return d.toLocaleDateString('fr-FR',{month:'short',year:'2-digit'}); });
+
     var _pos = window._cdLastPos;
     var _isUsd = !(price && price.currency === 'EUR');
     var pruVal = null;
-    if(_pos && _pos.pruEur){
-      pruVal = _isUsd ? _pos.pruEur * (S.eurUsd||1.10) : _pos.pruEur;
-    }
-    var datasets = [{ data: values, borderColor: col, backgroundColor: bg, fill: true, tension: 0.2, pointRadius: 0, pointHoverRadius: 5, borderWidth: 2, label: 'Cours' }];
-    if(pruVal){
-      datasets.push({ data: Array(values.length).fill(Math.round(pruVal*100)/100), borderColor:'rgba(245,158,11,0.9)', borderWidth:1.5, borderDash:[6,3], pointRadius:0, pointHoverRadius:0, fill:false, label:'PRU '+(_isUsd?'$':'€')+pruVal.toFixed(2), tension:0 });
-    }
-    if(window._companyChart){ try{ window._companyChart.destroy(); }catch(e){} window._companyChart=null; }
-    window._companyChart = new Chart(canvas, {
-      type: 'line',
-      data: { labels: labels, datasets: datasets },
-      options: {
-        responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
-        plugins: {
-          legend: { display: pruVal!=null, labels:{color:'#6b7280',font:{size:10},boxWidth:10,padding:8} },
-          tooltip: {
-            mode: 'index', intersect: false,
-            callbacks: {
-              title: function(ctx){
-                var ts = timestamps[ctx[0].dataIndex];
-                if(!ts) return '';
-                var d = new Date(ts*1000);
-                return d.toLocaleDateString('fr-FR', {day:'2-digit', month:'2-digit', year:'numeric'});
-              },
-              label: function(ctx){ return currSym + ctx.parsed.y.toFixed(2); }
-            }
+    if(_pos && _pos.pruEur) pruVal = _isUsd ? _pos.pruEur*(S.eurUsd||1.10) : _pos.pruEur;
+
+    var datasets = [];
+    if(isCompareMode){
+      // Mode comparaison : rebaser tout à 0% depuis le début de la période
+      var isUp = data[data.length-1].c >= data[0].c;
+      var baseVal = data[0].c;
+      datasets.push({
+        data: data.map(function(p){return baseVal>0?(p.c/baseVal-1)*100:0;}),
+        borderColor: isUp?'#22c55e':'#ef4444', backgroundColor:'transparent',
+        fill:false, tension:0.2, pointRadius:0, pointHoverRadius:5, borderWidth:2.5,
+        label: _ticker.toUpperCase()
+      });
+      // Fetch et overlay chaque comparaison
+      for(var cid of compareIds){
+        var col = window._cdCompareActive[cid];
+        var cPts;
+        if(cid==='__ptf__'){
+          // Portefeuille : utilise buildPortfolioLine
+          var pfPos = S.enrichedPos.length ? S.enrichedPos : computePositions();
+          var ptfLine = await buildPortfolioLine(pfPos, window._cdCurrentRange||'5y');
+          if(ptfLine.length>1){
+            var ptfBase = ptfLine[0].pct;
+            datasets.push({
+              data: labels.map(function(_,i){ var idx=Math.round(i/labels.length*(ptfLine.length-1)); return ptfLine[idx]?ptfLine[idx].pct-ptfBase:null; }),
+              borderColor:col, backgroundColor:'transparent', fill:false, tension:0.2,
+              pointRadius:0, pointHoverRadius:5, borderWidth:2, label:'Mon portefeuille', borderDash:[4,3]
+            });
           }
+        } else {
+          cPts = await fetchPriceHistory(cid, window._cdCurrentRange||'5y');
+          if(cPts&&cPts.length>1){
+            var cBase=cPts[0].c;
+            datasets.push({
+              data: labels.map(function(_,i){
+                var t=timestamps[i]; var cp=cPts.filter(function(p){return p.t<=t;}); if(!cp.length)return null;
+                return (cp[cp.length-1].c/cBase-1)*100;
+              }),
+              borderColor:col, backgroundColor:'transparent', fill:false, tension:0.2,
+              pointRadius:0, pointHoverRadius:5, borderWidth:2,
+              label:(cid==='^GSPC'?'S&P 500':'Nasdaq 100')
+            });
+          }
+        }
+      }
+    } else {
+      // Mode normal : prix absolus
+      var values = data.map(function(p){return p.c;});
+      var isUp = values[values.length-1] >= values[0];
+      var col = isUp?'#22c55e':'#ef4444';
+      datasets.push({data:values, borderColor:col, backgroundColor:isUp?'rgba(34,197,94,0.07)':'rgba(239,68,68,0.07)',
+        fill:true, tension:0.2, pointRadius:0, pointHoverRadius:5, borderWidth:2, label:'Cours'});
+      if(pruVal) datasets.push({data:Array(values.length).fill(Math.round(pruVal*100)/100),
+        borderColor:'rgba(245,158,11,0.9)', borderWidth:1.5, borderDash:[6,3],
+        pointRadius:0, fill:false, label:'PRU '+(_isUsd?'$':'€')+pruVal.toFixed(2), tension:0});
+    }
+
+    if(window._companyChart){try{window._companyChart.destroy();}catch(e){} window._companyChart=null;}
+    window._companyChart = new Chart(canvas, {
+      type:'line', data:{labels:labels, datasets:datasets},
+      options:{
+        responsive:true, maintainAspectRatio:false, animation:{duration:300},
+        plugins:{
+          legend:{display:isCompareMode||(pruVal!=null), labels:{color:'#6b7280',font:{size:10},boxWidth:10,padding:8}},
+          tooltip:{mode:'index', intersect:false, callbacks:{
+            title:function(ctx){var ts=timestamps[ctx[0].dataIndex];if(!ts)return'';return new Date(ts*1000).toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'});},
+            label:function(ctx){return ctx.dataset.label+': '+(isCompareMode?(ctx.parsed.y>=0?'+':'')+ctx.parsed.y.toFixed(1)+'%':currSym+ctx.parsed.y.toFixed(2));}
+          }}
         },
-        scales: {
-          x: { grid:{color:'rgba(255,255,255,0.04)'}, ticks:{color:'#6b7280',font:{size:10},maxTicksLimit:8} },
-          y: { grid:{color:'rgba(255,255,255,0.04)'}, ticks:{color:'#6b7280',font:{size:10},callback:function(v){return v.toFixed(0);}}, position:'right' }
+        scales:{
+          x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',font:{size:10},maxTicksLimit:8}},
+          y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',font:{size:10},callback:function(v){return isCompareMode?(v>=0?'+':'')+v.toFixed(0)+'%':v.toFixed(0);}},position:'right'}
         }
       }
     });
   }, 80);
 }
 
+
 async function changeCdPeriod(btn, ticker) {
   var periodMap = {'1M':{range:'1mo',label:'1 mois'},'6M':{range:'6mo',label:'6 mois'},'1A':{range:'1y',label:'1 an'},'3A':{range:'3y',label:'3 ans'},'5A':{range:'5y',label:'5 ans'}};
   var pm = periodMap[btn.dataset.period]; if(!pm) return;
   document.querySelectorAll('.cd-period-btn').forEach(function(b){b.style.background='';});
-  btn.style.background = 'var(--card2)';
-  var lbl = document.getElementById('cd-chart-label');
-  if(lbl) lbl.textContent = 'Cours — ' + pm.label;
+  btn.style.background='var(--card2)';
+  document.getElementById('cd-chart-label').textContent='Cours — '+pm.label;
+  // Stocker le range courant (utilisé par la comparaison)
+  window._cdCurrentRange = pm.range;
+  // Réinitialiser les boutons de comparaison visuellement
+  document.querySelectorAll('.cd-cmp-btn').forEach(function(b){
+    b.style.background='transparent'; b.style.color='var(--muted)'; b.style.borderColor='var(--border2)';
+  });
+  window._cdCompareActive = {};
   try {
-    var rc = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=chart&range='+pm.range);
-    var dc = await rc.json();
+    var r=await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=chart&range='+pm.range,{signal:AbortSignal.timeout(12000)});
+    var dc=await r.json();
+    window._cdChartPts = dc.chartData||[];
     drawCdChart(dc.chartData||[], window._cdLastPrice, ticker);
   } catch(e){}
 }
 
 // ═══ COMPANY DETAIL — FINANCIAL ANALYSIS ═══════════════════════════════════
+
+// ── Vue trimestrielle / annuelle ──────────────────────────────────────────
+async function switchFinMode(mode, ticker){
+  var btnA=document.getElementById('fin-btn-annual');
+  var btnQ=document.getElementById('fin-btn-quarterly');
+  if(btnA){btnA.style.background=mode==='annual'?'var(--accent)22':'transparent';btnA.style.color=mode==='annual'?'var(--accent)':'var(--muted)';btnA.style.borderColor=mode==='annual'?'var(--accent)':'var(--border2)';}
+  if(btnQ){btnQ.style.background=mode==='quarterly'?'var(--accent)22':'transparent';btnQ.style.color=mode==='quarterly'?'var(--accent)':'var(--muted)';btnQ.style.borderColor=mode==='quarterly'?'var(--accent)':'var(--border2)';}
+
+  if(mode==='annual'){
+    // Recharger les données annuelles
+    loadCdFinancials(ticker, window._cdLastPrice, window._cdChartPts||[], S.fundamentals&&S.fundamentals[ticker]);
+    return;
+  }
+
+  // ── Mode trimestriel ──
+  var el=document.getElementById('cd-fin-section'); if(!el) return;
+  var mainGrid=el.querySelector('.cd-charts-grid');
+  if(mainGrid) mainGrid.innerHTML='<div style="text-align:center;padding:20px"><div class="spinner"></div></div>';
+
+  try{
+    var r=await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=financials_quarterly',{signal:AbortSignal.timeout(12000)});
+    var d=await r.json();
+    if(!d||!d.quarters||!d.quarters.length){
+      if(mainGrid) mainGrid.innerHTML='<div style="color:var(--muted);padding:20px;text-align:center">Données trimestrielles indisponibles</div>';
+      return;
+    }
+    var q=d; var sym=(window._cdLastPrice&&window._cdLastPrice.currency==='EUR')?'€':'$';
+    if(mainGrid) mainGrid.innerHTML=
+      '<div style="grid-column:1/-1">'+
+        '<div class="card" style="margin-bottom:12px">'+
+          '<div id="fin-title-rev-q" style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px">Revenus & Bénéfices trimestriels</div>'+
+          '<div style="position:relative;height:200px"><canvas id="cdchart-rev-q"></canvas></div>'+
+        '</div>'+
+      '</div>'+
+      '<div>'+
+        '<div class="card">'+
+          '<div id="fin-title-cf-q" style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px">Cash Flow trimestriel</div>'+
+          '<div style="position:relative;height:200px"><canvas id="cdchart-cf-q"></canvas></div>'+
+        '</div>'+
+      '</div>'+
+      '<div>'+
+        '<div class="card">'+
+          '<div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px">Résultat net trimestriel</div>'+
+          '<div style="position:relative;height:200px"><canvas id="cdchart-ni-q"></canvas></div>'+
+        '</div>'+
+      '</div>';
+
+    cdBarChart('cdchart-rev-q', q.quarters, [
+      {label:'CA',       data:q.revenue,    color:'#5b7ef5'},
+      {label:'Rés. net', data:q.netIncome,  color:'#22c55e'},
+      {label:'FCF',      data:q.freeCF,     color:'#06b6d4'},
+    ], 'fin-title-rev-q', sym);
+    cdBarChart('cdchart-cf-q', q.quarters, [
+      {label:'FCF',  data:q.freeCF,      color:'#22c55e'},
+      {label:'OCF',  data:q.operatingCF, color:'#5b7ef5'},
+      {label:'Capex',data:q.capex,       color:'#ef4444'},
+    ], 'fin-title-cf-q', sym);
+    cdBarChart('cdchart-ni-q', q.quarters, [
+      {label:'Résultat net', data:q.netIncome, color:'#22c55e'},
+      {label:'Marge brute',  data:q.grossProfit, color:'#5b7ef5'},
+    ], null, sym);
+  }catch(e){if(mainGrid)mainGrid.innerHTML='<div style="color:var(--red);padding:20px">Erreur : '+e.message+'</div>';}
+}
 
 async function loadCdFinancials(ticker, price, chartPts, f) {
   var el = document.getElementById('cd-fin-section');
@@ -1690,6 +1818,15 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
 
   // Fill right column with compact financial KPIs
   var finRight = document.getElementById('cd-fin-right');
+  // ── Ajouter bouton toggle annuel/trimestriel ──
+  var finToggleDiv = document.createElement('div');
+  finToggleDiv.style.cssText='display:flex;gap:6px;margin-bottom:14px;align-items:center';
+  finToggleDiv.innerHTML=
+    '<span style="font-size:11px;color:var(--muted)">Vue :</span>'+
+    '<button id="fin-btn-annual" onclick="switchFinMode(&quot;annual&quot;,&quot;'+ticker+'&quot;)" style="padding:3px 10px;font-size:11px;border:1px solid var(--accent);border-radius:20px;background:var(--accent)22;color:var(--accent);cursor:pointer">Annuel</button>'+
+    '<button id="fin-btn-quarterly" onclick="switchFinMode(&quot;quarterly&quot;,&quot;'+ticker+'&quot;)" style="padding:3px 10px;font-size:11px;border:1px solid var(--border2);border-radius:20px;background:transparent;color:var(--muted);cursor:pointer">Trimestriel</button>';
+  el.insertBefore(finToggleDiv, el.firstChild);
+
   if(finRight && fin.years.length) {
     var lyr = fin.years.length-1;
     var kpiBadge = function(lbl, val, fmt, colorFn){
@@ -1715,7 +1852,7 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
 
   el.innerHTML =
     '<div style="margin-top:4px;padding-top:24px;border-top:1px solid var(--border)">' +
-    '<h3 style="font-size:15px;font-weight:700;margin-bottom:16px">📊 Historique financier</h3>' +
+    '<div class="cd-charts-grid"><h3 style="font-size:15px;font-weight:700;margin-bottom:16px">📊 Historique financier</h3>' +
     '<div style="'+grids3+'">' +
       '<div class="card"><div id="fin-title-rev" style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Revenus & Bénéfices (Md'+sym+')</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-rev"></canvas></div></div>' +
       '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Marges</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-margins"></canvas></div></div>' +
@@ -1732,7 +1869,7 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
       '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">P/FCF</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-pfcf"></canvas></div></div>' +
       '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">P/OCF</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-pocf"></canvas></div></div>' +
     '</div>' +
-    '</div>';
+    '</div></div>';
 
   // Draw all charts (setTimeout for DOM settle)
   setTimeout(function(){
