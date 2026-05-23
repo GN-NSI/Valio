@@ -1651,6 +1651,7 @@ async function switchFinMode(mode, ticker){
     }
     var q=d; var sym=(window._cdLastPrice&&window._cdLastPrice.currency==='EUR')?'€':'$';
     if(mainGrid) mainGrid.innerHTML=
+      "<div style='display:flex;gap:6px;margin-bottom:14px;align-items:center'><span style='font-size:11px;color:var(--muted)'>Vue :</span><button id='fin-btn-annual' onclick='switchFinMode(&quot;annual&quot;,&quot;"+ticker+"&quot;)' style='padding:3px 10px;font-size:11px;border:1px solid var(--border2);border-radius:20px;background:transparent;color:var(--muted);cursor:pointer'>Annuel</button><button id='fin-btn-quarterly' onclick='switchFinMode(&quot;quarterly&quot;,&quot;"+ticker+"&quot;)' style='padding:3px 10px;font-size:11px;border:1px solid var(--accent);border-radius:20px;background:var(--accent)22;color:var(--accent);cursor:pointer'>Trimestriel</button></div>"+
       '<div style="grid-column:1/-1">'+
         '<div class="card" style="margin-bottom:12px">'+
           '<div id="fin-title-rev-q" style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px">Revenus & Bénéfices trimestriels</div>'+
