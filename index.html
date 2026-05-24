@@ -1719,6 +1719,8 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
       if(m.net_income!=null)       fin.netIncome[idx2]       = m.net_income;
       if(m.eps_diluted!=null)      fin.eps[idx2]             = m.eps_diluted;
       if(m.ocf!=null)              fin.operatingCF[idx2]     = m.ocf;
+      if(m.net_margin_pct!=null && fin.revenue[idx2]!=null)
+        fin.netIncome[idx2] = Math.round(fin.revenue[idx2] * m.net_margin_pct / 10) / 10;
       if(m.capex!=null)            fin.capex[idx2]           = m.capex;
       if(m.fcf!=null)              fin.freeCF[idx2]          = m.fcf;
     }
@@ -1795,14 +1797,16 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
   });
   var curPrice = price&&price.price;
   // Compute shares outstanding from mktCap/price for historical ratio calculation
-  var currShares = (f&&f.mktCap&&curPrice) ? f.mktCap/curPrice : null;
+  var currShares = null;
+  if(f&&f.mktCap&&curPrice) currShares=f.mktCap/curPrice;
+  else if(f&&f.sharesOutstanding) currShares=f.sharesOutstanding;
   var pfcfVals = buildValSeries(function(i,py){
-    var fcf=fin.freeCF[i]; if(!fcf||fcf<=0||!py||!currShares) return null;
+    var fcf=fin.freeCF[i]; if(fcf==null||!py||!currShares) return null;
     var fcfPerShare = fcf*1e9/currShares; if(fcfPerShare<=0) return null;
     return {avg:py.avg/fcfPerShare, hi:py.high/fcfPerShare, lo:py.low/fcfPerShare};
   });
   var pocfVals = buildValSeries(function(i,py){
-    var ocf=fin.operatingCF[i]; if(!ocf||ocf<=0||!py||!currShares) return null;
+    var ocf=fin.operatingCF[i]; if(ocf==null||!py||!currShares) return null;
     var ocfPerShare = ocf*1e9/currShares; if(ocfPerShare<=0) return null;
     return {avg:py.avg/ocfPerShare, hi:py.high/ocfPerShare, lo:py.low/ocfPerShare};
   });
@@ -1859,6 +1863,20 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
       '<div class="card"><div id="fin-title-cf" style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Cash Flow (Md'+sym+')</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-cf"></canvas></div></div>' +
     '</div>' +
     (latestWithSegments ? '<div class="card" style="margin-bottom:16px"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Répartition CA · '+latestWithSegments.period+' <span style="color:var(--green);font-size:10px">● Données manuelles</span></div><div style="position:relative;height:220px"><canvas id="cdchart-segments"></canvas></div></div>' : '') +
+    (function(){
+      // Afficher métriques utilisateurs si disponibles dans les données manuelles
+      var umEntries=(manualData||[]).filter(function(m){return m.dau_mau!=null||m.users_growth_pct!=null;});
+      if(!umEntries.length) return '';
+      umEntries.sort(function(a,b){return b.period>a.period?1:-1;});
+      var rows=umEntries.slice(0,4).map(function(m){
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border2)">'+
+          '<span style="font-size:12px;color:var(--muted)">'+m.period+'</span>'+
+          '<span class="mono" style="font-size:13px;font-weight:600">'+(m.dau_mau!=null?fN(m.dau_mau,1)+'M users':'—')+'</span>'+
+          '<span class="mono" style="font-size:12px;color:'+(m.users_growth_pct>=0?'var(--green)':'var(--red)')+'">'+(m.users_growth_pct!=null?(m.users_growth_pct>=0?'+':'')+m.users_growth_pct.toFixed(1)+'%':'—')+'</span>'+
+        '</div>';
+      }).join('');
+      return '<div class="card" style="margin-bottom:16px"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase">👥 Croissance utilisateurs <span style="color:var(--green);font-size:10px">● Données manuelles</span></div>'+rows+'</div>';
+    })() +
     '<h3 style="font-size:15px;font-weight:700;margin:4px 0 16px">📈 Valorisation historique</h3>' +
     '<div style="'+grids3+'">' +
       '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">P/E</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-pe"></canvas></div></div>' +
@@ -2052,10 +2070,17 @@ async function openEarningsEdit(ticker, name, entryId) {
       fld('gp','Marge brute (Md) <span style="font-size:9px;color:var(--muted2)">ou calc. depuis %</span>',e2.gross_profit)+
       fld('oi','Résultat opé. (Md)',e2.operating_income)+
       fld('ni','Résultat net (Md)',e2.net_income)+
+      fld('nm-pct','Marge nette (%)',e2.net_margin_pct,0.1)+
       fld('eps','EPS dilué',e2.eps_diluted,0.01)+fld('ocf','OCF (Md)',e2.ocf)+
       fld('capex','Capex (Md)',e2.capex)+fld('fcf','FCF (Md)',e2.fcf)+
     '</div>'+
 
+    '<div class="stats-section-title" style="margin:10px 0 6px">👥 Métriques utilisateurs (optionnel)</div>'+
+    '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Pour les plateformes : Reddit, Meta, Snap, Pinterest…</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">'+
+      fld('dau-mau','Utilisateurs actifs (M)',e2.dau_mau,0.1)+''+
+      fld('users-growth','Croissance users (%)',e2.users_growth_pct,0.1)+
+    '</div>'+
     '<div class="stats-section-title" style="margin:10px 0 6px">🔭 Guidance (optionnel)</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'+
       fld('grev-lo','CA guidé min (Md)',e2.guidance_rev_low)+fld('grev-hi','CA guidé max (Md)',e2.guidance_rev_high)+
@@ -2100,8 +2125,9 @@ async function saveEarningsEntry(ticker, name, entryId) {
     user_id:u.id, ticker, period, currency:cur,
     segments:segs.length?segs:null,
     revenue:rev_val, gross_profit:gp_val, gross_margin_pct:gm_pct,
-    operating_income:fv('oi'), net_income:fv('ni'),
+    operating_income:fv('oi'), net_income:fv('ni'), net_margin_pct:fv('nm-pct'),
     eps_diluted:fv('eps'), ocf:fv('ocf'), capex:fv('capex'), fcf:fv('fcf'),
+    dau_mau:fv('dau-mau'), users_growth_pct:fv('users-growth'),
     guidance_rev_low:fv('grev-lo'), guidance_rev_high:fv('grev-hi'), guidance_eps:fv('geps'),
     guidance_notes:document.getElementById('em-gnotes').value.trim()||null,
     updated_at:new Date().toISOString(),
@@ -2139,7 +2165,7 @@ function cdBarChart(id, labels, datasets, titleId, currSym) {
   if(!hasData(datasets)){ c.parentNode.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:12px">Données indisponibles</div>'; return; }
   var allVals=datasets.reduce(function(arr,ds){return arr.concat(ds.data.filter(function(v){return v!=null;}));}, []);
   var maxAbs=allVals.reduce(function(m,v){return Math.max(m,Math.abs(v));},0);
-  var useMd=maxAbs>=0.5; var factor=useMd?1:1000; var unitLabel=useMd?'Md':'M'; var sym=currSym||'$';
+  var useMd=maxAbs>=5; var factor=useMd?1:1000; var unitLabel=useMd?'Md':'M'; var sym=currSym||'$';
   if(titleId){var te=document.getElementById(titleId);if(te){te.textContent=(titleId==='fin-title-rev'?'Revenus & Bénéfices':'Cash Flow')+' ('+unitLabel+sym+')';}}
   var scaledDs=datasets.map(function(ds){return {label:ds.label,data:ds.data.map(function(v){return v!=null?v*factor:null;}),color:ds.color};});
   var k='_cdc_'+id; if(window[k]){try{window[k].destroy();}catch(e){}}
