@@ -122,6 +122,7 @@ module.exports = async (req, res) => {
       const pct = v => (v?.raw != null ? v.raw * 100 : null);
 
       const mktCap    = raw(ks.marketCap) || raw(sd.marketCap);
+      const sharesOutstanding = raw(ks.sharesOutstanding) || raw(sd.sharesOutstanding);
       const fcf       = raw(fd.freeCashflow);
       const ocf       = raw(fd.operatingCashflow);
       const totalDebt = raw(fd.totalDebt);
@@ -163,7 +164,7 @@ module.exports = async (req, res) => {
         epsGrowthFwd5Y,
         revenueGrowthFwd1Y,
         freeCashflow: fcf, operatingCashFlow: ocf,
-        mktCap, fcfGrowth: null, roic: null,
+        mktCap, sharesOutstanding, fcfGrowth: null, roic: null,
         timestamp: Date.now(),
       };
 
