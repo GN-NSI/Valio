@@ -2413,7 +2413,6 @@ function _renderDepositsUI(deposits){
 
 async function _drawDepositChart(deposits, totalVal){
   var cv=document.getElementById('deposit-chart'); if(!cv) return;
-  // Construire la série dépôts cumulés par date (toutes opérations)
   var sorted=deposits.slice().sort(function(a,b){return a.deposit_date<b.deposit_date?-1:1;});
   var depLabels=[], depSeries=[], cum=0;
   sorted.forEach(function(d){
@@ -2421,30 +2420,52 @@ async function _drawDepositChart(deposits, totalVal){
     depLabels.push(new Date(d.deposit_date).toLocaleDateString('fr-FR',{month:'short',year:'2-digit'}));
     depSeries.push(cum);
   });
-  // Dernier point = aujourd'hui
-  depLabels.push("Auj.");
-  depSeries.push(cum);
+  depLabels.push('Auj.'); depSeries.push(cum);
 
-  // Valeur portefeuille : fetchPriceHistory pour chaque position × qté, interpolé aux dates de dépôt
-  var ptfSeries=depSeries.map(function(_,i){return i===depSeries.length-1?totalVal:null;});
+  // ── Reconstruction réelle du portefeuille à chaque date de dépôt ──
+  // Utilise les transactions pour savoir ce que Nathan détenait vraiment
+  var ptfSeries=depSeries.map(function(){return null;});
   try{
-    var pos=(S.enrichedPos.length?S.enrichedPos:[]).filter(function(p){return p.quantity>0&&p.ticker;});
-    if(pos.length){
-      var line=await buildPortfolioLine(pos,'5y');
-      if(line&&line.length>1){
-        var lastPct=line[line.length-1].pct;
-        var allDates=sorted.map(function(d){return new Date(d.deposit_date).getTime()/1000;});
-        allDates.push(Date.now()/1000);
-        ptfSeries=allDates.map(function(ts,i){
-          if(i===allDates.length-1) return totalVal;
-          var pts=line.filter(function(p){return p.t<=ts;});
-          if(!pts.length) pts=[line[0]];
-          var p=pts[pts.length-1];
-          return Math.round(totalVal*(1+p.pct/100)/(1+lastPct/100)*100)/100;
-        });
-      }
+    var txns=(S.transactions||[]).slice().sort(function(a,b){
+      return new Date(a.transaction_date)-new Date(b.transaction_date);
+    });
+    var allTickers=[...new Set(txns.map(function(t){return t.ticker;}).filter(Boolean))];
+
+    // Fetch 5y d'historique pour tous les tickers (batch de 4)
+    var hists={};
+    for(var bi=0;bi<allTickers.length;bi+=4){
+      await Promise.all(allTickers.slice(bi,bi+4).map(async function(tk){
+        hists[tk]=await fetchPriceHistory(tk,'5y');
+      }));
+      if(bi+4<allTickers.length) await new Promise(function(r){setTimeout(r,350);});
     }
-  }catch(e){}
+
+    // Pour chaque date de dépôt : reconstruire les holdings et valoriser
+    var allDates=sorted.map(function(d){return d.deposit_date;});
+    allDates.push(new Date().toISOString().slice(0,10)); // aujourd'hui
+
+    ptfSeries=allDates.map(function(date,idx){
+      if(idx===allDates.length-1) return totalVal; // dernier point = valeur exacte actuelle
+      var ts=new Date(date).getTime()/1000;
+      // Holdings à cette date (toutes transactions ≤ date)
+      var holdings={};
+      txns.forEach(function(tx){
+        if(!tx.ticker||new Date(tx.transaction_date)>new Date(date)) return;
+        if(!holdings[tx.ticker]) holdings[tx.ticker]=0;
+        var txType=(tx.transaction_type||'').toLowerCase();
+        holdings[tx.ticker]+=(txType==='buy'?1:txType==='sell'?-1:0)*(tx.quantity||0);
+      });
+      // Valorisation au cours du moment
+      return Object.keys(holdings).reduce(function(sum,ticker){
+        var qty=holdings[ticker]; if(qty<=0.0001) return sum;
+        var pts=(hists[ticker]||[]).filter(function(p){return p.t<=ts;});
+        if(!pts.length) return sum;
+        var price=pts[pts.length-1].c;
+        var isUsd=!(S.prices[ticker]&&S.prices[ticker].currency==='EUR');
+        return sum+qty*(isUsd?price/(S.eurUsd||1.1):price);
+      },0);
+    });
+  }catch(e){console.warn('_drawDepositChart error:',e);}
 
   if(window._depChart){try{window._depChart.destroy();}catch(e){}}
   window._depChart=new Chart(cv,{type:'line',
@@ -2454,7 +2475,7 @@ async function _drawDepositChart(deposits, totalVal){
     ]},
     options:{responsive:true,maintainAspectRatio:false,
       plugins:{legend:{labels:{color:'#6b7280',font:{size:11}}},
-        tooltip:{mode:'index',intersect:false,callbacks:{label:function(ctx){return ctx.dataset.label+': '+fE(ctx.raw);}}}},
+        tooltip:{mode:'index',intersect:false,callbacks:{label:function(ctx){return ctx.dataset.label+': '+(ctx.raw!=null?fE(ctx.raw):'—');}}}},
       scales:{x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',maxTicksLimit:12}},
         y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',callback:function(v){return fE(v);}},position:'right'}}}
   });
