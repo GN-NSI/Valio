@@ -1651,7 +1651,7 @@ async function switchFinMode(mode, ticker){
     }
     var q=d; var sym=(window._cdLastPrice&&window._cdLastPrice.currency==='EUR')?'€':'$';
     if(mainGrid) mainGrid.innerHTML=
-      "<div style='display:flex;gap:6px;margin-bottom:14px;align-items:center'><span style='font-size:11px;color:var(--muted)'>Vue :</span><button id='fin-btn-annual' onclick='switchFinMode(&quot;annual&quot;,&quot;"+ticker+"&quot;)' style='padding:3px 10px;font-size:11px;border:1px solid var(--border2);border-radius:20px;background:transparent;color:var(--muted);cursor:pointer'>Annuel</button><button id='fin-btn-quarterly' onclick='switchFinMode(&quot;quarterly&quot;,&quot;"+ticker+"&quot;)' style='padding:3px 10px;font-size:11px;border:1px solid var(--accent);border-radius:20px;background:var(--accent)22;color:var(--accent);cursor:pointer'>Trimestriel</button></div>"+
+      "<div style='grid-column:1/-1;display:flex;gap:6px;margin-bottom:14px;align-items:center'><span style='font-size:11px;color:var(--muted)'>Vue :</span><button id='fin-btn-annual' onclick='switchFinMode(&quot;annual&quot;,&quot;"+ticker+"&quot;)' style='padding:3px 10px;font-size:11px;border:1px solid var(--border2);border-radius:20px;background:transparent;color:var(--muted);cursor:pointer'>Annuel</button><button id='fin-btn-quarterly' onclick='switchFinMode(&quot;quarterly&quot;,&quot;"+ticker+"&quot;)' style='padding:3px 10px;font-size:11px;border:1px solid var(--accent);border-radius:20px;background:var(--accent)22;color:var(--accent);cursor:pointer'>Trimestriel</button></div>"+
       '<div style="grid-column:1/-1">'+
         '<div class="card" style="margin-bottom:12px">'+
           '<div id="fin-title-rev-q" style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px">Revenus & Bénéfices trimestriels</div>'+
@@ -1848,7 +1848,7 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
 
   el.innerHTML =
     '<div style="margin-top:4px;padding-top:24px;border-top:1px solid var(--border)">' +
-    '<div class="cd-charts-grid"><div style="display:flex;gap:6px;margin-bottom:14px;align-items:center"><span style="font-size:11px;color:var(--muted)">Vue :</span><button id="fin-btn-annual" onclick="switchFinMode(&quot;annual&quot;,&quot;'+ticker+'&quot;)" style="padding:3px 10px;font-size:11px;border:1px solid var(--accent);border-radius:20px;background:var(--accent)22;color:var(--accent);cursor:pointer">Annuel</button><button id="fin-btn-quarterly" onclick="switchFinMode(&quot;quarterly&quot;,&quot;'+ticker+'&quot;)" style="padding:3px 10px;font-size:11px;border:1px solid var(--border2);border-radius:20px;background:transparent;color:var(--muted);cursor:pointer">Trimestriel</button></div><h3 style="font-size:15px;font-weight:700;margin-bottom:16px">📊 Historique financier</h3>' +
+    '<div class="cd-charts-grid"><div style="display:flex;gap:6px;margin-bottom:14px;grid-column:1/-1;align-items:center"><span style="font-size:11px;color:var(--muted)">Vue :</span><button id="fin-btn-annual" onclick="switchFinMode(&quot;annual&quot;,&quot;'+ticker+'&quot;)" style="padding:3px 10px;font-size:11px;border:1px solid var(--accent);border-radius:20px;background:var(--accent)22;color:var(--accent);cursor:pointer">Annuel</button><button id="fin-btn-quarterly" onclick="switchFinMode(&quot;quarterly&quot;,&quot;'+ticker+'&quot;)" style="padding:3px 10px;font-size:11px;border:1px solid var(--border2);border-radius:20px;background:transparent;color:var(--muted);cursor:pointer">Trimestriel</button></div><h3 style="font-size:15px;font-weight:700;margin-bottom:16px">📊 Historique financier</h3>' +
     '<div style="'+grids3+'">' +
       '<div class="card"><div id="fin-title-rev" style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Revenus & Bénéfices (Md'+sym+')</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-rev"></canvas></div></div>' +
       '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Marges</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-margins"></canvas></div></div>' +
@@ -2309,125 +2309,218 @@ async function getMyName(){
 }
 
 // ═══ PAGE DÉPÔTS & ÉVOLUTION DU SOLDE ════════════════════════════════════
+var _depSort={col:'date',asc:false}; // tri par défaut: date décroissante
+var _depFilter=null; // filtre compte (null = tous)
+
 async function renderDeposits(){
   var pg=document.getElementById('page');
-  pg.innerHTML='<h2 style="font-size:20px;font-weight:700;margin-bottom:20px">💸 Dépôts & Évolution du solde</h2>'+
-    '<div style="text-align:center;padding:40px"><div class="spinner"></div></div>';
-
+  pg.innerHTML='<div style="text-align:center;padding:60px"><div class="spinner"></div></div>';
   var deposits=await dbGet('deposits','order=deposit_date.asc&select=*,accounts(name)')||[];
-  var txns=S.transactions;
+  _renderDepositsUI(deposits);
+}
 
-  // Calcul des dépôts cumulés par date
-  var depCumul=[], depSum=0;
-  deposits.forEach(function(d){depSum+=d.amount; depCumul.push({date:d.deposit_date, val:depSum});});
-
-  // Valeur totale courante
+function _renderDepositsUI(deposits){
+  var pg=document.getElementById('page');
   var totalVal=S.enrichedPos.reduce(function(s,p){return s+(p.valueEur||0);},0);
   var totalCost=S.enrichedPos.reduce(function(s,p){return s+(p.totalCostEur||0);},0);
   var totalRealized=S.realizedPnl||0;
-  var totalDeposited=depSum;
+
+  // Comptes distincts pour le filtre
+  var acctNames=[...new Set(deposits.map(function(d){return d.accounts&&d.accounts.name;}).filter(Boolean))];
+
+  // Calcul total déposé (somme algébrique : dépôts - retraits)
+  var totalDeposited=deposits.reduce(function(s,d){return s+d.amount;},0);
+
+  // Filtre par compte
+  var filtered=_depFilter?deposits.filter(function(d){return d.accounts&&d.accounts.name===_depFilter;}):deposits;
+
+  // Tri
+  filtered=filtered.slice().sort(function(a,b){
+    var va=_depSort.col==='date'?a.deposit_date:_depSort.col==='amount'?a.amount:(a.accounts&&a.accounts.name||'');
+    var vb=_depSort.col==='date'?b.deposit_date:_depSort.col==='amount'?b.amount:(b.accounts&&b.accounts.name||'');
+    if(va<vb)return _depSort.asc?-1:1;
+    if(va>vb)return _depSort.asc?1:-1;
+    return 0;
+  });
+
+  // Cumulé : pour chaque ligne, somme de TOUS les dépôts jusqu'à et y compris cette date
+  // (tri par date asc pour calculer le cumulé, puis on réaffiche dans l'ordre de tri)
+  var sortedByDate=deposits.slice().sort(function(a,b){return a.deposit_date<b.deposit_date?-1:1;});
+  var cumMap={};
+  var cum=0;
+  sortedByDate.forEach(function(d){cum+=d.amount; cumMap[d.id]=cum;});
+
+  var thStyle='padding:8px;text-align:left;font-size:11px;color:var(--muted);cursor:pointer;user-select:none;white-space:nowrap';
+  var thR='padding:8px;text-align:right;font-size:11px;color:var(--muted);cursor:pointer;user-select:none';
+  var sort=function(col){return 'onclick="sortDeposits(\''+col+'\')"';};
+  var arrow=function(col){return _depSort.col===col?(_depSort.asc?' ↑':' ↓'):'';};
 
   pg.innerHTML=
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">'+
       '<h2 style="font-size:20px;font-weight:700">💸 Dépôts & Évolution du solde</h2>'+
-      '<button class="btn btn-primary btn-sm" onclick="openAddDeposit()">+ Ajouter un dépôt</button>'+
+      '<div style="display:flex;gap:8px">'+
+        '<button class="btn btn-ghost btn-sm" onclick="openAddDeposit(\'retrait\')">− Retrait</button>'+
+        '<button class="btn btn-primary btn-sm" onclick="openAddDeposit(\'depot\')">+ Ajouter un dépôt</button>'+
+      '</div>'+
     '</div>'+
     '<div class="kpi-grid" style="margin-bottom:22px">'+
-      '<div class="kpi-card"><div class="kpi-label">Total déposé</div><div class="kpi-value">'+fE(totalDeposited)+'</div><div class="kpi-sub">'+deposits.length+' versement(s)</div></div>'+
+      '<div class="kpi-card"><div class="kpi-label">Total net déposé</div><div class="kpi-value">'+fE(totalDeposited)+'</div><div class="kpi-sub">'+deposits.length+' opération(s)</div></div>'+
       '<div class="kpi-card"><div class="kpi-label">Valeur actuelle</div><div class="kpi-value">'+fE(totalVal)+'</div><div class="kpi-sub">Positions ouvertes</div></div>'+
       '<div class="kpi-card"><div class="kpi-label">PV latentes</div><div class="kpi-value"><span class="'+(totalVal-totalCost>=0?'c-green':'c-red')+'">'+(totalVal-totalCost>=0?'+':'')+fE(totalVal-totalCost)+'</span></div><div class="kpi-sub">Non réalisées</div></div>'+
       '<div class="kpi-card"><div class="kpi-label">PV réalisées</div><div class="kpi-value"><span class="'+(totalRealized>=0?'c-green':'c-red')+'">'+(totalRealized>=0?'+':'')+fE(Math.abs(totalRealized))+'</span></div><div class="kpi-sub">Gains actés</div></div>'+
     '</div>'+
-    '<div class="card" style="margin-bottom:16px"><div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-bottom:12px">Évolution du solde vs dépôts cumulés</div>'+
+    '<div class="card" style="margin-bottom:16px">'+
+      '<div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-bottom:12px">Évolution du solde vs dépôts cumulés</div>'+
       '<div style="position:relative;height:300px"><canvas id="deposit-chart"></canvas></div>'+
     '</div>'+
-    '<div class="card"><div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-bottom:12px">Historique des dépôts</div>'+
+    '<div class="card">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
+        '<div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase">Historique des opérations</div>'+
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">'+
+          '<button onclick="filterDeposits(null)" style="padding:3px 10px;font-size:11px;border-radius:20px;border:1px solid '+(!_depFilter?'var(--accent)':'var(--border2)')+';background:'+(!_depFilter?'var(--accent)22':'transparent')+';color:'+(!_depFilter?'var(--accent)':'var(--muted)')+';cursor:pointer">Tous</button>'+
+          acctNames.map(function(n){var a=_depFilter===n; return '<button onclick="filterDeposits(\''+n+'\')" style="padding:3px 10px;font-size:11px;border-radius:20px;border:1px solid '+(a?'var(--accent)':'var(--border2)')+';background:'+(a?'var(--accent)22':'transparent')+';color:'+(a?'var(--accent)':'var(--muted)')+';cursor:pointer">'+n+'</button>';}).join('')+
+        '</div>'+
+      '</div>'+
       '<table style="width:100%;border-collapse:collapse">'+
         '<thead><tr style="border-bottom:1px solid var(--border)">'+
-          '<th style="padding:8px;text-align:left;font-size:11px;color:var(--muted)">DATE</th>'+
-          '<th style="padding:8px;text-align:left;font-size:11px;color:var(--muted)">COMPTE</th>'+
-          '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">MONTANT</th>'+
-          '<th style="padding:8px;text-align:left;font-size:11px;color:var(--muted)">NOTE</th>'+
-          '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">CUMULÉ</th>'+
-          '<th style="padding:8px"></th>'+
+          '<th style="'+thStyle+'" '+sort('date')+'>DATE'+arrow('date')+'</th>'+
+          '<th style="'+thStyle+'" '+sort('account')+'>COMPTE'+arrow('account')+'</th>'+
+          '<th style="'+thR+'" '+sort('amount')+'>MONTANT'+arrow('amount')+'</th>'+
+          '<th style="'+thStyle+'">NOTE</th>'+
+          '<th style="'+thR+'">CUMULÉ</th>'+
+          '<th style="padding:8px;width:80px"></th>'+
         '</tr></thead><tbody>'+
-        (function(){var cum=0; return deposits.slice().reverse().map(function(d){
-          cum+=d.amount;
+        filtered.map(function(d){
+          var isRetrait=d.amount<0;
           return '<tr style="border-bottom:1px solid var(--border2)">'+
             '<td style="padding:10px 8px;font-size:13px">'+new Date(d.deposit_date).toLocaleDateString('fr-FR')+'</td>'+
             '<td style="padding:10px 8px;font-size:13px">'+((d.accounts&&d.accounts.name)||'—')+'</td>'+
-            '<td style="padding:10px 8px;text-align:right;font-weight:600" class="mono">'+fE(d.amount)+'</td>'+
+            '<td style="padding:10px 8px;text-align:right;font-weight:600;color:'+(isRetrait?'var(--red)':'inherit')+'" class="mono">'+(isRetrait?'':'')+fE(d.amount)+'</td>'+
             '<td style="padding:10px 8px;font-size:12px;color:var(--muted)">'+( d.notes||'')+'</td>'+
-            '<td style="padding:10px 8px;text-align:right;font-size:12px" class="mono">'+fE(cum)+'</td>'+
-            '<td style="padding:10px 8px;text-align:right"><button class="btn btn-ghost btn-sm" style="color:var(--red);padding:2px 6px" onclick="deleteDeposit(&quot;'+d.id+'&quot;)">✕</button></td>'+
-            '</tr>';
-        }).join('');})() +
-        '</tbody></table>'+
+            '<td style="padding:10px 8px;text-align:right;font-size:12px" class="mono">'+fE(cumMap[d.id]||0)+'</td>'+
+            '<td style="padding:10px 8px;text-align:right;display:flex;gap:4px;justify-content:flex-end">'+
+              '<button class="btn btn-ghost btn-sm" style="padding:2px 7px" onclick="editDeposit(\''+d.id+'\')">✏️</button>'+
+              '<button class="btn btn-ghost btn-sm" style="color:var(--red);padding:2px 7px" onclick="deleteDeposit(\''+d.id+'\')">✕</button>'+
+            '</td>'+
+          '</tr>';
+        }).join('')+
+      '</tbody></table>'+
     '</div>';
 
-  // Draw chart: deposits cumulés (step) + valeur portfolio (calculée des positions × prix actuel, statique)
-  setTimeout(function(){
-    var cv=document.getElementById('deposit-chart'); if(!cv) return;
-    // Construire la série temporelle de la valeur du portefeuille à partir des transactions
-    // Simplification : on utilise les dates de dépôts + aujourd'hui comme points de la courbe
-    var allDates=deposits.map(function(d){return d.deposit_date;});
-    allDates.push(new Date().toISOString().slice(0,10));
-    allDates=allDates.filter(function(d,i,a){return a.indexOf(d)===i;}).sort();
-
-    var cumDep=0, depIdx=0;
-    var depSeries=allDates.map(function(date){
-      while(depIdx<deposits.length&&deposits[depIdx].deposit_date<=date){cumDep+=deposits[depIdx].amount;depIdx++;}
-      return cumDep;
-    });
-
-    var labels=allDates.map(function(d){return new Date(d).toLocaleDateString('fr-FR',{month:'short',year:'2-digit'});});
-    // Valeur portefeuille : dernier point = valeur actuelle, reste proportionnel
-    var portSeries=allDates.map(function(d,i){return i===allDates.length-1?totalVal:null;});
-
-    new Chart(cv,{type:'line',
-      data:{labels:labels, datasets:[
-        {label:'Valeur portefeuille', data:portSeries.map(function(v,i){return i===portSeries.length-1?totalVal:depSeries[i]+(totalRealized>0?totalRealized:0);}),
-         borderColor:'#5b7ef5', backgroundColor:'rgba(91,126,245,0.08)', fill:true, tension:0.3, pointRadius:3, borderWidth:2.5},
-        {label:'Dépôts cumulés', data:depSeries, borderColor:'#f59e0b', backgroundColor:'transparent',
-         fill:false, stepped:true, pointRadius:3, borderWidth:2, borderDash:[5,4]},
-      ]},
-      options:{responsive:true,maintainAspectRatio:false,
-        plugins:{legend:{labels:{color:'#6b7280',font:{size:11}}},
-          tooltip:{mode:'index',intersect:false,callbacks:{label:function(ctx){return ctx.dataset.label+': '+fE(ctx.raw);}}}},
-        scales:{x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280'}},
-          y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',callback:function(v){return fE(v);}},position:'right'}}}
-    });
-  },80);
+  // Graphique : portfolio value historique via buildPortfolioLine
+  _drawDepositChart(deposits, totalVal);
 }
 
-function openAddDeposit(){
+async function _drawDepositChart(deposits, totalVal){
+  var cv=document.getElementById('deposit-chart'); if(!cv) return;
+  // Construire la série dépôts cumulés par date (toutes opérations)
+  var sorted=deposits.slice().sort(function(a,b){return a.deposit_date<b.deposit_date?-1:1;});
+  var depLabels=[], depSeries=[], cum=0;
+  sorted.forEach(function(d){
+    cum+=d.amount;
+    depLabels.push(new Date(d.deposit_date).toLocaleDateString('fr-FR',{month:'short',year:'2-digit'}));
+    depSeries.push(cum);
+  });
+  // Dernier point = aujourd'hui
+  depLabels.push("Auj.");
+  depSeries.push(cum);
+
+  // Valeur portefeuille : fetchPriceHistory pour chaque position × qté, interpolé aux dates de dépôt
+  var ptfSeries=depSeries.map(function(_,i){return i===depSeries.length-1?totalVal:null;});
+  try{
+    var pos=(S.enrichedPos.length?S.enrichedPos:[]).filter(function(p){return p.quantity>0&&p.ticker;});
+    if(pos.length){
+      var line=await buildPortfolioLine(pos,'5y');
+      if(line&&line.length>1){
+        var lastPct=line[line.length-1].pct;
+        var allDates=sorted.map(function(d){return new Date(d.deposit_date).getTime()/1000;});
+        allDates.push(Date.now()/1000);
+        ptfSeries=allDates.map(function(ts,i){
+          if(i===allDates.length-1) return totalVal;
+          var pts=line.filter(function(p){return p.t<=ts;});
+          if(!pts.length) pts=[line[0]];
+          var p=pts[pts.length-1];
+          return Math.round(totalVal*(1+p.pct/100)/(1+lastPct/100)*100)/100;
+        });
+      }
+    }
+  }catch(e){}
+
+  if(window._depChart){try{window._depChart.destroy();}catch(e){}}
+  window._depChart=new Chart(cv,{type:'line',
+    data:{labels:depLabels,datasets:[
+      {label:'Valeur portefeuille',data:ptfSeries,borderColor:'#5b7ef5',backgroundColor:'rgba(91,126,245,0.08)',fill:true,tension:0.3,pointRadius:3,borderWidth:2.5},
+      {label:'Dépôts cumulés',data:depSeries,borderColor:'#f59e0b',backgroundColor:'transparent',fill:false,stepped:true,pointRadius:3,borderWidth:2,borderDash:[5,4]},
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#6b7280',font:{size:11}}},
+        tooltip:{mode:'index',intersect:false,callbacks:{label:function(ctx){return ctx.dataset.label+': '+fE(ctx.raw);}}}},
+      scales:{x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',maxTicksLimit:12}},
+        y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',callback:function(v){return fE(v);}},position:'right'}}}
+  });
+}
+
+window.sortDeposits=function(col){
+  if(_depSort.col===col)_depSort.asc=!_depSort.asc;
+  else{_depSort.col=col;_depSort.asc=col!=='date';}
+  renderDeposits();
+};
+window.filterDeposits=function(name){_depFilter=name;renderDeposits();};
+
+function openAddDeposit(type){
+  var isRetrait=type==='retrait';
   var accts=S.accounts;
-  showModal('<div class="modal-hd"><h2>Ajouter un versement</h2><button class="modal-close" onclick="closeModal()">✕</button></div>'+
+  showModal('<div class="modal-hd"><h2>'+(isRetrait?'Enregistrer un retrait':'Ajouter un versement')+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div>'+
     '<div class="form-group"><label class="form-label">Compte</label>'+
     '<select id="dep-acct" class="form-input"><option value="">— Choisir —</option>'+
     accts.map(function(a){return '<option value="'+a.id+'">'+a.name+'</option>';}).join('')+'</select></div>'+
-    '<div class="form-group"><label class="form-label">Montant (€)</label><input id="dep-amount" class="form-input" type="number" step="0.01" placeholder="500"></div>'+
+    '<div class="form-group"><label class="form-label">Montant (€)</label><input id="dep-amount" class="form-input" type="number" step="0.01" min="0" placeholder="500"></div>'+
     '<div class="form-group"><label class="form-label">Date</label><input id="dep-date" class="form-input" type="date" value="'+new Date().toISOString().slice(0,10)+'"></div>'+
     '<div class="form-group"><label class="form-label">Note (optionnel)</label><input id="dep-notes" class="form-input" placeholder="Virement mensuel"></div>'+
+    '<input type="hidden" id="dep-type" value="'+(isRetrait?'-1':'1')+'">'+
+    '<input type="hidden" id="dep-edit-id" value="">'+
+    '<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button>'+
+    '<button class="btn btn-primary" onclick="saveDeposit()">'+(isRetrait?'Retrait':'Enregistrer')+'</button></div>');
+}
+
+async function editDeposit(id){
+  var dep=await dbGet('deposits','id=eq.'+id+'&select=*,accounts(name)');
+  dep=dep&&dep[0]; if(!dep) return;
+  var isRetrait=dep.amount<0;
+  showModal('<div class="modal-hd"><h2>Modifier l\'opération</h2><button class="modal-close" onclick="closeModal()">✕</button></div>'+
+    '<div class="form-group"><label class="form-label">Compte</label>'+
+    '<select id="dep-acct" class="form-input"><option value="">— Choisir —</option>'+
+    S.accounts.map(function(a){return '<option value="'+a.id+'"'+(a.id===dep.account_id?' selected':'')+'>'+a.name+'</option>';}).join('')+'</select></div>'+
+    '<div class="form-group"><label class="form-label">Montant (€)</label><input id="dep-amount" class="form-input" type="number" step="0.01" min="0" value="'+Math.abs(dep.amount)+'"></div>'+
+    '<div class="form-group"><label class="form-label">Date</label><input id="dep-date" class="form-input" type="date" value="'+dep.deposit_date+'"></div>'+
+    '<div class="form-group"><label class="form-label">Note</label><input id="dep-notes" class="form-input" value="'+(dep.notes||'')+'"></div>'+
+    '<input type="hidden" id="dep-type" value="'+(isRetrait?'-1':'1')+'">'+
+    '<input type="hidden" id="dep-edit-id" value="'+id+'">'+
     '<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button>'+
     '<button class="btn btn-primary" onclick="saveDeposit()">Enregistrer</button></div>');
 }
 
 async function saveDeposit(){
   var acctId=document.getElementById('dep-acct')?.value;
-  var amount=parseFloat(document.getElementById('dep-amount')?.value);
+  var absAmount=parseFloat(document.getElementById('dep-amount')?.value);
   var date=document.getElementById('dep-date')?.value;
   var notes=document.getElementById('dep-notes')?.value.trim()||null;
-  if(!acctId||!amount||!date)return showToast('❌ Champs obligatoires manquants');
+  var sign=parseInt(document.getElementById('dep-type')?.value||'1');
+  var editId=document.getElementById('dep-edit-id')?.value;
+  if(!acctId||isNaN(absAmount)||absAmount<=0||!date)return showToast('❌ Champs obligatoires manquants');
+  var amount=absAmount*sign;
   try{
-    await dbPost('deposits',{account_id:acctId,amount:amount,deposit_date:date,notes:notes});
-    closeModal(); showToast('✅ Versement enregistré');
-    renderDeposits();
+    if(editId){
+      await dbPatch('deposits','id=eq.'+editId,{account_id:acctId,amount:amount,deposit_date:date,notes:notes});
+    } else {
+      await dbPost('deposits',{account_id:acctId,amount:amount,deposit_date:date,notes:notes});
+    }
+    closeModal(); showToast(editId?'✅ Modifié':'✅ Enregistré'); renderDeposits();
   }catch(e){showToast('❌ '+e.message);}
 }
 
 async function deleteDeposit(id){
-  if(!confirm('Supprimer ce versement ?'))return;
+  if(!confirm('Supprimer cette opération ?'))return;
   try{await dbDel('deposits','id=eq.'+id);showToast('✅ Supprimé');renderDeposits();}
   catch(e){showToast('❌ '+e.message);}
 }
