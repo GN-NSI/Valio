@@ -1798,9 +1798,12 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
   function margin(num, denom) {
     return num!=null && denom && denom>0 ? num/denom*100 : null;
   }
-  var grossMargins = fin.years.map(function(_,i){ return margin(fin.grossProfit[i], fin.revenue[i]); });
-  var opMargins    = fin.years.map(function(_,i){ return margin(fin.operatingIncome[i], fin.revenue[i]); });
-  var netMargins   = fin.years.map(function(_,i){ return margin(fin.netIncome[i], fin.revenue[i]); });
+  // Marges : utilise les % manuels en priorité si disponibles
+  var _manMargMap={};
+  (manualData||[]).forEach(function(m){if(m.gross_margin_pct!=null||m.net_margin_pct!=null)_manMargMap[m.period]=m;});
+  var grossMargins=fin.years.map(function(yr,i){var mm=_manMargMap[yr];if(mm&&mm.gross_margin_pct!=null)return mm.gross_margin_pct;return margin(fin.grossProfit[i],fin.revenue[i]);});
+  var opMargins=fin.years.map(function(_,i){return margin(fin.operatingIncome[i],fin.revenue[i]);});
+  var netMargins=fin.years.map(function(yr,i){var mm=_manMargMap[yr];if(mm&&mm.net_margin_pct!=null)return mm.net_margin_pct;return margin(fin.netIncome[i],fin.revenue[i]);});
 
   // ROE, ROIC approx
   var roe  = fin.years.map(function(_,i){
@@ -1847,7 +1850,10 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
   // Si marge brute ≥ 98% du CA, c'est probablement une donnée manquante (ex: Google retourne revenue = grossProfit)
   var _gp = nz(fin.grossProfit[ly]);
   var _rev = fin.revenue[ly];
-  if(_gp!=null && _rev!=null && _gp >= _rev * 0.995) _gp = null; // invalide si grossProfit≈revenue
+  if(_gp!=null && _rev!=null && _gp >= _rev * 0.995) _gp = null;
+  // Fallback depuis les % manuels si Yahoo manque
+  var _manLast=(manualData||[]).filter(function(m){return m.period===fin.years[ly];}).sort(function(a,b){return(b.updated_at||'')>(a.updated_at||'')?1:-1;})[0];
+  if(_gp==null && _manLast && _manLast.gross_margin_pct!=null && _rev!=null) _gp=Math.round(_rev*_manLast.gross_margin_pct)/100;
   var wf = {
     revenue: _rev,
     cogs: _rev!=null && _gp!=null ? _rev - _gp : null,
