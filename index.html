@@ -1650,8 +1650,48 @@ async function switchFinMode(mode, ticker){
       return;
     }
     var q=d; var sym=(window._cdLastPrice&&window._cdLastPrice.currency==='EUR')?'€':'$';
-    // Normaliser Capex en valeur absolue pour affichage
+    // ── Merger les données manuelles trimestrielles (capex, fcf, ocf) ──
+    // Convertit "2026-Q1" → "Q1'26" pour matcher les labels Yahoo Finance
+    function periodToQLabel(p){
+      var m=p.match(/^(\d{4})-(Q[1-4])$/);
+      if(!m)return null;
+      return m[2]+"'"+(m[1].slice(2));
+    }
+    try{
+      var u2=getUser();
+      if(u2){
+        var manQ=await dbGet('earnings_manual','user_id=eq.'+u2.id+'&ticker=eq.'+encodeURIComponent(ticker)+'&period=like.*-Q*&order=period.asc')||[];
+        manQ.forEach(function(m){
+          var lbl=periodToQLabel(m.period);
+          var idx=q.quarters.indexOf(lbl);
+          if(idx<0){q.quarters.push(lbl);['revenue','netIncome','grossProfit','freeCF','operatingCF','capex'].forEach(function(k){if(!q[k])q[k]=[];q[k].push(null);});idx=q.quarters.length-1;}
+          if(m.revenue!=null) q.revenue[idx]=m.revenue;
+          if(m.net_income!=null) q.netIncome[idx]=m.net_income;
+          if(m.fcf!=null) q.freeCF[idx]=m.fcf;
+          if(m.ocf!=null) q.operatingCF[idx]=m.ocf;
+          if(m.capex!=null) q.capex[idx]=m.capex;
+        });
+      }
+    }catch(e){}
+
+    // Normaliser Capex en négatif (convention cash outflow)
     var capexQ=(q.capex||[]).map(function(v){return v!=null?-Math.abs(v):null;});
+
+    // ── Calcul des variations YoY pour CA et Résultat net ──
+    // Compare chaque trimestre avec le même trimestre il y a 4 positions (ou même label -1 an)
+    function computeYoY(arr, labels){
+      return arr.map(function(v,i){
+        // Cherche même trimestre année précédente (ex: Q1'26 → Q1'25)
+        var lbl=labels[i]; if(!lbl||v==null) return null;
+        var prev=null;
+        var ym=lbl.match(/^(Q[1-4])'(\d{2})$/);
+        if(ym){ var prevLbl=ym[1]+"'"+(String(parseInt('20'+ym[2])-1)).slice(2); var pi=labels.indexOf(prevLbl); if(pi>=0&&arr[pi]!=null) prev=arr[pi]; }
+        if(prev==null&&i>=4&&arr[i-4]!=null) prev=arr[i-4]; // fallback: 4 positions avant
+        return prev!=null&&Math.abs(prev)>0.001 ? ((v-prev)/Math.abs(prev)*100) : null;
+      });
+    }
+    var caYoY=computeYoY(q.revenue||[], q.quarters);
+    var niYoY=computeYoY(q.netIncome||[], q.quarters);
     if(mainGrid) mainGrid.innerHTML=
       "<div style='grid-column:1/-1;display:flex;gap:6px;margin-bottom:14px;align-items:center'><span style='font-size:11px;color:var(--muted)'>Vue :</span>" +
       "<button id='fin-btn-annual' onclick='switchFinMode(&quot;annual&quot;,&quot;"+ticker+"&quot;)' style='padding:3px 10px;font-size:11px;border:1px solid var(--border2);border-radius:20px;background:transparent;color:var(--muted);cursor:pointer'>Annuel</button>" +
@@ -1668,8 +1708,8 @@ async function switchFinMode(mode, ticker){
           '<div style="position:relative;height:190px"><canvas id="cdchart-fcf-q"></canvas></div></div>'+
       '</div>';
 
-    cdBarChart('cdchart-ca-q',    q.quarters, [{label:'CA',       data:q.revenue,   color:'#5b7ef5'}], 'fin-title-ca-q',    sym);
-    cdBarChart('cdchart-ni-q',    q.quarters, [{label:'Rés. net', data:q.netIncome, color:'#22c55e'}], 'fin-title-ni-q',    sym);
+    cdBarChartYoY('cdchart-ca-q',    q.quarters, [{label:'CA',       data:q.revenue,   color:'#5b7ef5'}], 'fin-title-ca-q',    sym, caYoY);
+    cdBarChartYoY('cdchart-ni-q',    q.quarters, [{label:'Rés. net', data:q.netIncome, color:'#22c55e'}], 'fin-title-ni-q',    sym, niYoY);
     cdBarChart('cdchart-capex-q', q.quarters, [{label:'Capex',    data:capexQ,      color:'#ef4444'}], 'fin-title-capex-q', sym);
     cdBarChart('cdchart-fcf-q',   q.quarters, [{label:'FCF',      data:q.freeCF,    color:'#06b6d4'}], 'fin-title-fcf-q',   sym);
   }catch(e){if(mainGrid)mainGrid.innerHTML='<div style="color:var(--red);padding:20px">Erreur : '+e.message+'</div>';}
@@ -1807,7 +1847,7 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
   // Si marge brute ≥ 98% du CA, c'est probablement une donnée manquante (ex: Google retourne revenue = grossProfit)
   var _gp = nz(fin.grossProfit[ly]);
   var _rev = fin.revenue[ly];
-  if(_gp!=null && _rev!=null && _gp >= _rev * 0.98) _gp = null; // invalide → on masque
+  if(_gp!=null && _rev!=null && _gp >= _rev * 0.995) _gp = null; // invalide si grossProfit≈revenue
   var wf = {
     revenue: _rev,
     cogs: _rev!=null && _gp!=null ? _rev - _gp : null,
@@ -2211,13 +2251,61 @@ async function deleteEarnings(id, ticker, name) {
 }
 
 function hasData(datasets){ return datasets.some(function(ds){return ds.data&&ds.data.some(function(v){return v!=null&&v!==0;});}); }
+// ── Graphique barres + annotation YoY ────────────────────────────────────
+function cdBarChartYoY(id, labels, datasets, titleId, currSym, yoyArr) {
+  var c = document.getElementById(id); if(!c) return;
+  if(!hasData(datasets)){ c.parentNode.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:12px">Données indisponibles</div>'; return; }
+  var allVals=datasets.reduce(function(arr,ds){return arr.concat(ds.data.filter(function(v){return v!=null;}));}, []);
+  var maxAbs=allVals.reduce(function(m,v){return Math.max(m,Math.abs(v));},0);
+  var useMd=maxAbs>=5; var factor=useMd?1:1000; var unitLabel=useMd?'Md':'M'; var sym=currSym||'$';
+  if(titleId){var te=document.getElementById(titleId);if(te){var _tm={'fin-title-ca-q':"CA",'fin-title-ni-q':"Rés. net"};te.textContent=(_tm[titleId]||datasets[0].label||'')+" ("+unitLabel+sym+") — variation YoY";}}
+  var scaledDs=datasets.map(function(ds){return {label:ds.label,data:ds.data.map(function(v){return v!=null?v*factor:null;}),color:ds.color};});
+  var yoyPlugin={id:'yoyLabels',afterDatasetsDraw:function(chart){
+    var ctx=chart.ctx;
+    chart.getDatasetMeta(0).data.forEach(function(bar,i){
+      var yoy=yoyArr&&yoyArr[i];
+      if(yoy==null||isNaN(yoy)) return;
+      var lbl=(yoy>=0?'+':'')+yoy.toFixed(1)+'%';
+      ctx.save();
+      ctx.fillStyle=yoy>=0?'#22c55e':'#ef4444';
+      ctx.font='bold 10px sans-serif';
+      ctx.textAlign='center';
+      ctx.fillText(lbl, bar.x, bar.y-6);
+      ctx.restore();
+    });
+  }};
+  var k='_cdc_'+id; if(window[k]){try{window[k].destroy();}catch(e){}}
+  window[k] = new Chart(c, {
+    type:'bar',
+    data:{labels:labels, datasets:scaledDs.map(function(ds){return {label:ds.label,data:ds.data,backgroundColor:ds.color+'bb',borderColor:ds.color,borderWidth:1,borderRadius:3};})},
+    plugins:[yoyPlugin],
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      layout:{padding:{top:18}},
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{label:function(ctx){
+          var yoy=yoyArr&&yoyArr[ctx.dataIndex];
+          var base=ctx.dataset.label+': '+(ctx.raw!=null?ctx.raw.toFixed(useMd?1:0)+' '+unitLabel+sym:'—');
+          return yoy!=null?base+' ('+(yoy>=0?'+':'')+yoy.toFixed(1)+'% YoY)':base;
+        }}}
+      },
+      scales:{x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',font:{size:10}}},
+              y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',font:{size:10},callback:function(v){return v.toFixed(0)+unitLabel;}},position:'right'}}
+    }
+  });
+}
+
 function cdBarChart(id, labels, datasets, titleId, currSym) {
   var c = document.getElementById(id); if(!c) return;
   if(!hasData(datasets)){ c.parentNode.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:12px">Données indisponibles</div>'; return; }
   var allVals=datasets.reduce(function(arr,ds){return arr.concat(ds.data.filter(function(v){return v!=null;}));}, []);
   var maxAbs=allVals.reduce(function(m,v){return Math.max(m,Math.abs(v));},0);
   var useMd=maxAbs>=5; var factor=useMd?1:1000; var unitLabel=useMd?'Md':'M'; var sym=currSym||'$';
-  if(titleId){var te=document.getElementById(titleId);if(te){te.textContent=(titleId==='fin-title-rev'?'Revenus & Bénéfices':'Cash Flow')+' ('+unitLabel+sym+')';}}
+  if(titleId){var te=document.getElementById(titleId);if(te){
+    var _tm={'fin-title-rev':"Revenus & Bénéfices",'fin-title-cf':"Cash Flow",'fin-title-ca-q':"Chiffre d'affaires",'fin-title-ni-q':"Résultat net",'fin-title-capex-q':"Capex",'fin-title-fcf-q':"FCF"};
+    te.textContent=(_tm[titleId]||(scaledDs[0]&&scaledDs[0].label)||'Données')+' ('+unitLabel+sym+')';
+  }}
   var scaledDs=datasets.map(function(ds){return {label:ds.label,data:ds.data.map(function(v){return v!=null?v*factor:null;}),color:ds.color};});
   var k='_cdc_'+id; if(window[k]){try{window[k].destroy();}catch(e){}}
   window[k] = new Chart(c, {
