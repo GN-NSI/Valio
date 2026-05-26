@@ -1674,8 +1674,15 @@ async function switchFinMode(mode, ticker){
       }
     }catch(e){}
 
-    // Normaliser Capex en négatif (convention cash outflow)
-    var capexQ=(q.capex||[]).map(function(v){return v!=null?-Math.abs(v):null;});
+    // ── Tri chronologique des trimestres ──
+    (function(){
+      function qlNum(l){var m=l&&l.match(/^(Q[1-4])'(\d{2})$/);return m?parseInt('20'+m[2])*4+parseInt(m[1][1]):9999;}
+      var ord=q.quarters.map(function(_,i){return i;}).sort(function(a,b){return qlNum(q.quarters[a])-qlNum(q.quarters[b]);});
+      ['quarters','revenue','netIncome','grossProfit','freeCF','operatingCF','capex'].forEach(function(k){
+        if(q[k]&&q[k].length) q[k]=ord.map(function(i){return q[k][i];});
+      });
+    })();
+    var capexQ=(q.capex||[]).map(function(v){return v!=null?Math.abs(v):null;});
 
     // ── Calcul des variations YoY pour CA et Résultat net ──
     // Compare chaque trimestre avec le même trimestre il y a 4 positions (ou même label -1 an)
