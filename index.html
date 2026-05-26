@@ -1691,6 +1691,10 @@ async function switchFinMode(mode, ticker){
 async function loadCdFinancials(ticker, price, chartPts, f) {
   var el = document.getElementById('cd-fin-section');
   if(!el) return;
+  // S'assurer que les fondamentaux sont chargés (nécessaire pour P/FCF, P/OCF)
+  if(!f || !f.mktCap) {
+    try{var _fr=await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=fundamentals',{signal:AbortSignal.timeout(8000)});var _fd=await _fr.json();if(_fd&&_fd.mktCap){f=_fd;if(!S.fundamentals)S.fundamentals={};S.fundamentals[ticker]=_fd;}}catch(e){}
+  }
   // Charger Yahoo Finance + données manuelles en parallèle
   var fin = null, manualData = [];
   var [finRes, manualRes] = await Promise.allSettled([
@@ -1796,19 +1800,17 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
     return {avg:py.avg/eps, hi:py.high/eps, lo:py.low/eps};
   });
   var curPrice = price&&price.price;
-  // Compute shares outstanding from mktCap/price for historical ratio calculation
-  var currShares = null;
-  if(f&&f.mktCap&&curPrice) currShares=f.mktCap/curPrice;
-  else if(f&&f.sharesOutstanding) currShares=f.sharesOutstanding;
+  // P/FCF & P/OCF : mktCap × (prixHist/prixActuel) / FCF total — pas besoin du nb d'actions
+  var mktCapCur = f && f.mktCap;
   var pfcfVals = buildValSeries(function(i,py){
-    var fcf=fin.freeCF[i]; if(fcf==null||!py||!currShares) return null;
-    var fcfPerShare = fcf*1e9/currShares; if(fcfPerShare<=0) return null;
-    return {avg:py.avg/fcfPerShare, hi:py.high/fcfPerShare, lo:py.low/fcfPerShare};
+    var fcf=fin.freeCF[i]; if(fcf==null||!py||!mktCapCur||!curPrice) return null;
+    var histMktCap=mktCapCur*(py.avg/curPrice), fcfT=fcf*1e9; if(!fcfT) return null;
+    return {avg:histMktCap/fcfT, hi:mktCapCur*(py.high/curPrice)/fcfT, lo:mktCapCur*(py.low/curPrice)/fcfT};
   });
   var pocfVals = buildValSeries(function(i,py){
-    var ocf=fin.operatingCF[i]; if(ocf==null||!py||!currShares) return null;
-    var ocfPerShare = ocf*1e9/currShares; if(ocfPerShare<=0) return null;
-    return {avg:py.avg/ocfPerShare, hi:py.high/ocfPerShare, lo:py.low/ocfPerShare};
+    var ocf=fin.operatingCF[i]; if(ocf==null||!py||!mktCapCur||!curPrice) return null;
+    var histMktCap=mktCapCur*(py.avg/curPrice), ocfT=ocf*1e9; if(!ocfT) return null;
+    return {avg:histMktCap/ocfT, hi:mktCapCur*(py.high/curPrice)/ocfT, lo:mktCapCur*(py.low/curPrice)/ocfT};
   });
 
   // Latest year waterfall data
@@ -1862,7 +1864,7 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
       '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Résultat '+fin.years[ly]+'</div><div id="cdchart-waterfall"></div></div>' +
       '<div class="card"><div id="fin-title-cf" style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Cash Flow (Md'+sym+')</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-cf"></canvas></div></div>' +
     '</div>' +
-    (latestWithSegments ? '<div class="card" style="margin-bottom:16px"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Répartition CA · '+latestWithSegments.period+' <span style="color:var(--green);font-size:10px">● Données manuelles</span></div><div style="position:relative;height:220px"><canvas id="cdchart-segments"></canvas></div></div>' : '') +
+    (latestWithSegments ? _buildSegmentCard(latestWithSegments, manualData) : '') +
     (function(){
       // Afficher métriques utilisateurs si disponibles dans les données manuelles
       var umEntries=(manualData||[]).filter(function(m){return m.dau_mau!=null||m.users_growth_pct!=null;});
@@ -1884,6 +1886,42 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
       '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">P/OCF</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-pocf"></canvas></div></div>' +
     '</div>' +
     '</div></div>';
+
+  function _buildSegmentCard(latest, allManual){
+    var prevM=(allManual||[]).filter(function(m){return m.segments&&m.segments.length&&m.period!==latest.period;}).sort(function(a,b){return b.period>a.period?1:-1;})[0];
+    var growthHtml='';
+    if(prevM){
+      var curSegs=latest.segments; var total=curSegs.reduce(function(s,g){return s+g.value;},0);
+      var rows=curSegs.map(function(seg){
+        var prev=prevM.segments.find(function(p){return p.name.toLowerCase()===seg.name.toLowerCase();});
+        var pct=total>0?(seg.value/total*100).toFixed(1)+'%':'—';
+        var growth=(prev&&prev.value>0)?((seg.value-prev.value)/prev.value*100):null;
+        var gCol=growth==null?'var(--muted)':growth>=30?'var(--green)':growth>0?'var(--yellow)':'var(--red)';
+        var gLbl=growth==null?'—':(growth>=0?'+':'')+growth.toFixed(1)+'%';
+        var badge=growth!=null&&growth>=30?' 🚀':growth!=null&&growth<0?' 📉':'';
+        return '<tr style="border-bottom:1px solid var(--border2)">'+
+          '<td style="padding:7px 6px;font-size:12px;font-weight:600">'+seg.name+badge+'</td>'+
+          '<td style="padding:7px 6px;text-align:right;font-size:12px" class="mono">'+seg.value+'Md</td>'+
+          '<td style="padding:7px 6px;text-align:right;font-size:11px;color:var(--muted)">'+pct+'</td>'+
+          '<td style="padding:7px 6px;text-align:right;font-size:12px;font-weight:700;color:'+gCol+'">'+gLbl+'</td>'+
+          '</tr>';
+      }).join('');
+      growthHtml='<div style="margin-top:10px"><div style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-bottom:6px">Croissance vs '+prevM.period+'</div>'+
+        '<table style="width:100%;border-collapse:collapse">'+
+        '<thead><tr><th style="padding:5px 6px;text-align:left;font-size:10px;color:var(--muted)">Segment</th>'+
+        '<th style="padding:5px 6px;text-align:right;font-size:10px;color:var(--muted)">CA</th>'+
+        '<th style="padding:5px 6px;text-align:right;font-size:10px;color:var(--muted)">Part</th>'+
+        '<th style="padding:5px 6px;text-align:right;font-size:10px;color:var(--muted)">YoY</th></tr></thead>'+
+        '<tbody>'+rows+'</tbody></table></div>';
+    }
+    return '<div class="card" style="margin-bottom:16px">'+
+      '<div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Répartition CA · '+latest.period+' <span style="color:var(--green);font-size:10px">● Données manuelles</span></div>'+
+      '<div style="display:grid;grid-template-columns:240px 1fr;gap:20px;align-items:start">'+
+        '<div style="position:relative;height:220px"><canvas id="cdchart-segments"></canvas></div>'+
+        '<div>'+growthHtml+'</div>'+
+      '</div>'+
+    '</div>';
+  }
 
   // Draw all charts (setTimeout for DOM settle)
   setTimeout(function(){
