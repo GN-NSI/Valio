@@ -1650,41 +1650,28 @@ async function switchFinMode(mode, ticker){
       return;
     }
     var q=d; var sym=(window._cdLastPrice&&window._cdLastPrice.currency==='EUR')?'€':'$';
+    // Normaliser Capex en valeur absolue pour affichage
+    var capexQ=(q.capex||[]).map(function(v){return v!=null?-Math.abs(v):null;});
     if(mainGrid) mainGrid.innerHTML=
-      "<div style='grid-column:1/-1;display:flex;gap:6px;margin-bottom:14px;align-items:center'><span style='font-size:11px;color:var(--muted)'>Vue :</span><button id='fin-btn-annual' onclick='switchFinMode(&quot;annual&quot;,&quot;"+ticker+"&quot;)' style='padding:3px 10px;font-size:11px;border:1px solid var(--border2);border-radius:20px;background:transparent;color:var(--muted);cursor:pointer'>Annuel</button><button id='fin-btn-quarterly' onclick='switchFinMode(&quot;quarterly&quot;,&quot;"+ticker+"&quot;)' style='padding:3px 10px;font-size:11px;border:1px solid var(--accent);border-radius:20px;background:var(--accent)22;color:var(--accent);cursor:pointer'>Trimestriel</button></div>"+
-      '<div style="grid-column:1/-1">'+
-        '<div class="card" style="margin-bottom:12px">'+
-          '<div id="fin-title-rev-q" style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px">Revenus & Bénéfices trimestriels</div>'+
-          '<div style="position:relative;height:200px"><canvas id="cdchart-rev-q"></canvas></div>'+
-        '</div>'+
-      '</div>'+
-      '<div>'+
-        '<div class="card">'+
-          '<div id="fin-title-cf-q" style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px">Cash Flow trimestriel</div>'+
-          '<div style="position:relative;height:200px"><canvas id="cdchart-cf-q"></canvas></div>'+
-        '</div>'+
-      '</div>'+
-      '<div>'+
-        '<div class="card">'+
-          '<div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px">Résultat net trimestriel</div>'+
-          '<div style="position:relative;height:200px"><canvas id="cdchart-ni-q"></canvas></div>'+
-        '</div>'+
+      "<div style='grid-column:1/-1;display:flex;gap:6px;margin-bottom:14px;align-items:center'><span style='font-size:11px;color:var(--muted)'>Vue :</span>" +
+      "<button id='fin-btn-annual' onclick='switchFinMode(&quot;annual&quot;,&quot;"+ticker+"&quot;)' style='padding:3px 10px;font-size:11px;border:1px solid var(--border2);border-radius:20px;background:transparent;color:var(--muted);cursor:pointer'>Annuel</button>" +
+      "<button id='fin-btn-quarterly' onclick='switchFinMode(&quot;quarterly&quot;,&quot;"+ticker+"&quot;)' style='padding:3px 10px;font-size:11px;border:1px solid var(--accent);border-radius:20px;background:var(--accent)22;color:var(--accent);cursor:pointer'>Trimestriel</button>" +
+      "</div>" +
+      '<div style="grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:12px">'+
+        '<div class="card"><div id="fin-title-ca-q" style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px">Chiffre d\'affaires trimestriel</div>'+
+          '<div style="position:relative;height:190px"><canvas id="cdchart-ca-q"></canvas></div></div>'+
+        '<div class="card"><div id="fin-title-ni-q" style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px">Résultat net trimestriel</div>'+
+          '<div style="position:relative;height:190px"><canvas id="cdchart-ni-q"></canvas></div></div>'+
+        '<div class="card"><div id="fin-title-capex-q" style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px">Capex trimestriel</div>'+
+          '<div style="position:relative;height:190px"><canvas id="cdchart-capex-q"></canvas></div></div>'+
+        '<div class="card"><div id="fin-title-fcf-q" style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px">FCF trimestriel</div>'+
+          '<div style="position:relative;height:190px"><canvas id="cdchart-fcf-q"></canvas></div></div>'+
       '</div>';
 
-    cdBarChart('cdchart-rev-q', q.quarters, [
-      {label:'CA',       data:q.revenue,    color:'#5b7ef5'},
-      {label:'Rés. net', data:q.netIncome,  color:'#22c55e'},
-      {label:'FCF',      data:q.freeCF,     color:'#06b6d4'},
-    ], 'fin-title-rev-q', sym);
-    cdBarChart('cdchart-cf-q', q.quarters, [
-      {label:'FCF',  data:q.freeCF,      color:'#22c55e'},
-      {label:'OCF',  data:q.operatingCF, color:'#5b7ef5'},
-      {label:'Capex',data:q.capex,       color:'#ef4444'},
-    ], 'fin-title-cf-q', sym);
-    cdBarChart('cdchart-ni-q', q.quarters, [
-      {label:'Résultat net', data:q.netIncome, color:'#22c55e'},
-      {label:'Marge brute',  data:q.grossProfit, color:'#5b7ef5'},
-    ], null, sym);
+    cdBarChart('cdchart-ca-q',    q.quarters, [{label:'CA',       data:q.revenue,   color:'#5b7ef5'}], 'fin-title-ca-q',    sym);
+    cdBarChart('cdchart-ni-q',    q.quarters, [{label:'Rés. net', data:q.netIncome, color:'#22c55e'}], 'fin-title-ni-q',    sym);
+    cdBarChart('cdchart-capex-q', q.quarters, [{label:'Capex',    data:capexQ,      color:'#ef4444'}], 'fin-title-capex-q', sym);
+    cdBarChart('cdchart-fcf-q',   q.quarters, [{label:'FCF',      data:q.freeCF,    color:'#06b6d4'}], 'fin-title-fcf-q',   sym);
   }catch(e){if(mainGrid)mainGrid.innerHTML='<div style="color:var(--red);padding:20px">Erreur : '+e.message+'</div>';}
 }
 
@@ -1817,11 +1804,15 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
   var ly = fin.years.length-1;
   // Guard: treat 0 as null (Yahoo Finance peut retourner 0 pour des champs manquants)
   function nz(v){ return (v!=null && v!==0) ? v : null; }
+  // Si marge brute ≥ 98% du CA, c'est probablement une donnée manquante (ex: Google retourne revenue = grossProfit)
+  var _gp = nz(fin.grossProfit[ly]);
+  var _rev = fin.revenue[ly];
+  if(_gp!=null && _rev!=null && _gp >= _rev * 0.98) _gp = null; // invalide → on masque
   var wf = {
-    revenue: fin.revenue[ly],
-    cogs: fin.revenue[ly]!=null&&nz(fin.grossProfit[ly])!=null ? fin.revenue[ly]-nz(fin.grossProfit[ly]) : null,
-    grossProfit: nz(fin.grossProfit[ly]),
-    opex: nz(fin.grossProfit[ly])!=null&&nz(fin.operatingIncome[ly])!=null ? nz(fin.grossProfit[ly])-nz(fin.operatingIncome[ly]) : null,
+    revenue: _rev,
+    cogs: _rev!=null && _gp!=null ? _rev - _gp : null,
+    grossProfit: _gp,
+    opex: _gp!=null&&nz(fin.operatingIncome[ly])!=null ? _gp-nz(fin.operatingIncome[ly]) : null,
     operatingIncome: nz(fin.operatingIncome[ly]),
     other: nz(fin.operatingIncome[ly])!=null&&fin.netIncome[ly]!=null ? nz(fin.operatingIncome[ly])-fin.netIncome[ly] : null,
     netIncome: fin.netIncome[ly],
@@ -1888,7 +1879,29 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
     '</div></div>';
 
   function _buildSegmentCard(latest, allManual){
-    var prevM=(allManual||[]).filter(function(m){return m.segments&&m.segments.length&&m.period!==latest.period;}).sort(function(a,b){return b.period>a.period?1:-1;})[0];
+    // YoY : cherche exactement le même trimestre/exercice un an avant
+    function prevYearPeriod(period){
+      // "2026-Q1" → "2025-Q1" | "FY2025" → "FY2024"
+      var qm=period.match(/^(\d{4})-(Q[1-4])$/);
+      if(qm) return (parseInt(qm[1])-1)+'-'+qm[2];
+      var fm=period.match(/^FY(\d{4})$/);
+      if(fm) return 'FY'+(parseInt(fm[1])-1);
+      return null;
+    }
+    var targetPrev=prevYearPeriod(latest.period);
+    var prevM=null;
+    if(targetPrev){
+      prevM=(allManual||[]).find(function(m){return m.segments&&m.segments.length&&m.period===targetPrev;});
+    }
+    // Fallback: si pas de même trimestre N-1, cherche l'année fiscale précédente
+    if(!prevM){
+      var qm2=latest.period.match(/^(\d{4})-(Q[1-4])$/);
+      if(qm2){
+        var altFY='FY'+(parseInt(qm2[1])-1);
+        prevM=(allManual||[]).find(function(m){return m.segments&&m.segments.length&&m.period===altFY;});
+      }
+    }
+    var compLabel=prevM?prevM.period:'—';
     var growthHtml='';
     if(prevM){
       var curSegs=latest.segments; var total=curSegs.reduce(function(s,g){return s+g.value;},0);
@@ -1906,7 +1919,7 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
           '<td style="padding:7px 6px;text-align:right;font-size:12px;font-weight:700;color:'+gCol+'">'+gLbl+'</td>'+
           '</tr>';
       }).join('');
-      growthHtml='<div style="margin-top:10px"><div style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-bottom:6px">Croissance vs '+prevM.period+'</div>'+
+      growthHtml='<div style="margin-top:10px"><div style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-bottom:6px">Croissance YoY vs '+compLabel+'</div>'+
         '<table style="width:100%;border-collapse:collapse">'+
         '<thead><tr><th style="padding:5px 6px;text-align:left;font-size:10px;color:var(--muted)">Segment</th>'+
         '<th style="padding:5px 6px;text-align:right;font-size:10px;color:var(--muted)">CA</th>'+
