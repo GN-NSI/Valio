@@ -3261,9 +3261,11 @@ async function buildPortfolioLine(positions, range, txList){
   if(startIdx<0) startIdx=rawValues.findIndex(function(v){return v>0;});
   if(startIdx<0) return [];
 
+  // Rebase à 0% au premier point — cohérent avec les lignes indices
+  var startVal=rawValues[startIdx];
+  if(!startVal) return [];
   return timestamps.slice(startIdx).map(function(t,i){
-    var inv=investedAtT[startIdx+i]||investedAtT[startIdx]||1;
-    return {t:t, pct:(rawValues[startIdx+i]/inv-1)*100};
+    return {t:t, pct:(rawValues[startIdx+i]/startVal-1)*100};
   });
 }
 
