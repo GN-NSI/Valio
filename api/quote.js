@@ -298,6 +298,99 @@ module.exports = async (req, res) => {
     } catch(e) { return res.status(500).json({ error: e.message }); }
   }
 
+  // ── AI AUTOFILL — Extraction automatique des résultats non-GAAP ──────────
+  if (type === 'autofill') {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY_MISSING',
+      hint: "Ajoutez ANTHROPIC_API_KEY dans les variables Vercel" });
+
+    const period = req.query.period || '';
+    // Convertir période → texte lisible pour le prompt
+    const qm = period.match(/^(\d{4})-(Q[1-4])$/);
+    const fm = period.match(/^FY(\d{4})$/);
+    const periodHuman = qm ? `Q${qm[2][1]} ${qm[1]}` : fm ? `fiscal year ${fm[1]}` : period;
+
+    const prompt = `Search for the official earnings press release for ${symbol} for ${periodHuman}.
+
+Extract and return ONLY a valid JSON object (no markdown, no extra text):
+{
+  "revenue": <total revenue in billions USD, GAAP — e.g. 44.1>,
+  "gross_margin_pct": <gross margin in %, e.g. 57.2>,
+  "gross_profit": <gross profit in billions, or null>,
+  "operating_income": <NON-GAAP operating income in billions, or null>,
+  "net_income": <NON-GAAP net income in billions — excludes SBC, acquisition amortization>,
+  "net_margin_pct": <NON-GAAP net margin %, or null>,
+  "eps_diluted": <NON-GAAP diluted EPS in USD, e.g. 4.93>,
+  "ocf": <operating cash flow in billions — usually GAAP, or null>,
+  "capex": <capital expenditures in billions — positive number, or null>,
+  "fcf": <free cash flow in billions, or null>,
+  "segments": [{"name": "Segment Name", "value": <revenue in billions>}] or null,
+  "currency": "USD",
+  "source": "<exact URL of the press release used>"
+}
+
+Rules:
+- revenue is ALWAYS GAAP (non-GAAP revenue is extremely rare)
+- net_income and eps_diluted: use NON-GAAP (NVIDIA calls it non-GAAP net income, MSFT same)
+- For companies without explicit non-GAAP (Apple, French/Korean companies): use GAAP, set is_gaap_fallback: true
+- Segments: use the revenue breakdown table if present in the press release
+- Return null for any field you cannot find with confidence — do NOT guess
+- All monetary values in BILLIONS of the reporting currency`;
+
+    try {
+      let messages = [{ role: 'user', content: prompt }];
+      let finalText = null;
+
+      // Agentic loop — handle web search tool turns
+      for (let iter = 0; iter < 6; iter++) {
+        const r = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 1500,
+            tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+            messages
+          })
+        });
+        if (!r.ok) throw new Error('Anthropic API error ' + r.status);
+        const d = await r.json();
+
+        // Collect any text block
+        const tb = d.content?.find(b => b.type === 'text');
+        if (tb) finalText = tb.text;
+
+        if (d.stop_reason === 'end_turn') break;
+
+        if (d.stop_reason === 'tool_use') {
+          // Continue conversation with empty tool results (Anthropic handles the search)
+          messages.push({ role: 'assistant', content: d.content });
+          const toolResults = (d.content || [])
+            .filter(b => b.type === 'tool_use')
+            .map(b => ({ type: 'tool_result', tool_use_id: b.id, content: '' }));
+          if (!toolResults.length) break;
+          messages.push({ role: 'user', content: toolResults });
+        } else break;
+      }
+
+      if (!finalText) throw new Error('No API response');
+
+      // Extract JSON from response (strip markdown fences if present)
+      const clean = finalText.replace(/```json|```/g, '').trim();
+      const jsonMatch = clean.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('No JSON in response: ' + finalText.slice(0, 200));
+      const data = JSON.parse(jsonMatch[0]);
+      return res.json({ ok: true, data });
+
+    } catch(e) {
+      return res.status(500).json({ ok: false, error: e.message });
+    }
+  }
+
   // ── CHART (données brutes pour fiche société, range paramétrable) ────────
   if (type === 'chart') {
     try {
