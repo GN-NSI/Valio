@@ -3203,7 +3203,9 @@ async function getFriendTransactions(friendId){
 
 // ── Performance portefeuille (positions actuelles × prix historiques) ────────
 // Utilise le coût total comme dénominateur → P&L% cohérent avec la page portefeuille
-async function buildPortfolioLine(positions, range, txList){
+async function buildPortfolioLine(positions, range){
+  // Approche "hindsight" : positions actuelles × prix historiques
+  // Comparable aux indices (S&P, Nasdaq) qui sont aussi rebased à 0%
   var pos=(positions||[]).filter(function(p){return p.quantity>0.0001&&p.ticker;});
   if(!pos.length) return [];
 
@@ -3217,57 +3219,40 @@ async function buildPortfolioLine(positions, range, txList){
     if(i+BATCH<pos.length) await new Promise(function(r){setTimeout(r,DELAY);});
   }
 
-  // Timestamps communs
+  // Timestamps communs, dédupliqués et sous-échantillonnés
   var tsSet={};
-  Object.values(hists).forEach(function(pts){pts.forEach(function(p){tsSet[p.t]=true;});});
+  Object.values(hists).forEach(function(pts){(pts||[]).forEach(function(p){tsSet[p.t]=true;});});
   var timestamps=Object.keys(tsSet).map(Number).sort(function(a,b){return a-b;});
   if(timestamps.length<3) return [];
   var step=Math.max(1,Math.floor(timestamps.length/60));
   timestamps=timestamps.filter(function(_,i){return i%step===0||i===timestamps.length-1;});
 
-  // Date du premier achat par ticker (depuis transactions réelles)
-  var txs=txList||S.transactions||[];
-  var firstBuyTs={};
-  txs.forEach(function(tx){
-    var type=(tx.transaction_type||tx.type||'').toLowerCase();
-    if(type==='buy'||type==='buy'){
-      var d=new Date(tx.transaction_date||tx.date).getTime()/1000;
-      if(!firstBuyTs[tx.ticker]||d<firstBuyTs[tx.ticker]) firstBuyTs[tx.ticker]=d;
-    }
-  });
-
-  // Valeur + capital investi à chaque timestamp
-  // IMPORTANT : on ne compte une position dans investedAtT QUE si on a aussi son prix
-  // (sinon : investedAtT > 0 mais rawValues = 0 → -100% artificiel)
-  var rawValues=[],investedAtT=[];
-  timestamps.forEach(function(t){
-    var val=0,inv=0;
-    pos.forEach(function(p){
-      var fb=firstBuyTs[p.ticker];
-      if(fb&&t<fb) return; // Pas encore acheté
+  // Valeur à chaque timestamp (devise correcte via toEur)
+  var rawValues=timestamps.map(function(t){
+    return pos.reduce(function(sum,p){
       var pts=(hists[p.ticker]||[]).filter(function(q){return q.t<=t;});
-      if(!pts.length) return; // Pas de données prix → exclure des deux côtés
+      if(!pts.length) return sum;
       var price=pts[pts.length-1].c;
       var currency=(S.prices[p.ticker]&&S.prices[p.ticker].currency)||'USD';
-      val+=p.quantity*toEur(price,currency);
-      inv+=p.totalCostEur||0;
-    });
-    rawValues.push(val);
-    investedAtT.push(inv);
+      return sum+p.quantity*toEur(price,currency);
+    },0);
   });
 
-  // Démarre au premier point avec capital investi
-  var startIdx=investedAtT.findIndex(function(v){return v>0;});
+  // Trouver le premier point stable : ≥50% de la valeur finale représentée
+  // (évite les débuts artificiellement bas quand des tickers n'ont pas encore de données)
+  var finalVal=rawValues[rawValues.length-1]||1;
+  var startIdx=rawValues.findIndex(function(v){return v>0&&v>=finalVal*0.5;});
   if(startIdx<0) startIdx=rawValues.findIndex(function(v){return v>0;});
-  if(startIdx<0) return [];
+  if(startIdx<0||!rawValues[startIdx]) return [];
 
-  // Rebase à 0% au premier point — cohérent avec les lignes indices
+  // Rebase à 0% au premier point stable — cohérent avec les indices
   var startVal=rawValues[startIdx];
-  if(!startVal) return [];
   return timestamps.slice(startIdx).map(function(t,i){
     return {t:t, pct:(rawValues[startIdx+i]/startVal-1)*100};
   });
 }
+
+// ── Performance indice
 
 // ── Performance indice ────────────────────────────────────────────────────
 async function buildIndexLine(symbol, range){
@@ -3384,7 +3369,7 @@ async function refreshBmChart(){
     if(item.type==='friend'){
       var txns=await getFriendTransactions(item.id);
       var pos=computePositionsFromData([],txns);
-      return await buildPortfolioLine(pos,range,txns); // passe les transactions pour les dates d'achat
+      return await buildPortfolioLine(pos,range);
     }
     return [];
   }));
