@@ -3236,26 +3236,24 @@ async function buildPortfolioLine(positions, range, txList){
     }
   });
 
-  // Capital investi à chaque timestamp (uniquement les positions achetées avant t)
-  var investedAtT=timestamps.map(function(t){
-    return pos.reduce(function(sum,p){
+  // Valeur + capital investi à chaque timestamp
+  // IMPORTANT : on ne compte une position dans investedAtT QUE si on a aussi son prix
+  // (sinon : investedAtT > 0 mais rawValues = 0 → -100% artificiel)
+  var rawValues=[],investedAtT=[];
+  timestamps.forEach(function(t){
+    var val=0,inv=0;
+    pos.forEach(function(p){
       var fb=firstBuyTs[p.ticker];
-      if(fb&&t<fb) return sum; // Pas encore acheté
-      return sum+(p.totalCostEur||0);
-    },0);
-  });
-
-  // Valeur à chaque timestamp (correction devise : toEur)
-  var rawValues=timestamps.map(function(t){
-    return pos.reduce(function(sum,p){
-      var fb=firstBuyTs[p.ticker];
-      if(fb&&t<fb) return sum; // Pas encore acheté
+      if(fb&&t<fb) return; // Pas encore acheté
       var pts=(hists[p.ticker]||[]).filter(function(q){return q.t<=t;});
-      if(!pts.length) return sum;
+      if(!pts.length) return; // Pas de données prix → exclure des deux côtés
       var price=pts[pts.length-1].c;
       var currency=(S.prices[p.ticker]&&S.prices[p.ticker].currency)||'USD';
-      return sum+p.quantity*toEur(price,currency);
-    },0);
+      val+=p.quantity*toEur(price,currency);
+      inv+=p.totalCostEur||0;
+    });
+    rawValues.push(val);
+    investedAtT.push(inv);
   });
 
   // Démarre au premier point avec capital investi
