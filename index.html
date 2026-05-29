@@ -2870,30 +2870,17 @@ async function editCashBalance(acctId, current, acctName){
 
 // ── Chargement des amis ───────────────────────────────────────────────────
 async function loadFriends(force){
+  // Mode ouvert : tous les utilisateurs inscrits sont automatiquement visibles entre eux
   _friendsCache=null;
   var u = getUser(); if(!u) return [];
   try {
-    var asReq = await dbGet('friends','status=eq.accepted&requester_id=eq.'+u.id).catch(function(){return[];});
-    var asAddr = await dbGet('friends','status=eq.accepted&addressee_id=eq.'+u.id).catch(function(){return[];});
-    var rows=[...(asReq||[]),...(asAddr||[])];
-    if(!rows.length) return (_friendsCache=[]);
-    // Déduplication : une seule carte par ami même si 2 lignes existent
-    var seen={};
-    var friendIds=[];
-    rows.forEach(function(r){
-      var fid=r.requester_id===u.id?r.addressee_id:r.requester_id;
-      if(!seen[fid]){seen[fid]=true;friendIds.push(fid);}
-    });
-    // user_profiles utilise id (= auth UUID) comme clé primaire
-    var profiles=[];
-    try{ profiles=await dbGet('user_profiles','id=in.('+friendIds.join(',')+')')||[]; }
-    catch(e){}
-    _friendsCache = friendIds.map(function(fid){
-      var p=profiles.find(function(x){return x.id===fid;});
-      return {id:fid, name:(p&&p.display_name)||'Ami'};
+    // Récupère tous les profils sauf le sien
+    var profiles = await dbGet('user_profiles','id=neq.'+u.id+'&order=display_name.asc') || [];
+    _friendsCache = profiles.map(function(p){
+      return {id:p.id, name:p.display_name||p.username||'Utilisateur'};
     });
     return _friendsCache;
-  } catch(e){ showToast('❌ loadFriends: '+e.message); return []; }
+  } catch(e){ showToast('Erreur chargement utilisateurs: '+e.message); return []; }
 }
 
 // ── Génération du lien d'invitation ──────────────────────────────────────
