@@ -705,7 +705,7 @@ function posTblRows(pos){
     const usd=d?(d.currency||'USD')==='USD':true;
     const chg=d?.changePct??0;
 
-    const _cur=d.currency||'USD'; const _dispP=(_cur==='USD'||_cur==='EUR')?d.price:toEur(d.price,_cur); const _sym=_cur==='USD'?'$':'€';
+    const _cur=(d&&d.currency)||'USD'; const _dispP=d?((_cur==='USD'||_cur==='EUR')?d.price:toEur(d.price,_cur)):null; const _sym=_cur==='USD'?'$':'€';
     const priceHTML=priceLoaded
       ?`<span class="mono">${d.manual?'✎ ':''}`+_sym+`${fN(_dispP)}</span>`+(!d.manual?`<div style="font-size:11px;color:${chg>=0?'var(--green)':'var(--red)'};margin-top:2px">${chg>=0?'+':''}${chg.toFixed(2)}%</div>`:'')
       :noPrice?`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix</button>`
