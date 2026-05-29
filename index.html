@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Valio</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js">
 // Délégation d'événement pour ouvrir la fiche société
@@ -1808,7 +1810,13 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
   // Marges : utilise les % manuels en priorité si disponibles
   var _manMargMap={};
   (manualData||[]).forEach(function(m){if(m.gross_margin_pct!=null||m.net_margin_pct!=null)_manMargMap[m.period]=m;});
-  var grossMargins=fin.years.map(function(yr,i){var mm=_manMargMap[yr];if(mm&&mm.gross_margin_pct!=null)return mm.gross_margin_pct;return margin(fin.grossProfit[i],fin.revenue[i]);});
+  var grossMargins=fin.years.map(function(yr,i){
+    var mm=_manMargMap[yr];if(mm&&mm.gross_margin_pct!=null)return mm.gross_margin_pct;
+    var gp=fin.grossProfit[i],rv=fin.revenue[i];
+    if(gp==null||rv==null||rv===0) return null;
+    if(gp>=rv*0.995) return null; // sanity: Yahoo parfois retourne grossProfit=revenue
+    return margin(gp,rv);
+  });
   var opMargins=fin.years.map(function(_,i){return margin(fin.operatingIncome[i],fin.revenue[i]);});
   var netMargins=fin.years.map(function(yr,i){var mm=_manMargMap[yr];if(mm&&mm.net_margin_pct!=null)return mm.net_margin_pct;return margin(fin.netIncome[i],fin.revenue[i]);});
 
@@ -1860,7 +1868,7 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
   if(_gp!=null && _rev!=null && _gp >= _rev * 0.995) _gp = null;
   // Fallback depuis les % manuels si Yahoo manque
   var _manLast=(manualData||[]).filter(function(m){return m.period===fin.years[ly];}).sort(function(a,b){return(b.updated_at||'')>(a.updated_at||'')?1:-1;})[0];
-  if(_gp==null && _manLast && _manLast.gross_margin_pct!=null && _rev!=null) _gp=Math.round(_rev*_manLast.gross_margin_pct)/100;
+  if(_gp==null && _manLast && _manLast.gross_margin_pct!=null && _rev!=null) _gp=Math.round(_rev*_manLast.gross_margin_pct/100*10)/10;
   var wf = {
     revenue: _rev,
     cogs: _rev!=null && _gp!=null ? _rev - _gp : null,
@@ -2194,9 +2202,10 @@ async function openEarningsEdit(ticker, name, entryId) {
     '<input id="em-gnotes" class="form-input" value="'+(e2.guidance_notes||'')+'" placeholder="ex: forte demande Data Center Q2…"></div>'+
     '</div>'+
 
-    '<div class="modal-footer">'+
+    '<div class="modal-footer" style="flex-wrap:wrap;gap:8px">'+
     '<button class="btn btn-ghost" onclick="openEarningsForm(\''+ticker+'\',\''+name+'\')">← Retour</button>'+
-    '<button class="btn btn-primary" onclick="saveEarningsEntry(\''+ticker+'\',\''+name+'\','+(entryId?'\''+entryId+'\'':'null')+')">💾 Enregistrer</button>'+
+    '<button id="em-autofill-btn" style="padding:6px 14px;font-size:12px;font-weight:600;border:1px solid var(--accent);border-radius:8px;background:var(--accent)22;color:var(--accent);cursor:pointer" onclick="autoFillEarnings(\''+ticker+'\',\''+name+'\')">✨ Auto-remplir (non-GAAP)</button>'+
+    '<button class="btn btn-primary" onclick="saveEarningsEntry(\''+ticker+'\',\''+name+'\','+(entryId?'\''+entryId+'\'':'null')+')">&#x1f4be; Enregistrer</button>'+
     '</div>'
   );
 }
@@ -2207,6 +2216,62 @@ function addEarningsSegment() {
   row.className = 'seg-row'; row.style.cssText='display:flex;gap:8px;margin-bottom:6px';
   row.innerHTML='<input class="form-input seg-name" placeholder="Segment" style="flex:2"><input class="form-input seg-val" type="number" step="0.1" placeholder="Md" style="flex:1;text-align:right"><button onclick="this.parentNode.remove()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0 4px">×</button>';
   c.appendChild(row);
+}
+
+
+// ── Auto-remplissage IA des résultats (non-GAAP) ─────────────────────────
+async function autoFillEarnings(ticker, name){
+  var perEl=document.getElementById('em-period'); var yrEl=document.getElementById('em-year');
+  if(!perEl||!yrEl){showToast('Ouvre le formulaire dabord');return;}
+  var per=perEl.value, yr=yrEl.value;
+  if(!per||!yr){showToast('Sélectionne une période dabord');return;}
+  var period=per==='FY'?('FY'+yr):(yr+'-'+per);
+
+  var btn=document.getElementById('em-autofill-btn');
+  if(btn){btn.disabled=true;btn.textContent='Recherche...';}
+  showToast('Recherche résultats non-GAAP '+ticker+' '+period+'...');
+
+  try{
+    var r=await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=autofill&period='+encodeURIComponent(period),
+      {signal:AbortSignal.timeout(50000)});
+    var resp=await r.json();
+    if(!resp.ok||!resp.data){showToast('Erreur: '+(resp.error||'extraction échouée'));return;}
+
+    var d=resp.data; var filled=0; var skipped=[];
+    var map={'em-revenue':d.revenue,'em-gp':d.gross_profit,'em-gmpct':d.gross_margin_pct,
+      'em-oi':d.operating_income,'em-ni':d.net_income,'em-nmpct':d.net_margin_pct,
+      'em-eps':d.eps_diluted,'em-ocf':d.ocf,'em-capex':d.capex,'em-fcf':d.fcf};
+    Object.keys(map).forEach(function(id){
+      var v=map[id]; var el=document.getElementById(id); if(!el) return;
+      if(v!=null){el.value=Math.round(v*100)/100; el.style.outline='2px solid var(--accent)'; filled++;}
+      else skipped.push(id);
+    });
+
+    // Segments
+    if(d.segments&&d.segments.length){
+      var sc=document.getElementById('seg-container'); if(sc){sc.innerHTML='';
+        d.segments.forEach(function(seg){addEarningsSegment();
+          var rows=sc.querySelectorAll('.seg-row');var last=rows[rows.length-1];if(!last)return;
+          var ni=last.querySelector('input[placeholder="Nom du segment"]');
+          var vi=last.querySelector('input[placeholder="Md$"]');
+          if(ni)ni.value=seg.name; if(vi)vi.value=Math.round(seg.value*10)/10;
+        });
+      }
+    }
+
+    showToast((d.is_gaap_fallback?'⚠️ GAAP (pas de non-GAAP)':'✅')+' '+filled+' champs remplis — vérifie les surlignés en bleu');
+
+    // Source link
+    if(d.source){
+      var ex=document.getElementById('em-af-src');if(!ex){
+        ex=document.createElement('div');ex.id='em-af-src';
+        ex.style='font-size:11px;color:var(--muted);padding:6px 16px;word-break:break-all;border-top:1px solid var(--border)';
+        var mf=document.querySelector('#modal-content .modal-footer');if(mf)mf.parentNode.insertBefore(ex,mf);
+      }
+      ex.innerHTML='Source : <a href="'+d.source+'" target="_blank" style="color:var(--accent)">'+d.source.slice(0,90)+'</a>';
+    }
+  }catch(e){showToast('Erreur: '+(e.message||'timeout'));}
+  finally{if(btn){btn.disabled=false;btn.textContent='✨ Auto-remplir (non-GAAP)';}}
 }
 
 async function saveEarningsEntry(ticker, name, entryId) {
