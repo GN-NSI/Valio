@@ -2941,9 +2941,12 @@ async function renderAmis(){
         var pos = computePositionsFromData([],txns||[]);
         var totalCost=0,totalVal=0;
         pos.forEach(function(p){
-          totalCost+=p.totalCostEur||0;
           var px=S.prices[p.ticker];
-          if(px){var pEur=toEur(px.price,px.currency||'USD'); totalVal+=p.quantity*pEur;}
+          // N'inclure que les positions dont le prix est chargé (sinon P&L = -100% artificiel)
+          if(px&&px.price){
+            totalCost+=p.totalCostEur||0;
+            totalVal+=p.quantity*toEur(px.price,px.currency||'USD');
+          }
         });
         var pct=totalCost>0?(totalVal/totalCost-1)*100:null;
         var statEl=document.getElementById('f-stat-'+idx);
