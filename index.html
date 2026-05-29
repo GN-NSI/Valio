@@ -705,8 +705,9 @@ function posTblRows(pos){
     const usd=d?(d.currency||'USD')==='USD':true;
     const chg=d?.changePct??0;
 
+    const _cur=d.currency||'USD'; const _dispP=(_cur==='USD'||_cur==='EUR')?d.price:toEur(d.price,_cur); const _sym=_cur==='USD'?'$':'€';
     const priceHTML=priceLoaded
-      ?`<span class="mono">${d.manual?'✎ ':''}`+(usd?'$':'€')+`${fN(d.price)}</span>`+(!d.manual?`<div style="font-size:11px;color:${chg>=0?'var(--green)':'var(--red)'};margin-top:2px">${chg>=0?'+':''}${chg.toFixed(2)}%</div>`:'')
+      ?`<span class="mono">${d.manual?'✎ ':''}`+_sym+`${fN(_dispP)}</span>`+(!d.manual?`<div style="font-size:11px;color:${chg>=0?'var(--green)':'var(--red)'};margin-top:2px">${chg>=0?'+':''}${chg.toFixed(2)}%</div>`:'')
       :noPrice?`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix</button>`
       :`<div class="shimmer" style="width:55px;height:14px"></div>`;
 
@@ -743,11 +744,10 @@ async function fetchOneTicker(p){
       d._t=Date.now();S.prices[p.ticker]=d;
     }
     if(!d?.price){if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix ✎</button>`;return;}
-    const pe=toEur(d.price,d.currency||'USD');
+    const _fc=d.currency||'USD'; const pe=toEur(d.price,_fc); const _fdp=(_fc==='USD'||_fc==='EUR')?d.price:pe; const _fs=_fc==='USD'?'$':'€';
     const ve=pe*p.quantity,pnl=ve-p.totalCostEur,pct=p.totalCostEur>0?(pnl/p.totalCostEur)*100:0,chg=d.changePct??0;
     p.priceEur=pe;p.valueEur=ve;p.pnlEur=pnl;p.pnlPct=pct;
-    // Mise à jour directe des cellules (pas de re-render)
-    const showChg=Math.abs(chg)>=0.01;if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<span class="mono">`+(usd?'$':'€')+`${fN(d.price)}</span>`+(showChg?`<div style="font-size:11px;color:${chg>=0?'var(--green)':'var(--red)'};margin-top:2px">${chg>=0?'+':''}${chg.toFixed(2)}%</div>`:`<div style="font-size:11px;color:var(--muted2);margin-top:2px">marché fermé</div>`);
+    const showChg=Math.abs(chg)>=0.01;if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<span class="mono">`+_fs+`${fN(_fdp)}</span>`+(showChg?`<div style="font-size:11px;color:${chg>=0?'var(--green)':'var(--red)'};margin-top:2px">${chg>=0?'+':''}${chg.toFixed(2)}%</div>`:`<div style="font-size:11px;color:var(--muted2);margin-top:2px">marché fermé</div>`);
     if($('vl-'+p.ticker))$('vl-'+p.ticker).innerHTML=`<span class="mono">${fE(ve)}</span>`;
     if($('pl-'+p.ticker))$('pl-'+p.ticker).innerHTML=`<span class="mono ${pnl>=0?'c-green':'c-red'}">${pnl>=0?'+':''}${fE(pnl)}</span>`;
     if($('pp-'+p.ticker))$('pp-'+p.ticker).innerHTML=`<span class="mono ${pct>=0?'c-green':'c-red'}">${pct>=0?'+':''}${pct.toFixed(2)}%</span>`;
@@ -1155,8 +1155,8 @@ function renderWatchlistTable(){
   var sorted=sortItems(watchlistItems.slice(),wlSort);
   var rows=sorted.map(function(w){
     var d=S.prices[w.ticker];
-    var isUsd=(d && d.currency && d.currency!=='EUR');
-    var priceStr=d && d.price ? '<span class="mono">'+(isUsd?'$':'€')+fN(d.price)+'</span>' : '<span style="color:var(--muted)">—</span>';
+    var _sc=d&&d.currency||'USD'; var _sdp=(_sc==='USD'||_sc==='EUR')?d&&d.price:d&&toEur(d.price,_sc); var _ss=_sc==='USD'?'$':'€';
+    var priceStr=d && d.price ? '<span class="mono">'+_ss+fN(_sdp)+'</span>' : '<span style="color:var(--muted)">—</span>';
     var tid=w.ticker.replace(/[^a-zA-Z0-9]/g,'_');
     return '<tr>'+
       '<td style="text-align:left;padding-left:20px"><div class="ticker-cell">'+
@@ -1280,8 +1280,8 @@ async function renderScreener(){
   var _totalPf = S.enrichedPos.reduce(function(s,p){return s+(p.valueEur||0);},0);
   var rows=allItems.map(function(p){
     var d=S.prices[p.ticker];
-    var isUsd=!(d && d.currency==='EUR');
-    var priceStr=d && d.price ? '<span class="mono">'+(isUsd?'$':'€')+fN(d.price)+'</span>' : '—';
+    var _sc2=d&&d.currency||'USD'; var _sdp2=(_sc2==='USD'||_sc2==='EUR')?d&&d.price:d&&toEur(d.price,_sc2); var _ss2=_sc2==='USD'?'$':'€';
+    var priceStr=d && d.price ? '<span class="mono">'+_ss2+fN(_sdp2)+'</span>' : '—';
     var tid=p.ticker.replace(/[^a-zA-Z0-9]/g,'_');
     var badge=p._isWatch?'<span style="font-size:10px;background:rgba(245,158,11,.15);color:#f59e0b;padding:2px 5px;border-radius:4px;margin-left:4px">WATCH</span>':'';
     var ep=S.enrichedPos.find(function(x){return x.ticker===p.ticker;});
