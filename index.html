@@ -465,7 +465,25 @@ async function dbDel(t,q){await rest('/rest/v1/'+t+'?'+q,{method:'DELETE'});}
 async function dbUpsert(t,data,conflict){await rest('/rest/v1/'+t+(conflict?'?on_conflict='+conflict:''),{method:'POST',headers:{Prefer:'resolution=ignore-duplicates,return=representation'},body:JSON.stringify(data)});}
 
 // ═══ STATE ═══
-const S={accounts:[],transactions:[],prices:{},profiles:{},fundamentals:{},fundamentalsAttempted:new Set(),eurUsd:1.08,page:'portfolio',chart:null,enrichedPos:[],portfolioRendered:false};
+const S={accounts:[],transactions:[],prices:{},profiles:{},fundamentals:{},fundamentalsAttempted:new Set(),eurUsd:1.08,eurSek:11.5,eurKrw:1500,eurTwd:35,page:'portfolio',chart:null,enrichedPos:[],portfolioRendered:false};
+// Convertit n'importe quelle devise en EUR
+function toEur(price,currency){
+  if(!price||isNaN(price))return price;
+  switch((currency||'USD').toUpperCase()){
+    case 'EUR': return price;
+    case 'USD': return price/(S.eurUsd||1.1);
+    case 'SEK': return price/(S.eurSek||11.5);
+    case 'KRW': return price/(S.eurKrw||1500);
+    case 'TWD': return price/(S.eurTwd||35);
+    default:    return price/(S.eurUsd||1.1);
+  }
+}
+function currSymbol(currency){
+  switch((currency||'USD').toUpperCase()){
+    case 'EUR': return '€'; case 'SEK': return 'kr'; case 'KRW': return '₩'; case 'TWD': return 'NT$'; default: return '$';
+  }
+}
+
 const manualPrices={};
 let chartMode='positions',chartDrill=[];
 let posSort={col:'value',dir:'desc'};
@@ -505,7 +523,13 @@ async function bootstrap(){
   if(S.accounts.length){const ids=S.accounts.map(a=>a.id).join(',');S.transactions=await dbGet('transactions','account_id=in.('+ids+')&order=transaction_date.desc&select=*,accounts(name,type)')||[];}
   else S.transactions=[];
   try{const r=await fetch(API+'?symbol=EURUSD%3DX',{signal:AbortSignal.timeout(5000)});const d=await r.json();if(d.price){S.eurUsd=d.price;document.getElementById('eurusd-rate').textContent='1 EUR = '+d.price.toFixed(4)+' USD';}}catch{}
-  await loadManualPrices(); // Charge les prix manuels partagés depuis Supabase
+  // Taux de change supplémentaires (SEK, KRW, TWD)
+  await Promise.allSettled([
+    fetch(API+'?symbol=EURSEK%3DX',{signal:AbortSignal.timeout(5000)}).then(r=>r.json()).then(d=>{if(d.price)S.eurSek=d.price;}),
+    fetch(API+'?symbol=EURKRW%3DX',{signal:AbortSignal.timeout(5000)}).then(r=>r.json()).then(d=>{if(d.price)S.eurKrw=d.price;}),
+    fetch(API+'?symbol=EURTWD%3DX',{signal:AbortSignal.timeout(5000)}).then(r=>r.json()).then(d=>{if(d.price)S.eurTwd=d.price;}),
+  ]).catch(()=>{});
+  await loadManualPrices();
 }
 async function refreshData(){showToast('🔄 Actualisation…');S.prices={};S.profiles={};S.fundamentals={};S.enrichedPos=[];S.portfolioRendered=false;document.getElementById('page-portfolio').innerHTML='';await bootstrap();navigate(S.page);}
 
@@ -556,7 +580,7 @@ function computePositions(){
   [...S.transactions].sort((a,b)=>new Date(a.transaction_date)-new Date(b.transaction_date)).forEach(tx=>{
     const k=tx.ticker;
     if(!map[k])map[k]={ticker:tx.ticker,name:tx.name,asset_type:tx.asset_type,quantity:0,totalCostEur:0,realizedPnlEur:0,totalSoldEur:0,accounts:[],buyCurrencies:[]};
-    const p=map[k];const toE=v=>tx.currency==='USD'?v/S.eurUsd:v;
+    const p=map[k];const toE=v=>toEur(v,tx.currency);
     const an=tx.accounts?.name||'—';if(!p.accounts.includes(an))p.accounts.push(an);
     if(tx.transaction_type==='buy'){
       p.totalCostEur+=tx.quantity*toE(tx.price)+toE(tx.fees||0);
@@ -719,7 +743,7 @@ async function fetchOneTicker(p){
       d._t=Date.now();S.prices[p.ticker]=d;
     }
     if(!d?.price){if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix ✎</button>`;return;}
-    const usd=(d.currency||'USD')==='USD';const pe=usd?d.price/S.eurUsd:d.price;
+    const pe=toEur(d.price,d.currency||'USD');
     const ve=pe*p.quantity,pnl=ve-p.totalCostEur,pct=p.totalCostEur>0?(pnl/p.totalCostEur)*100:0,chg=d.changePct??0;
     p.priceEur=pe;p.valueEur=ve;p.pnlEur=pnl;p.pnlPct=pct;
     // Mise à jour directe des cellules (pas de re-render)
@@ -790,7 +814,7 @@ function buildChartData(){
 
   if(chartMode==='enveloppe'){
     if(!drill.length){
-      const m={};computeByAccount().forEach(p=>{const d=S.prices[p.ticker];if(!d?.price)return;const usd=(d.currency||'USD')==='USD';const pe=usd?d.price/S.eurUsd:d.price;const ve=pe*p.quantity;if(ve>0)m[p.accountName]=(m[p.accountName]||0)+ve;});
+      const m={};computeByAccount().forEach(p=>{const d=S.prices[p.ticker];if(!d?.price)return;const pe=toEur(d.price,d.currency||'USD');const ve=pe*p.quantity;if(ve>0)m[p.accountName]=(m[p.accountName]||0)+ve;});
       const entries=Object.entries(m).sort((a,b)=>b[1]-a[1]);
       return{labels:entries.map(e=>e[0]),values:entries.map(e=>e[1]),colors:entries.map(e=>acctColor(e[0]).color),clickable:true};
     }else{const filt=pos.filter(p=>p.accounts.includes(drill[0]));return{...groupByKey(filt,p=>p.ticker,(t,i)=>tickerColor(t,i)),clickable:false};}
@@ -2704,8 +2728,8 @@ async function _drawDepositChart(deposits, totalVal){
         var pts=(hists[ticker]||[]).filter(function(p){return p.t<=ts;});
         if(!pts.length) return sum;
         var price=pts[pts.length-1].c;
-        var isUsd=!(S.prices[ticker]&&S.prices[ticker].currency==='EUR');
-        return sum+qty*(isUsd?price/(S.eurUsd||1.1):price);
+        var px_cur=(S.prices[ticker]&&S.prices[ticker].currency)||'USD';
+        return sum+qty*toEur(price,px_cur);
       },0);
     });
   }catch(e){console.warn('_drawDepositChart error:',e);}
@@ -2932,7 +2956,7 @@ async function renderAmis(){
         pos.forEach(function(p){
           totalCost+=p.totalCostEur||0;
           var px=S.prices[p.ticker];
-          if(px){var pEur=px.currency==='USD'?px.price/(S.eurUsd||1.1):px.price; totalVal+=p.quantity*pEur;}
+          if(px){var pEur=toEur(px.price,px.currency||'USD'); totalVal+=p.quantity*pEur;}
         });
         var pct=totalCost>0?(totalVal/totalCost-1)*100:null;
         var statEl=document.getElementById('f-stat-'+idx);
