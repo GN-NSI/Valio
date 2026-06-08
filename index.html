@@ -2688,8 +2688,36 @@ function _renderDepositsUI(deposits){
   _drawDepositChart(deposits, totalVal);
 }
 
-async function _drawDepositChart(deposits, totalVal){
+var _depHistCache={}; // cache historiques 5y par ticker (évite de re-fetch à chaque clic de filtre)
+function _holdingsValueLive(txns){
+  var holdings={};
+  txns.forEach(function(tx){
+    if(!tx.ticker) return;
+    var t=(tx.transaction_type||'').toLowerCase();
+    holdings[tx.ticker]=(holdings[tx.ticker]||0)+(t==='buy'?1:t==='sell'?-1:0)*(tx.quantity||0);
+  });
+  return Object.keys(holdings).reduce(function(sum,tk){
+    var q=holdings[tk]; if(q<=0.0001) return sum;
+    var d=manualPrices[tk]||S.prices[tk];
+    if(!d||d.price==null) return sum;
+    return sum+q*toEur(d.price,d.currency||'USD');
+  },0);
+}
+
+async function _drawDepositChart(allDeposits, totalVal){
   var cv=document.getElementById('deposit-chart'); if(!cv) return;
+
+  // ── Filtre compte (Modif 3) : dépôts ET valeur du portefeuille du seul courtier sélectionné ──
+  var acctId=null;
+  if(_depFilter){
+    var a=(S.accounts||[]).find(function(x){return x.name===_depFilter;});
+    acctId=a?a.id:null;
+  }
+  var deposits=_depFilter
+    ? allDeposits.filter(function(d){return d.accounts&&d.accounts.name===_depFilter;})
+    : allDeposits;
+
+  // ── Dépôts cumulés (du compte filtré, ou global) ──
   var sorted=deposits.slice().sort(function(a,b){return a.deposit_date<b.deposit_date?-1:1;});
   var depLabels=[], depSeries=[], cum=0;
   sorted.forEach(function(d){
@@ -2699,32 +2727,32 @@ async function _drawDepositChart(deposits, totalVal){
   });
   depLabels.push('Auj.'); depSeries.push(cum);
 
-  // ── Reconstruction réelle du portefeuille à chaque date de dépôt ──
-  // Utilise les transactions pour savoir ce que Nathan détenait vraiment
+  // ── Reconstruction du solde à chaque date (transactions filtrées par compte si besoin) ──
   var ptfSeries=depSeries.map(function(){return null;});
   try{
     var txns=(S.transactions||[]).slice().sort(function(a,b){
       return new Date(a.transaction_date)-new Date(b.transaction_date);
     });
+    if(acctId) txns=txns.filter(function(t){return t.account_id===acctId;});
     var allTickers=[...new Set(txns.map(function(t){return t.ticker;}).filter(Boolean))];
 
-    // Fetch 5y d'historique pour tous les tickers (batch de 4)
-    var hists={};
-    for(var bi=0;bi<allTickers.length;bi+=4){
-      await Promise.all(allTickers.slice(bi,bi+4).map(async function(tk){
-        hists[tk]=await fetchPriceHistory(tk,'5y');
+    // Fetch 5y d'historique (avec cache) pour les tickers manquants — batch de 4
+    var need=allTickers.filter(function(tk){return !_depHistCache[tk];});
+    for(var bi=0;bi<need.length;bi+=4){
+      await Promise.all(need.slice(bi,bi+4).map(async function(tk){
+        _depHistCache[tk]=await fetchPriceHistory(tk,'5y');
       }));
-      if(bi+4<allTickers.length) await new Promise(function(r){setTimeout(r,350);});
+      if(bi+4<need.length) await new Promise(function(r){setTimeout(r,350);});
     }
+    var hists=_depHistCache;
 
-    // Pour chaque date de dépôt : reconstruire les holdings et valoriser
     var allDates=sorted.map(function(d){return d.deposit_date;});
     allDates.push(new Date().toISOString().slice(0,10)); // aujourd'hui
 
     ptfSeries=allDates.map(function(date,idx){
-      if(idx===allDates.length-1) return totalVal; // dernier point = valeur exacte actuelle
+      // Dernier point = valeur exacte actuelle (globale = totalVal ; filtrée = live du compte)
+      if(idx===allDates.length-1) return _depFilter ? _holdingsValueLive(txns) : totalVal;
       var ts=new Date(date).getTime()/1000;
-      // Holdings à cette date (toutes transactions ≤ date)
       var holdings={};
       txns.forEach(function(tx){
         if(!tx.ticker||new Date(tx.transaction_date)>new Date(date)) return;
@@ -2732,7 +2760,6 @@ async function _drawDepositChart(deposits, totalVal){
         var txType=(tx.transaction_type||'').toLowerCase();
         holdings[tx.ticker]+=(txType==='buy'?1:txType==='sell'?-1:0)*(tx.quantity||0);
       });
-      // Valorisation au cours du moment
       return Object.keys(holdings).reduce(function(sum,ticker){
         var qty=holdings[ticker]; if(qty<=0.0001) return sum;
         var pts=(hists[ticker]||[]).filter(function(p){return p.t<=ts;});
@@ -2744,11 +2771,12 @@ async function _drawDepositChart(deposits, totalVal){
     });
   }catch(e){console.warn('_drawDepositChart error:',e);}
 
+  var sfx=_depFilter?(' · '+_depFilter):'';
   if(window._depChart){try{window._depChart.destroy();}catch(e){}}
   window._depChart=new Chart(cv,{type:'line',
     data:{labels:depLabels,datasets:[
-      {label:'Valeur portefeuille',data:ptfSeries,borderColor:'#5b7ef5',backgroundColor:'rgba(91,126,245,0.08)',fill:true,tension:0.3,pointRadius:3,borderWidth:2.5},
-      {label:'Dépôts cumulés',data:depSeries,borderColor:'#f59e0b',backgroundColor:'transparent',fill:false,stepped:true,pointRadius:3,borderWidth:2,borderDash:[5,4]},
+      {label:'Valeur portefeuille'+sfx,data:ptfSeries,borderColor:'#5b7ef5',backgroundColor:'rgba(91,126,245,0.08)',fill:true,tension:0.3,pointRadius:3,borderWidth:2.5},
+      {label:'Dépôts cumulés'+sfx,data:depSeries,borderColor:'#f59e0b',backgroundColor:'transparent',fill:false,stepped:true,pointRadius:3,borderWidth:2,borderDash:[5,4]},
     ]},
     options:{responsive:true,maintainAspectRatio:false,
       plugins:{legend:{labels:{color:'#6b7280',font:{size:11}}},
@@ -3011,6 +3039,63 @@ function computePositionsFromData(accounts, transactions){
   return Object.values(map).filter(function(p){return p.quantity>0.0001;});
 }
 
+// ═══ PORTEFEUILLE AMI — tri colonnes + P&L € (Modif 1) ═══
+var _friendPos=[];
+var _friendSort={col:'value',dir:'desc'};
+var _FSORT={
+  titre:function(p){return p.ticker||'';},
+  qty:function(p){return p.quantity||0;},
+  pru:function(p){return p.pruEur||0;},
+  cours:function(p){return p.priceEur||0;},
+  value:function(p){return p.valueEur||0;},
+  pnl:function(p){return p.pnlEur!=null?p.pnlEur:-Infinity;},
+  pnlpct:function(p){return p.pnlPct!=null?p.pnlPct:-Infinity;}
+};
+function _sortFriendPos(pos){
+  var fn=_FSORT[_friendSort.col]||_FSORT.value;
+  return pos.slice().sort(function(a,b){
+    var va=fn(a),vb=fn(b);
+    if(typeof va==='string')return _friendSort.dir==='desc'?vb.localeCompare(va):va.localeCompare(vb);
+    return _friendSort.dir==='desc'?vb-va:va-vb;
+  });
+}
+function _fSortIcon(col){
+  if(_friendSort.col!==col)return '<span style="opacity:.3;font-size:9px">↕</span>';
+  return _friendSort.dir==='desc'?'↓':'↑';
+}
+function _fTh(col,label,align){
+  var a=align||'right';var active=_friendSort.col===col;
+  return '<th onclick="clickFriendSort(\''+col+'\')" style="padding:8px;text-align:'+a+';font-size:11px;color:'+(active?'var(--accent)':'var(--muted)')+';cursor:pointer;user-select:none;white-space:nowrap">'+label+' '+_fSortIcon(col)+'</th>';
+}
+function _friendHead(){
+  return '<tr style="border-bottom:1px solid var(--border)">'+
+    _fTh('titre','TITRE','left')+_fTh('qty','QTÉ')+_fTh('pru','PRU')+
+    _fTh('cours','COURS')+_fTh('value','VALEUR')+_fTh('pnl','P&L €')+_fTh('pnlpct','P&L %')+
+  '</tr>';
+}
+function _friendRows(pos){
+  return pos.map(function(p){
+    var pctColor=p.pnlPct!=null&&p.pnlPct>=0?'var(--green)':'var(--red)';
+    var eColor=p.pnlEur!=null&&p.pnlEur>=0?'var(--green)':'var(--red)';
+    return '<tr style="border-bottom:1px solid var(--border2)">'+
+      '<td style="padding:10px 8px"><div style="font-weight:600;font-size:13px">'+p.ticker+'</div>'+
+        (TICKER_SUBSECTOR[p.ticker]?'<div style="font-size:11px;color:var(--muted)">'+TICKER_SUBSECTOR[p.ticker]+'</div>':'')+'</td>'+
+      '<td style="padding:10px 8px;text-align:right" class="mono">'+fN(p.quantity,4)+'</td>'+
+      '<td style="padding:10px 8px;text-align:right" class="mono">'+(p.pruEur!=null?fN(p.pruEur,2)+' €':'—')+'</td>'+
+      '<td style="padding:10px 8px;text-align:right" class="mono">'+(p.priceEur!=null?fN(p.priceEur,2)+' €':'—')+'</td>'+
+      '<td style="padding:10px 8px;text-align:right" class="mono">'+(p.valueEur!=null?fE(p.valueEur):'—')+'</td>'+
+      '<td style="padding:10px 8px;text-align:right;color:'+eColor+'" class="mono">'+(p.pnlEur!=null?(p.pnlEur>=0?'+':'')+fE(p.pnlEur):'—')+'</td>'+
+      '<td style="padding:10px 8px;text-align:right;color:'+pctColor+'" class="mono">'+(p.pnlPct!=null?(p.pnlPct>=0?'+':'')+p.pnlPct.toFixed(1)+'%':'—')+'</td>'+
+      '</tr>';
+  }).join('');
+}
+window.clickFriendSort=function(col){
+  if(_friendSort.col===col)_friendSort.dir=_friendSort.dir==='desc'?'asc':'desc';
+  else{_friendSort.col=col;_friendSort.dir='desc';}
+  var tb=document.getElementById('friend-pos-body'); if(tb)tb.innerHTML=_friendRows(_sortFriendPos(_friendPos));
+  var th=document.getElementById('friend-pos-thead'); if(th)th.innerHTML=_friendHead();
+};
+
 async function renderFriendPortfolio(friendId, friendName){
   var pg=document.getElementById('page');
   pg.innerHTML='<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">'+
@@ -3072,19 +3157,9 @@ async function renderFriendPortfolio(friendId, friendName){
       '<button id="ftab-rat" onclick="switchFriendTab(\'rat\')" style="padding:8px 16px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px">📐 Ratios</button>'+
       '</div>';
 
-    // ── Tab Portefeuille ──
-    var posRows=pos.slice().sort(function(a,b){return (b.valueEur||0)-(a.valueEur||0);}).map(function(p){
-      var pnlColor=p.pnlPct!=null&&p.pnlPct>=0?'var(--green)':'var(--red)';
-      return '<tr style="border-bottom:1px solid var(--border2)">'+
-        '<td style="padding:10px 8px"><div style="font-weight:600;font-size:13px">'+p.ticker+'</div>'+
-          (TICKER_SUBSECTOR[p.ticker]?'<div style="font-size:11px;color:var(--muted)">'+TICKER_SUBSECTOR[p.ticker]+'</div>':'')+'</td>'+
-        '<td style="padding:10px 8px;text-align:right" class="mono">'+fN(p.quantity,4)+'</td>'+
-        '<td style="padding:10px 8px;text-align:right" class="mono">'+(p.pruEur!=null?fN(p.pruEur,2)+' €':'—')+'</td>'+
-        '<td style="padding:10px 8px;text-align:right" class="mono">'+(p.priceEur!=null?fN(p.priceEur,2)+' €':'—')+'</td>'+
-        '<td style="padding:10px 8px;text-align:right" class="mono">'+(p.valueEur!=null?fE(p.valueEur):'—')+'</td>'+
-        '<td style="padding:10px 8px;text-align:right;color:'+pnlColor+'" class="mono">'+(p.pnlPct!=null?(p.pnlPct>=0?'+':'')+p.pnlPct.toFixed(1)+'%':'—')+'</td>'+
-        '</tr>';
-    }).join('');
+    // ── Tab Portefeuille (tri + P&L € : voir _friendRows / clickFriendSort) ──
+    _friendPos=pos;
+    _friendSort={col:'value',dir:'desc'};
 
     var ptfTab='<div id="ftab-ptf-content">'+
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px">'+
@@ -3093,15 +3168,10 @@ async function renderFriendPortfolio(friendId, friendName){
         '<div class="card"><div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-bottom:10px">Répartition</div>'+
           '<div id="friend-legend" style="overflow-y:auto;max-height:200px"></div></div>'+
       '</div>'+
-      '<div class="card"><table style="width:100%;border-collapse:collapse">'+
-        '<thead><tr style="border-bottom:1px solid var(--border)">'+
-          '<th style="padding:8px;text-align:left;font-size:11px;color:var(--muted)">TITRE</th>'+
-          '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">QTÉ</th>'+
-          '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">PRU</th>'+
-          '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">COURS</th>'+
-          '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">VALEUR</th>'+
-          '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">P&L %</th>'+
-        '</tr></thead><tbody>'+posRows+'</tbody></table></div>'+
+      '<div class="card"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'+
+        '<thead id="friend-pos-thead">'+_friendHead()+'</thead>'+
+        '<tbody id="friend-pos-body">'+_friendRows(_sortFriendPos(pos))+'</tbody>'+
+      '</table></div></div>'+
       '</div>';
 
     // ── Tab Ratios ──
