@@ -3065,7 +3065,7 @@ function _fSortIcon(col){
 }
 function _fTh(col,label,align){
   var a=align||'right';var active=_friendSort.col===col;
-  return '<th onclick="clickFriendSort(\''+col+'\')" style="padding:8px;text-align:'+a+';font-size:11px;color:'+(active?'var(--accent)':'var(--muted)')+';cursor:pointer;user-select:none;white-space:nowrap">'+label+' '+_fSortIcon(col)+'</th>';
+  return '<th onclick="clickFriendSort(\''+col+'\')" style="padding:8px;text-align:'+a+';font-size:11px;color:'+(active?'var(--blue)':'var(--muted)')+';cursor:pointer;user-select:none;white-space:nowrap">'+label+' '+_fSortIcon(col)+'</th>';
 }
 function _friendHead(){
   return '<tr style="border-bottom:1px solid var(--border)">'+
@@ -3095,6 +3095,146 @@ window.clickFriendSort=function(col){
   var tb=document.getElementById('friend-pos-body'); if(tb)tb.innerHTML=_friendRows(_sortFriendPos(_friendPos));
   var th=document.getElementById('friend-pos-thead'); if(th)th.innerHTML=_friendHead();
 };
+
+// ═══ PORTEFEUILLE AMI — camembert multi-modes + ratios (réutilise les helpers globaux) ═══
+var _friendChartMode='positions', _friendChartDrill=[];
+function _friendChartData(){
+  var pos=_friendPos.filter(function(p){return (p.valueEur||0)>0;});
+  var mode=_friendChartMode, drill=_friendChartDrill;
+  if(!pos.length) return {labels:[],values:[],colors:[],clickable:false};
+
+  if(mode==='positions') return {...groupByKey(pos,function(p){return p.ticker;},function(t,i){return tickerColor(t,i);}),clickable:false};
+
+  if(mode==='type'){
+    if(!drill.length){
+      var m={}; pos.forEach(function(p){var k=isETF(p)?'ETF':'Stock picking';m[k]=(m[k]||0)+(p.valueEur||0);});
+      var ent=Object.entries(m).filter(function(e){return e[1]>0;}).sort(function(a,b){return b[1]-a[1];});
+      return {labels:ent.map(function(e){return e[0];}),values:ent.map(function(e){return e[1];}),colors:ent.map(function(_,i){return i===0?'#5b7ef5':'#22c55e';}),clickable:true};
+    }
+    var filt=pos.filter(function(p){return (isETF(p)?'ETF':'Stock picking')===drill[0];});
+    return {...groupByKey(filt,function(p){return p.ticker;},function(t,i){return tickerColor(t,i);}),clickable:false};
+  }
+
+  if(mode==='secteur'){
+    var getSect=function(ep){return ep._etfKey||(getProfile(ep.ticker).sector||'Non défini');};
+    var exp=explodeForMode(pos,'secteur');
+    if(!drill.length){
+      var m={};exp.forEach(function(ep){var k=getSect(ep);m[k]=(m[k]||0)+(ep.valueEur||0);});
+      var ent=Object.entries(m).filter(function(e){return e[1]>0;}).sort(function(a,b){return b[1]-a[1];});
+      return {labels:ent.map(function(e){return e[0];}),values:ent.map(function(e){return e[1];}),colors:ent.map(function(_,i){return PALETTE[i%PALETTE.length];}),clickable:true};
+    }
+    var filt=exp.filter(function(ep){return getSect(ep)===drill[0];});
+    var m2={};filt.forEach(function(ep){var k=ep._isEtfSlice?ep.name:ep.ticker;m2[k]=(m2[k]||0)+(ep.valueEur||0);});
+    var ent2=Object.entries(m2).filter(function(e){return e[1]>0;}).sort(function(a,b){return b[1]-a[1];});
+    return {labels:ent2.map(function(e){return e[0];}),values:ent2.map(function(e){return e[1];}),colors:ent2.map(function(e,i){return tickerColor(e[0],i);}),clickable:false};
+  }
+
+  if(mode==='region'){
+    if(!drill.length) return {...groupByKey(pos,function(p){return RMAP[getProfile(p.ticker).country||'XX']||'Autre';}),clickable:true};
+    if(drill.length===1){var filt=pos.filter(function(p){return (RMAP[getProfile(p.ticker).country||'XX']||'Autre')===drill[0];});return {...groupByKey(filt,function(p){return CNAMES[getProfile(p.ticker).country||'XX']||p.ticker;}),clickable:true};}
+    var filt2=pos.filter(function(p){return (CNAMES[getProfile(p.ticker).country||'XX']||p.ticker)===drill[1];});
+    return {...groupByKey(filt2,function(p){return p.ticker;},function(t,i){return tickerColor(t,i);}),clickable:false};
+  }
+
+  if(mode==='pays'){
+    var exp=explodeForMode(pos,'pays');
+    if(!drill.length){
+      var m={};exp.forEach(function(ep){var k=ep._etfKey?(CNAMES[ep._etfKey]||ep._etfKey):(CNAMES[getProfile(ep.ticker).country||'XX']||'Autre');m[k]=(m[k]||0)+(ep.valueEur||0);});
+      var ent=Object.entries(m).filter(function(e){return e[1]>0;}).sort(function(a,b){return b[1]-a[1];});
+      return {labels:ent.map(function(e){return e[0];}),values:ent.map(function(e){return e[1];}),colors:ent.map(function(_,i){return PALETTE[i%PALETTE.length];}),clickable:true};
+    }
+    var filt=exp.filter(function(ep){var k=ep._etfKey?(CNAMES[ep._etfKey]||ep._etfKey):(CNAMES[getProfile(ep.ticker).country||'XX']||'Autre');return k===drill[0];});
+    var m2={};filt.forEach(function(ep){var k=ep._isEtfSlice?ep.name+' (expo.)':ep.ticker;m2[k]=(m2[k]||0)+(ep.valueEur||0);});
+    var ent2=Object.entries(m2).filter(function(e){return e[1]>0;}).sort(function(a,b){return b[1]-a[1];});
+    return {labels:ent2.map(function(e){return e[0];}),values:ent2.map(function(e){return e[1];}),colors:ent2.map(function(e,i){return tickerColor(e[0].split(' ')[0],i);}),clickable:false};
+  }
+
+  if(mode==='capi'){
+    var tiers={'Mega (>1 000 Mds $)':0,'Large (100–1 000 Mds $)':0,'Mid (10–100 Mds $)':0,'Small (<10 Mds $)':0};
+    var exp=explodeForMode(pos,'capi');
+    exp.forEach(function(p){
+      if(p._etfKey){tiers[p._etfKey]=(tiers[p._etfKey]||0)+(p.valueEur||0);return;}
+      var mc=getProfile(p.ticker).mktCap||(S.fundamentals[p.ticker]&&S.fundamentals[p.ticker].mktCap)||0; if(!mc)return;
+      if(mc>1e12)tiers['Mega (>1 000 Mds $)']+=p.valueEur;
+      else if(mc>1e11)tiers['Large (100–1 000 Mds $)']+=p.valueEur;
+      else if(mc>1e10)tiers['Mid (10–100 Mds $)']+=p.valueEur;
+      else tiers['Small (<10 Mds $)']+=p.valueEur;
+    });
+    var entries=Object.entries(tiers).filter(function(e){return e[1]>0;}).sort(function(a,b){return b[1]-a[1];});
+    return {labels:entries.map(function(e){return e[0];}),values:entries.map(function(e){return e[1];}),colors:entries.map(function(_,i){return PALETTE[i%PALETTE.length];}),clickable:false};
+  }
+  return {labels:[],values:[],colors:[],clickable:false};
+}
+function renderFriendChart(){
+  var cv=document.getElementById('friend-donut'); if(!cv) return;
+  var d=_friendChartData(); var total=d.values.reduce(function(s,v){return s+v;},0);
+  if(window._friendChartObj){try{window._friendChartObj.destroy();}catch(e){}}
+  var leg=document.getElementById('friend-legend');
+  if(!total){ if(leg)leg.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px">Pas de données pour ce mode (titres non répertoriés).</div>'; return; }
+  window._friendChartObj=new Chart(cv,{type:'doughnut',
+    data:{labels:d.labels,datasets:[{data:d.values,backgroundColor:d.colors,borderColor:'rgba(0,0,0,.15)',borderWidth:2,hoverOffset:6}]},
+    options:{cutout:'62%',responsive:true,maintainAspectRatio:false,
+      onClick:function(_,els){if(els.length)_friendDrill(d.labels[els[0].index]);},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:function(ctx){return ctx.label+': '+fE(ctx.raw)+' ('+((ctx.raw/total*100).toFixed(1))+'%)';}}}}}
+  });
+  cv.style.cursor=d.clickable?'pointer':'default';
+  if(leg){
+    leg.innerHTML=d.labels.map(function(l,i){
+      var pct=total>0?((d.values[i]/total)*100).toFixed(1):'0';
+      var clk=d.clickable?(' onclick="_friendDrill(\''+String(l).replace(/'/g,"\\'")+'\')" style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px"'):(' style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px"');
+      return '<div'+clk+'>'+
+        '<div style="width:10px;height:10px;border-radius:50%;background:'+d.colors[i]+';flex-shrink:0"></div>'+
+        '<span style="font-weight:600">'+l+'</span>'+
+        '<span style="color:var(--muted);margin-left:auto">'+pct+'%</span></div>';
+    }).join('');
+  }
+  var bc=document.getElementById('friend-bc');
+  if(bc){
+    if(!_friendChartDrill.length) bc.innerHTML='';
+    else{
+      var html='<span class="bc-link" onclick="_friendChartDrill=[];renderFriendChart()">Tout</span>';
+      _friendChartDrill.forEach(function(dd,i){
+        html+='<span class="bc-sep"> › </span>';
+        if(i<_friendChartDrill.length-1) html+='<span class="bc-link" onclick="_friendChartDrill=_friendChartDrill.slice(0,'+(i+1)+');renderFriendChart()">'+dd+'</span>';
+        else html+='<span>'+dd+'</span>';
+      });
+      bc.innerHTML=html;
+    }
+  }
+}
+window._friendDrill=function(label){ var d=_friendChartData(); if(d.clickable){_friendChartDrill.push(label);renderFriendChart();} };
+window.changeFriendChartMode=function(mode){_friendChartMode=mode;_friendChartDrill=[];renderFriendChart();};
+
+async function loadFriendRatios(){
+  var btn=document.getElementById('friend-ratios-btn');
+  var el=document.getElementById('friend-ratios-content');
+  if(!el)return;
+  if(btn)btn.disabled=true;
+  el.innerHTML='<div class="spinner"></div>';
+  var EXCL=new Set(['NVTS','LYFT']);
+  var METRICS=[
+    {key:'trailingPE',label:'PER trail.',fmt:function(v){return v.toFixed(1)+'x';},opts:{min:0,max:150},color:function(v){return v<15?'var(--green)':v<30?'var(--yellow)':'var(--red)';}},
+    {key:'forwardPE',label:'PER fwd.',fmt:function(v){return v.toFixed(1)+'x';},opts:{min:0,max:100},color:function(v){return v<20?'var(--green)':v<25?'var(--yellow)':'var(--red)';}},
+    {key:'pegRatio',label:'PEG',fmt:function(v){return v.toFixed(2)+'x';},opts:{min:0,max:20},color:function(v){return v<1?'var(--green)':v<2?'var(--yellow)':'var(--red)';}},
+    {key:'profitMarginPct',label:'Marge nette',fmt:function(v){return v.toFixed(1)+'%';},opts:{},color:function(v){return v>20?'var(--green)':v>10?'var(--yellow)':'var(--red)';}},
+    {key:'returnOnEquity',label:'ROE',fmt:function(v){return v.toFixed(1)+'%';},opts:{min:-100,max:300},color:function(v){return v>20?'var(--green)':v>10?'var(--yellow)':'var(--red)';}},
+    {key:'revenueGrowthYoY',label:'Crois. CA',fmt:function(v){return (v>=0?'+':'')+v.toFixed(1)+'%';},opts:{},color:function(v){return v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)';}},
+    {key:'epsGrowth1Y',label:'Crois. EPS',fmt:function(v){return (v>=0?'+':'')+v.toFixed(1)+'%';},opts:{},color:function(v){return v>15?'var(--green)':v>5?'var(--yellow)':v>=0?'#f97316':'var(--red)';}},
+  ];
+  var pos=_friendPos.filter(function(p){return !isETF(p)&&!EXCL.has(p.ticker)&&(p.valueEur||0)>0;});
+  if(!pos.length){el.innerHTML='<span style="color:var(--muted);font-size:12px">Aucune action (que des ETF).</span>';if(btn)btn.disabled=false;return;}
+  await Promise.all(pos.map(async function(p){
+    if(!S.fundamentals) S.fundamentals={};
+    if(!S.fundamentals[p.ticker]){
+      try{var r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker)+'&type=fundamentals',{signal:AbortSignal.timeout(10000)});var d=await r.json();if(d&&!d.error)S.fundamentals[p.ticker]=d;}catch(e){}
+    }
+  }));
+  function wavg(key,opts){opts=opts||{};var min=opts.min==null?-Infinity:opts.min,max=opts.max==null?Infinity:opts.max;var sum=0,w=0;pos.forEach(function(p){var f=S.fundamentals[p.ticker];var v=p.valueEur||0;var val=f&&f[key];if(val!=null&&!isNaN(val)&&isFinite(val)&&v>0&&val>=min&&val<=max){sum+=val*v;w+=v;}});return w>0?sum/w:null;}
+  function mrow(label,val,fmt,color){var v=val==null?'<span style="color:var(--muted)">—</span>':'<span class="mono" style="color:'+color(val)+'">'+fmt(val)+'</span>';return '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border2)"><span style="font-size:12px;color:var(--muted)">'+label+'</span>'+v+'</div>';}
+  el.innerHTML=METRICS.map(function(m){return mrow(m.label,wavg(m.key,m.opts),m.fmt,m.color);}).join('')+
+    '<div style="font-size:10px;color:var(--muted2);margin-top:6px">Moyennes pondérées par valeur · actions uniquement</div>';
+  if(btn)btn.disabled=false;
+}
 
 async function renderFriendPortfolio(friendId, friendName){
   var pg=document.getElementById('page');
@@ -3160,13 +3300,35 @@ async function renderFriendPortfolio(friendId, friendName){
     // ── Tab Portefeuille (tri + P&L € : voir _friendRows / clickFriendSort) ──
     _friendPos=pos;
     _friendSort={col:'value',dir:'desc'};
+    _friendChartMode='positions'; _friendChartDrill=[];
 
     var ptfTab='<div id="ftab-ptf-content">'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px">'+
-        '<div class="card"><div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-bottom:10px">Allocation</div>'+
-          '<div style="position:relative;height:200px"><canvas id="friend-donut"></canvas></div></div>'+
-        '<div class="card"><div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-bottom:10px">Répartition</div>'+
-          '<div id="friend-legend" style="overflow-y:auto;max-height:200px"></div></div>'+
+      '<div class="pf-row">'+
+        '<div class="chart-card">'+
+          '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+
+            '<span style="font-size:15px;font-weight:600">Répartition</span>'+
+            '<select class="chart-select" onchange="changeFriendChartMode(this.value)">'+
+              '<option value="positions">Positions</option>'+
+              '<option value="type">Stock picking / ETF</option>'+
+              '<option value="secteur">Par secteur 🔍</option>'+
+              '<option value="region">Par région 🔍</option>'+
+              '<option value="pays">Par pays 🔍</option>'+
+              '<option value="capi">Par capitalisation</option>'+
+            '</select>'+
+          '</div>'+
+          '<div class="breadcrumb" id="friend-bc"></div>'+
+          '<div class="chart-wrap"><canvas id="friend-donut"></canvas></div>'+
+          '<div class="chart-legend" id="friend-legend"></div>'+
+        '</div>'+
+        '<div class="right-panel">'+
+          '<div class="panel-card">'+
+            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'+
+              '<div class="panel-title" style="margin-bottom:0">Ratios principaux</div>'+
+              '<button class="btn btn-ghost btn-sm" id="friend-ratios-btn" onclick="loadFriendRatios()">Charger</button>'+
+            '</div>'+
+            '<div id="friend-ratios-content" style="color:var(--muted);font-size:12px">Clique "Charger" pour les moyennes pondérées (actions).</div>'+
+          '</div>'+
+        '</div>'+
       '</div>'+
       '<div class="card"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'+
         '<thead id="friend-pos-thead">'+_friendHead()+'</thead>'+
@@ -3181,9 +3343,9 @@ async function renderFriendPortfolio(friendId, friendName){
         '<td style="padding:10px 8px;font-weight:600;font-size:12px">'+p.ticker+'</td>'+
         '<td style="padding:10px 8px;text-align:right;font-size:12px" class="mono" id="frat-pe-'+p.ticker+'">'+(f&&f.trailingPE?f.trailingPE.toFixed(1):'…')+'</td>'+
         '<td style="padding:10px 8px;text-align:right;font-size:12px" class="mono" id="frat-fpe-'+p.ticker+'">'+(f&&f.forwardPE?f.forwardPE.toFixed(1):'…')+'</td>'+
-        '<td style="padding:10px 8px;text-align:right;font-size:12px" class="mono" id="frat-nm-'+p.ticker+'">'+(f&&f.netMargin!=null?(f.netMargin*100).toFixed(1)+'%':'…')+'</td>'+
-        '<td style="padding:10px 8px;text-align:right;font-size:12px" class="mono" id="frat-roe-'+p.ticker+'">'+(f&&f.roe!=null?(f.roe*100).toFixed(1)+'%':'…')+'</td>'+
-        '<td style="padding:10px 8px;text-align:right;font-size:12px" class="mono" id="frat-rev-'+p.ticker+'">'+(f&&f.revenueGrowth!=null?(f.revenueGrowth*100).toFixed(1)+'%':'…')+'</td>'+
+        '<td style="padding:10px 8px;text-align:right;font-size:12px" class="mono" id="frat-nm-'+p.ticker+'">'+(f&&f.profitMarginPct!=null?f.profitMarginPct.toFixed(1)+'%':'…')+'</td>'+
+        '<td style="padding:10px 8px;text-align:right;font-size:12px" class="mono" id="frat-roe-'+p.ticker+'">'+(f&&f.returnOnEquity!=null?f.returnOnEquity.toFixed(1)+'%':'…')+'</td>'+
+        '<td style="padding:10px 8px;text-align:right;font-size:12px" class="mono" id="frat-rev-'+p.ticker+'">'+(f&&f.revenueGrowthYoY!=null?f.revenueGrowthYoY.toFixed(1)+'%':'…')+'</td>'+
         '</tr>';
     }).join('');
 
@@ -3203,27 +3365,8 @@ async function renderFriendPortfolio(friendId, friendName){
       '<h2 style="font-size:18px;font-weight:700">📊 '+friendName+'</h2></div>'+
       kpis+tabs+ptfTab+ratTab;
 
-    // ── Donut chart ──
-    setTimeout(function(){
-      var cv=document.getElementById('friend-donut'); if(!cv) return;
-      var sorted=pos.slice().sort(function(a,b){return (b.valueEur||0)-(a.valueEur||0);});
-      var colors=['#5b7ef5','#22c55e','#f59e0b','#06b6d4','#a855f7','#ef4444','#f97316','#84cc16','#ec4899','#14b8a6'];
-      var labels=sorted.map(function(p){return p.ticker;});
-      var data=sorted.map(function(p){return p.valueEur||0;});
-      var total=data.reduce(function(s,v){return s+v;},0);
-      new Chart(cv,{type:'doughnut',data:{labels:labels,datasets:[{data:data,backgroundColor:colors,borderColor:'rgba(0,0,0,.15)',borderWidth:2,hoverOffset:6}]},
-        options:{cutout:'62%',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:function(ctx){return ctx.label+': '+fE(ctx.raw)+' ('+((ctx.raw/total*100).toFixed(1))+'%)';}}}}
-      }});
-      // Legend
-      var leg=document.getElementById('friend-legend'); if(!leg) return;
-      leg.innerHTML=sorted.map(function(p,i){
-        var pct=total>0?((p.valueEur||0)/total*100).toFixed(1):'0';
-        return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px">'+
-          '<div style="width:10px;height:10px;border-radius:50%;background:'+colors[i%colors.length]+';flex-shrink:0"></div>'+
-          '<span style="font-weight:600">'+p.ticker+'</span>'+
-          '<span style="color:var(--muted);margin-left:auto">'+pct+'%</span></div>';
-      }).join('');
-    },80);
+    // ── Donut (multi-modes via renderFriendChart) ──
+    setTimeout(function(){ renderFriendChart(); },80);
 
     // ── Fetch fundamentals pour onglet Ratios ──
     pos.forEach(async function(p){
@@ -3237,9 +3380,9 @@ async function renderFriendPortfolio(friendId, friendName){
         var upd=function(id,val){var el=document.getElementById(id);if(el)el.textContent=val;};
         upd('frat-pe-'+p.ticker,d.trailingPE?d.trailingPE.toFixed(1):'—');
         upd('frat-fpe-'+p.ticker,d.forwardPE?d.forwardPE.toFixed(1):'—');
-        upd('frat-nm-'+p.ticker,d.netMargin!=null?(d.netMargin*100).toFixed(1)+'%':'—');
-        upd('frat-roe-'+p.ticker,d.roe!=null?(d.roe*100).toFixed(1)+'%':'—');
-        upd('frat-rev-'+p.ticker,d.revenueGrowth!=null?(d.revenueGrowth*100).toFixed(1)+'%':'—');
+        upd('frat-nm-'+p.ticker,d.profitMarginPct!=null?d.profitMarginPct.toFixed(1)+'%':'—');
+        upd('frat-roe-'+p.ticker,d.returnOnEquity!=null?d.returnOnEquity.toFixed(1)+'%':'—');
+        upd('frat-rev-'+p.ticker,d.revenueGrowthYoY!=null?d.revenueGrowthYoY.toFixed(1)+'%':'—');
       }catch(e){}
     });
 
