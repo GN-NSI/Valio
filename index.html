@@ -1782,9 +1782,8 @@ function drawCdChart(pts, price, ticker, pos) {
         var col = window._cdCompareActive[cid];
         var cPts;
         if(cid==='__ptf__'){
-          // Portefeuille : utilise buildPortfolioLine
-          var pfPos = S.enrichedPos.length ? S.enrichedPos : computePositions();
-          var ptfLine = await buildPortfolioLine(pfPos, window._cdCurrentRange||'5y');
+          // Portefeuille : vraie perf reconstruite (TWR) depuis les transactions
+          var ptfLine = await buildPortfolioLine(S.transactions||[], window._cdCurrentRange||'5y');
           if(ptfLine.length>1){
             var ptfBase = ptfLine[0].pct;
             datasets.push({
@@ -3737,53 +3736,73 @@ async function getFriendTransactions(friendId){
 
 // ── Performance portefeuille (positions actuelles × prix historiques) ────────
 // Utilise le coût total comme dénominateur → P&L% cohérent avec la page portefeuille
-async function buildPortfolioLine(positions, range){
-  // Approche "hindsight" : positions actuelles × prix historiques
-  // Comparable aux indices (S&P, Nasdaq) qui sont aussi rebased à 0%
-  var pos=(positions||[]).filter(function(p){return p.quantity>0.0001&&p.ticker;});
-  if(!pos.length) return [];
+async function buildPortfolioLine(transactions, range){
+  // VRAIE perf : reconstruit les positions réelles dans le temps (depuis les transactions)
+  // et calcule un TWR chaîné (neutralise dépôts/achats/ventes). Plus de biais "hindsight".
+  var txns=(transactions||[]).filter(function(t){return t.ticker;})
+    .slice().sort(function(a,b){return new Date(a.transaction_date)-new Date(b.transaction_date);});
+  if(!txns.length) return [];
+  var tickers=[...new Set(txns.map(function(t){return t.ticker;}))];
 
   // Fetch historiques en batch
-  var hists={};
-  var BATCH=4, DELAY=300;
-  for(var i=0;i<pos.length;i+=BATCH){
-    await Promise.all(pos.slice(i,i+BATCH).map(async function(p){
-      hists[p.ticker]=await fetchPriceHistory(p.ticker,range);
+  var hists={}; var BATCH=4, DELAY=300;
+  for(var i=0;i<tickers.length;i+=BATCH){
+    await Promise.all(tickers.slice(i,i+BATCH).map(async function(tk){
+      hists[tk]=await fetchPriceHistory(tk,range);
     }));
-    if(i+BATCH<pos.length) await new Promise(function(r){setTimeout(r,DELAY);});
+    if(i+BATCH<tickers.length) await new Promise(function(r){setTimeout(r,DELAY);});
   }
 
-  // Timestamps communs, dédupliqués et sous-échantillonnés
-  var tsSet={};
-  Object.values(hists).forEach(function(pts){(pts||[]).forEach(function(p){tsSet[p.t]=true;});});
+  // Timestamps communs, à partir de la 1re transaction, sous-échantillonnés
+  var tsSet={}; Object.values(hists).forEach(function(pts){(pts||[]).forEach(function(p){tsSet[p.t]=true;});});
   var timestamps=Object.keys(tsSet).map(Number).sort(function(a,b){return a-b;});
-  if(timestamps.length<3) return [];
+  var firstTx=new Date(txns[0].transaction_date).getTime()/1000;
+  timestamps=timestamps.filter(function(t){return t>=firstTx;});
+  if(timestamps.length<2) return [];
   var step=Math.max(1,Math.floor(timestamps.length/60));
   timestamps=timestamps.filter(function(_,i){return i%step===0||i===timestamps.length-1;});
 
-  // Valeur à chaque timestamp (devise correcte via toEur)
-  var rawValues=timestamps.map(function(t){
-    return pos.reduce(function(sum,p){
-      var pts=(hists[p.ticker]||[]).filter(function(q){return q.t<=t;});
-      if(!pts.length) return sum;
-      var price=pts[pts.length-1].c;
-      var currency=(S.prices[p.ticker]&&S.prices[p.ticker].currency)||'USD';
-      return sum+p.quantity*toEur(price,currency);
-    },0);
-  });
+  function cur(tk){ return (S.prices[tk]&&S.prices[tk].currency)||'USD'; }
+  function priceAt(tk,t){ var pts=(hists[tk]||[]).filter(function(q){return q.t<=t;}); return pts.length?pts[pts.length-1].c:null; }
+  // Valeur de marché des positions réellement détenues à la date t
+  function valueAt(t){
+    var hold={};
+    txns.forEach(function(tx){
+      if(new Date(tx.transaction_date).getTime()/1000>t) return;
+      var ty=(tx.transaction_type||tx.type||'').toLowerCase();
+      hold[tx.ticker]=(hold[tx.ticker]||0)+(ty==='buy'?1:ty==='sell'?-1:0)*(tx.quantity||0);
+    });
+    var v=0;
+    Object.keys(hold).forEach(function(tk){var q=hold[tk]; if(q<=1e-7)return; var pr=priceAt(tk,t); if(pr==null)return; v+=q*toEur(pr,cur(tk));});
+    return v;
+  }
+  // Flux net investi (achats - ventes, à leur valeur de transaction en €) sur (tPrev, t]
+  function netFlow(tPrev,t){
+    var f=0;
+    txns.forEach(function(tx){
+      var tt=new Date(tx.transaction_date).getTime()/1000;
+      if(tt<=tPrev||tt>t) return;
+      var ty=(tx.transaction_type||tx.type||'').toLowerCase();
+      var amt=(tx.quantity||0)*toEur(tx.price||0,tx.currency);
+      if(ty==='buy') f+=amt+toEur(tx.fees||0,tx.currency);
+      else if(ty==='sell') f-=amt;
+    });
+    return f;
+  }
 
-  // Trouver le premier point stable : ≥50% de la valeur finale représentée
-  // (évite les débuts artificiellement bas quand des tickers n'ont pas encore de données)
-  var finalVal=rawValues[rawValues.length-1]||1;
-  var startIdx=rawValues.findIndex(function(v){return v>0&&v>=finalVal*0.5;});
-  if(startIdx<0) startIdx=rawValues.findIndex(function(v){return v>0;});
-  if(startIdx<0||!rawValues[startIdx]) return [];
-
-  // Rebase à 0% au premier point stable — cohérent avec les indices
-  var startVal=rawValues[startIdx];
-  return timestamps.slice(startIdx).map(function(t,i){
-    return {t:t, pct:(rawValues[startIdx+i]/startVal-1)*100};
+  // TWR chaîné : r_sousPériode = (V_fin - flux) / V_début - 1
+  var cum=1, out=[], prevT=null, prevV=null;
+  timestamps.forEach(function(t){
+    var v=valueAt(t);
+    if(prevT==null){ prevT=t; prevV=v; out.push({t:t,pct:0}); return; }
+    if(prevV>0.01){
+      var r=(v-netFlow(prevT,t))/prevV - 1;
+      if(isFinite(r)) cum*=(1+r);
+    }
+    out.push({t:t,pct:(cum-1)*100});
+    prevT=t; prevV=v;
   });
+  return out;
 }
 
 // ── Performance indice
@@ -3895,15 +3914,11 @@ async function refreshBmChart(){
   var lines=await Promise.allSettled(items.map(async function(item){
     if(item.type==='index') return await buildIndexLine(item.symbol,range);
     if(item.type==='portfolio'){
-      // Positions actuelles / coût total → P&L% normalisé dans le temps
-      var pos=S.enrichedPos.filter(function(p){return p.quantity>0;});
-      if(!pos.length) pos=computePositions();
-      return await buildPortfolioLine(pos,range);
+      return await buildPortfolioLine(S.transactions||[], range);
     }
     if(item.type==='friend'){
       var txns=await getFriendTransactions(item.id);
-      var pos=computePositionsFromData([],txns);
-      return await buildPortfolioLine(pos,range);
+      return await buildPortfolioLine(txns||[], range);
     }
     return [];
   }));
