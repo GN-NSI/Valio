@@ -483,6 +483,24 @@ function currSymbol(currency){
     case 'EUR': return '€'; case 'SEK': return 'kr'; case 'KRW': return '₩'; case 'TWD': return 'NT$'; default: return '$';
   }
 }
+// Convertit un montant EUR vers une devise (inverse de toEur) — pour afficher PRU/cours en devise du titre
+function fromEur(eurVal,currency){
+  if(eurVal==null||isNaN(eurVal))return eurVal;
+  switch((currency||'EUR').toUpperCase()){
+    case 'EUR': return eurVal;
+    case 'USD': return eurVal*(S.eurUsd||1.1);
+    case 'SEK': return eurVal*(S.eurSek||11.5);
+    case 'KRW': return eurVal*(S.eurKrw||1500);
+    case 'TWD': return eurVal*(S.eurTwd||35);
+    default:    return eurVal*(S.eurUsd||1.1);
+  }
+}
+// Formate un prix dans sa devise : "147,15 €" ou "$170,00"
+function _fPx(val,curr){
+  if(val==null||isNaN(val))return '—';
+  curr=(curr||'EUR').toUpperCase();
+  return curr==='EUR' ? fN(val,2)+' €' : currSymbol(curr)+fN(val,2);
+}
 
 const manualPrices={};
 let chartMode='positions',chartDrill=[];
@@ -3259,10 +3277,11 @@ async function saveRename(){
 // Calcule les positions depuis transactions brutes (pour amis)
 function computePositionsFromData(accounts, transactions){
   var map={};
-  // Miroir exact de computePositions() : conversion via tx.currency + frais + CMP sur ventes
+  var totalRealized=0;
+  // Miroir exact de computePositions() : conversion via tx.currency + frais + CMP + PV réalisées
   (transactions||[]).slice().sort(function(a,b){return new Date(a.transaction_date)-new Date(b.transaction_date);}).forEach(function(tx){
     var k=tx.ticker; if(!k) return;
-    if(!map[k]) map[k]={ticker:k,quantity:0,totalCostEur:0,buyCurrencies:[]};
+    if(!map[k]) map[k]={ticker:k,quantity:0,totalCostEur:0,realizedPnlEur:0,buyCurrencies:[]};
     var m=map[k];
     var toE=function(v){return toEur(v,tx.currency);};
     var type=(tx.transaction_type||tx.type||'').toLowerCase();
@@ -3274,10 +3293,14 @@ function computePositionsFromData(accounts, transactions){
     } else if(type==='sell'){
       if(m.quantity<=0) return;
       var pru=m.totalCostEur/m.quantity;   // PRU CUMP au moment de la vente
+      var sellEur=toE(tx.price), feesEur=toE(tx.fees||0);
+      var realized=(sellEur-pru)*q-feesEur;
+      m.realizedPnlEur+=realized; totalRealized+=realized;
       m.totalCostEur-=q*pru;
       m.quantity-=q;
     }
   });
+  S.friendRealized=totalRealized; // PV réalisées de l'ami (inclut les titres soldés)
   return Object.values(map).filter(function(p){return p.quantity>0.000001;});
 }
 
@@ -3323,8 +3346,8 @@ function _friendRows(pos){
       '<td style="padding:10px 8px"><div style="font-weight:600;font-size:13px">'+p.ticker+'</div>'+
         (TICKER_SUBSECTOR[p.ticker]?'<div style="font-size:11px;color:var(--muted)">'+TICKER_SUBSECTOR[p.ticker]+'</div>':'')+'</td>'+
       '<td style="padding:10px 8px;text-align:right" class="mono">'+fN(p.quantity,4)+'</td>'+
-      '<td style="padding:10px 8px;text-align:right" class="mono">'+(p.pruEur!=null?fN(p.pruEur,2)+' €':'—')+'</td>'+
-      '<td style="padding:10px 8px;text-align:right" class="mono">'+(p.priceEur!=null?fN(p.priceEur,2)+' €':'—')+'</td>'+
+      '<td style="padding:10px 8px;text-align:right" class="mono">'+_fPx(p.pruNative!=null?p.pruNative:p.pruEur,p.curr)+'</td>'+
+      '<td style="padding:10px 8px;text-align:right" class="mono">'+_fPx(p.priceNative!=null?p.priceNative:p.priceEur,p.curr)+'</td>'+
       '<td style="padding:10px 8px;text-align:right" class="mono">'+(p.valueEur!=null?fE(p.valueEur):'—')+'</td>'+
       '<td style="padding:10px 8px;text-align:right;color:'+eColor+'" class="mono">'+(p.pnlEur!=null?(p.pnlEur>=0?'+':'')+fE(p.pnlEur):'—')+'</td>'+
       '<td style="padding:10px 8px;text-align:right;color:'+pctColor+'" class="mono">'+(p.pnlPct!=null?(p.pnlPct>=0?'+':'')+p.pnlPct.toFixed(1)+'%':'—')+'</td>'+
@@ -3515,12 +3538,18 @@ async function renderFriendPortfolio(friendId, friendName){
         p.pnlPct=p.totalCostEur>0?p.pnlEur/p.totalCostEur*100:null;
         p.pruEur=p.totalCostEur>0?p.totalCostEur/p.quantity:null;
         p.priceEur=pEur;
+        // Affichage en devise du titre : PRU et cours en $ (ou autre), valeur en €
+        p.curr=(px.currency||'EUR').toUpperCase();
+        p.priceNative=px.price;
+        p.pruNative=p.pruEur!=null?fromEur(p.pruEur,p.curr):null;
       }
     });
     var totalVal=pos.reduce(function(s,p){return s+(p.valueEur||0);},0);
     var totalCost=pos.reduce(function(s,p){return s+(p.totalCostEur||0);},0);
     var totalPnlEur=totalVal-totalCost;
     var totalPnlPct=totalCost>0?(totalPnlEur/totalCost)*100:null;
+    var totalRealized=S.friendRealized||0;
+    var perfPct=totalCost>0?((totalPnlEur+totalRealized)/totalCost)*100:null; // latent + réalisé (comme la vue perso)
     var sg=function(v){return v>=0?'+':'-';};
 
     // ── KPI cards ──
@@ -3528,9 +3557,9 @@ async function renderFriendPortfolio(friendId, friendName){
       ['<div class="kpi-card"><div class="kpi-label">Valeur totale</div><div class="kpi-value">'+fE(totalVal)+'</div><div class="kpi-sub">'+pos.length+' positions</div></div>',
        '<div class="kpi-card"><div class="kpi-label">Investi</div><div class="kpi-value">'+fE(totalCost)+'</div><div class="kpi-sub">Coût total</div></div>',
        '<div class="kpi-card"><div class="kpi-label">Plus-value latente</div><div class="kpi-value"><span class="'+(totalPnlEur>=0?'c-green':'c-red')+'">'+sg(totalPnlEur)+fE(Math.abs(totalPnlEur))+'</span></div>'+
-         '<div class="kpi-sub"><span class="badge '+(totalPnlEur>=0?'badge-green':'badge-red')+'">'+(totalPnlPct!=null?(totalPnlPct>=0?'+':'')+totalPnlPct.toFixed(2)+'%':'—')+'</span></div></div>',
-       '<div class="kpi-card"><div class="kpi-label">Performance</div><div class="kpi-value"><span class="'+(totalPnlEur>=0?'c-green':'c-red')+'" style="font-size:26px">'+(totalPnlPct!=null?(totalPnlPct>=0?'+':'')+totalPnlPct.toFixed(2)+'%':'—')+'</span></div>'+
-         '<div class="kpi-sub">vs prix de revient moyen</div></div>'
+         '<div class="kpi-sub"><span class="badge '+(totalPnlEur>=0?'badge-green':'badge-red')+'">'+(totalPnlPct!=null?(totalPnlPct>=0?'+':'')+totalPnlPct.toFixed(2)+'%':'—')+'</span>'+(totalRealized?' · réalisé '+(totalRealized>=0?'+':'')+fE(totalRealized):'')+'</div></div>',
+       '<div class="kpi-card"><div class="kpi-label">Performance</div><div class="kpi-value"><span class="'+(perfPct>=0?'c-green':'c-red')+'" style="font-size:26px">'+(perfPct!=null?(perfPct>=0?'+':'')+perfPct.toFixed(2)+'%':'—')+'</span></div>'+
+         '<div class="kpi-sub">latent + réalisé vs investi</div></div>'
       ].join('')+'</div>';
 
     // ── Tabs ──
