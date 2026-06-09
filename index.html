@@ -161,7 +161,6 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
         <div class="nav-item" id="nav-ratios" onclick="navigate('ratios')"><span class="nav-icon">📈</span><span>Ratios</span></div>
         <!-- Screener retiré: accès via clic sur entreprise dans Ratios -->
         <div class="nav-item" id="nav-watchlist" onclick="navigate('watchlist')"><span class="nav-icon">⭐</span><span>Watchlist</span></div>
-        <div class="nav-item disabled"><span class="nav-icon">📓</span><span>Journal</span><span class="nav-soon">BIENTÔT</span></div>
         <div class="nav-section">Social</div>
         <div class="nav-item" id="nav-amis" onclick="navigate('amis')"><span class="nav-icon">👥</span><span>Amis</span></div>
         <div class="nav-item" id="nav-benchmark" onclick="navigate('benchmark')"><span class="nav-icon">📊</span><span>Benchmark</span></div>
@@ -2809,7 +2808,12 @@ var _depFilter=null; // filtre compte (null = tous)
 async function renderDeposits(){
   var pg=document.getElementById('page');
   pg.innerHTML='<div style="text-align:center;padding:60px"><div class="spinner"></div></div>';
-  var deposits=await dbGet('deposits','order=deposit_date.asc&select=*,accounts(name)')||[];
+  // Filtre explicite sur les comptes du user (défense en profondeur, ne dépend pas que du RLS)
+  var myAccIds=(S.accounts||[]).map(function(a){return a.id;});
+  var deposits=[];
+  if(myAccIds.length){
+    deposits=await dbGet('deposits','account_id=in.('+myAccIds.join(',')+')&order=deposit_date.asc&select=*,accounts(name)')||[];
+  }
   _renderDepositsUI(deposits);
 }
 
@@ -3123,6 +3127,14 @@ async function editCashBalance(acctId, current, acctName){
 }
 
 
+// ── Visibilité : 'public' | 'perfs' | 'private' (Modif : 3 modes) ──
+function _effVis(p){
+  if(!p) return 'public';
+  if(p.visibility) return p.visibility;       // nouveau champ
+  if(p.is_public===false) return 'private';   // rétro-compat
+  return 'public';
+}
+
 // ── Chargement des amis ───────────────────────────────────────────────────
 async function loadFriends(force){
   // Mode ouvert : tous les utilisateurs inscrits sont automatiquement visibles entre eux
@@ -3132,9 +3144,9 @@ async function loadFriends(force){
     // Récupère tous les profils sauf le sien
     var profiles = await dbGet('user_profiles','id=neq.'+u.id+'&order=display_name.asc') || [];
     _friendsCache = profiles
-      .filter(function(p){ return p.is_public !== false; }) // Modif 4 : masque les profils privés (null/true = public)
+      .filter(function(p){ return _effVis(p)!=='private'; }) // incognito masqué
       .map(function(p){
-        return {id:p.id, name:p.display_name||p.username||'Utilisateur'};
+        return {id:p.id, name:p.display_name||p.username||'Utilisateur', vis:_effVis(p)};
       });
     return _friendsCache;
   } catch(e){ showToast('Erreur chargement utilisateurs: '+e.message); return []; }
@@ -3151,32 +3163,29 @@ async function generateInvite(){
   } catch(e){ showToast('❌ '+e.message); }
 }
 
-// ── Mode privé (Modif 4) ──────────────────────────────────────────────────
-async function _refreshPrivacyBtn(){
+// ── Confidentialité 3 modes (Modif) ───────────────────────────────────────
+async function _refreshPrivacySelect(){
   var u=getUser(); if(!u) return;
-  var btn=document.getElementById('privacy-btn'); if(!btn) return;
+  var sel=document.getElementById('privacy-sel'); if(!sel) return;
   try{
     var p=await dbGet('user_profiles','id=eq.'+u.id);
-    var isPub=!(p&&p[0]&&p[0].is_public===false);
-    btn.dataset.pub=isPub?'1':'0';
-    btn.innerHTML=isPub?'🌐 Public':'🔒 Privé';
-    btn.title=isPub
-      ? 'Ton portefeuille est visible par les autres utilisateurs. Clique pour le passer en privé.'
-      : 'Ton portefeuille est masqué pour les autres. Clique pour le repasser en public.';
+    sel.value=_effVis(p&&p[0]);
   }catch(e){}
 }
-window.togglePrivacy=async function(){
+window.setVisibility=async function(val){
   var u=getUser(); if(!u) return;
-  var btn=document.getElementById('privacy-btn'); if(!btn) return;
-  var newPub = btn.dataset.pub==='0'; // actuellement privé → repasse public
-  btn.disabled=true;
   try{
-    await dbPatch('user_profiles','id=eq.'+u.id,{is_public:newPub});
+    await dbPatch('user_profiles','id=eq.'+u.id,{visibility:val});
     _friendsCache=null;
-    showToast(newPub?'🌐 Profil rendu public':'🔒 Profil rendu privé — tes amis ne te voient plus');
-    await _refreshPrivacyBtn();
-  }catch(e){ showToast('❌ '+e.message); }
-  btn.disabled=false;
+    var msg=val==='public'?'🌐 Profil public — perfs et montants visibles'
+      :val==='perfs'?'📊 Mode « Perfs seules » — montants en € masqués'
+      :'🕶️ Incognito — tu n\u0027apparais plus chez tes amis';
+    showToast(msg);
+  }catch(e){
+    var m=(e&&e.message)||String(e);
+    if(/visibility|column|PGRST|does not exist/i.test(m)) m='Colonne « visibility » manquante — lance d\u0027abord le SQL fourni.';
+    showToast('❌ '+m);
+  }
 };
 
 // ── Page Amis ─────────────────────────────────────────────────────────────
@@ -3186,14 +3195,18 @@ async function renderAmis(){
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">'+
     '<div><h2 style="font-size:18px;font-weight:700">Mes amis</h2>'+
     '<p style="color:var(--muted);font-size:13px;margin-top:3px">Portefeuilles partagés entre amis</p></div>'+
-    '<div style="display:flex;gap:8px">'+
-    '<button class="btn btn-ghost btn-sm" id="privacy-btn" onclick="togglePrivacy()">🌐 …</button>'+
+    '<div style="display:flex;gap:8px;align-items:center">'+
+    '<select id="privacy-sel" onchange="setVisibility(this.value)" class="form-input" style="padding:6px 10px;font-size:13px" title="Qui voit ton portefeuille">'+
+      '<option value="public">🌐 Public</option>'+
+      '<option value="perfs">📊 Perfs seules (€ masqués)</option>'+
+      '<option value="private">🕶️ Incognito</option>'+
+    '</select>'+
     '<button class="btn btn-ghost btn-sm" onclick="openRenameModal()">✏️ Mon pseudo</button>'+
     '<button class="btn btn-primary" onclick="generateInvite()">🔗 Inviter un ami</button>'+
     '</div></div>'+
     '<div id="friends-list"><div style="text-align:center;padding:40px"><div class="spinner"></div></div></div>';
 
-  _refreshPrivacyBtn();
+  _refreshPrivacySelect();
   var friends = await loadFriends(true);
   var el = document.getElementById('friends-list'); if(!el) return;
 
@@ -3219,7 +3232,7 @@ async function renderAmis(){
       '<div style="flex:1"><div style="font-weight:600;font-size:15px">'+f.name+'</div><div style="font-size:12px;color:var(--muted)" id="f-stat-'+fi+'">Chargement…</div></div>'+
       '<div style="text-align:right"><div style="font-size:20px;font-weight:700" id="f-pnl-'+fi+'">—</div><div style="font-size:11px;color:var(--muted)">P&L global</div></div>'+
       '<div style="color:var(--muted);font-size:18px">›</div>';
-    card.onclick=(function(fid,fname){ return function(){ renderFriendPortfolio(fid,fname); }; })(f.id,f.name);
+    card.onclick=(function(fid,fname,fvis){ return function(){ renderFriendPortfolio(fid,fname,fvis); }; })(f.id,f.name,f.vis);
     cards.appendChild(card);
 
     // Load their stats async
@@ -3440,7 +3453,7 @@ function renderFriendChart(){
     data:{labels:d.labels,datasets:[{data:d.values,backgroundColor:d.colors,borderColor:'rgba(0,0,0,.15)',borderWidth:2,hoverOffset:6}]},
     options:{cutout:'62%',responsive:true,maintainAspectRatio:false,
       onClick:function(_,els){if(els.length)_friendDrill(d.labels[els[0].index]);},
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:function(ctx){return ctx.label+': '+fE(ctx.raw)+' ('+((ctx.raw/total*100).toFixed(1))+'%)';}}}}}
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:function(ctx){var pp=(ctx.raw/total*100).toFixed(1);return window._friendMaskAmounts?(ctx.label+': '+pp+'%'):(ctx.label+': '+fE(ctx.raw)+' ('+pp+'%)');}}}}}
   });
   cv.style.cursor=d.clickable?'pointer':'default';
   if(leg){
@@ -3501,7 +3514,31 @@ async function loadFriendRatios(){
   if(btn)btn.disabled=false;
 }
 
-async function renderFriendPortfolio(friendId, friendName){
+function _friendHeadMasked(){
+  return '<tr style="border-bottom:1px solid var(--border)">'+
+    '<th style="padding:8px;text-align:left;font-size:11px;color:var(--muted)">TITRE</th>'+
+    '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">POIDS</th>'+
+    '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">P&L %</th>'+
+  '</tr>';
+}
+function _friendRowsMasked(pos,totalVal){
+  return pos.slice().sort(function(a,b){return (b.valueEur||0)-(a.valueEur||0);}).map(function(p){
+    var w=totalVal>0?((p.valueEur||0)/totalVal*100):0;
+    var pctColor=p.pnlPct!=null&&p.pnlPct>=0?'var(--green)':'var(--red)';
+    return '<tr style="border-bottom:1px solid var(--border2)">'+
+      '<td style="padding:10px 8px"><div style="font-weight:600;font-size:13px">'+p.ticker+'</div>'+
+        (TICKER_SUBSECTOR[p.ticker]?'<div style="font-size:11px;color:var(--muted)">'+TICKER_SUBSECTOR[p.ticker]+'</div>':'')+'</td>'+
+      '<td style="padding:10px 8px;text-align:right" class="mono">'+w.toFixed(1)+'%</td>'+
+      '<td style="padding:10px 8px;text-align:right;color:'+pctColor+'" class="mono">'+(p.pnlPct!=null?(p.pnlPct>=0?'+':'')+p.pnlPct.toFixed(1)+'%':'—')+'</td>'+
+      '</tr>';
+  }).join('');
+}
+
+async function renderFriendPortfolio(friendId, friendName, friendVis){
+  // Détecte le mode du portefeuille consulté : 'perfs' → on masque tous les montants en €
+  var mask=(friendVis==='perfs');
+  if(!friendVis){ try{var _pr=await dbGet('user_profiles','id=eq.'+friendId); mask=_effVis(_pr&&_pr[0])==='perfs';}catch(e){} }
+  window._friendMaskAmounts=mask;
   var pg=document.getElementById('page');
   pg.innerHTML='<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">'+
     '<button class="btn btn-ghost btn-sm" onclick="navigate(\'amis\')">← Retour</button>'+
@@ -3553,14 +3590,24 @@ async function renderFriendPortfolio(friendId, friendName){
     var sg=function(v){return v>=0?'+':'-';};
 
     // ── KPI cards ──
-    var kpis='<div class="kpi-grid" style="margin-bottom:22px">'+
-      ['<div class="kpi-card"><div class="kpi-label">Valeur totale</div><div class="kpi-value">'+fE(totalVal)+'</div><div class="kpi-sub">'+pos.length+' positions</div></div>',
-       '<div class="kpi-card"><div class="kpi-label">Investi</div><div class="kpi-value">'+fE(totalCost)+'</div><div class="kpi-sub">Coût total</div></div>',
-       '<div class="kpi-card"><div class="kpi-label">Plus-value latente</div><div class="kpi-value"><span class="'+(totalPnlEur>=0?'c-green':'c-red')+'">'+sg(totalPnlEur)+fE(Math.abs(totalPnlEur))+'</span></div>'+
-         '<div class="kpi-sub"><span class="badge '+(totalPnlEur>=0?'badge-green':'badge-red')+'">'+(totalPnlPct!=null?(totalPnlPct>=0?'+':'')+totalPnlPct.toFixed(2)+'%':'—')+'</span>'+(totalRealized?' · réalisé '+(totalRealized>=0?'+':'')+fE(totalRealized):'')+'</div></div>',
-       '<div class="kpi-card"><div class="kpi-label">Performance</div><div class="kpi-value"><span class="'+(perfPct>=0?'c-green':'c-red')+'" style="font-size:26px">'+(perfPct!=null?(perfPct>=0?'+':'')+perfPct.toFixed(2)+'%':'—')+'</span></div>'+
-         '<div class="kpi-sub">latent + réalisé vs investi</div></div>'
-      ].join('')+'</div>';
+    var kpis;
+    if(mask){
+      kpis='<div class="kpi-grid" style="margin-bottom:22px">'+
+        ['<div class="kpi-card"><div class="kpi-label">Positions</div><div class="kpi-value">'+pos.length+'</div><div class="kpi-sub">titres</div></div>',
+         '<div class="kpi-card"><div class="kpi-label">Montants</div><div class="kpi-value" style="font-size:20px;color:var(--muted)">🕶️ masqués</div><div class="kpi-sub">mode « perfs seules »</div></div>',
+         '<div class="kpi-card"><div class="kpi-label">Plus-value latente</div><div class="kpi-value"><span class="'+(totalPnlEur>=0?'c-green':'c-red')+'" style="font-size:26px">'+(totalPnlPct!=null?(totalPnlPct>=0?'+':'')+totalPnlPct.toFixed(2)+'%':'—')+'</span></div><div class="kpi-sub">% seulement</div></div>',
+         '<div class="kpi-card"><div class="kpi-label">Performance</div><div class="kpi-value"><span class="'+(perfPct>=0?'c-green':'c-red')+'" style="font-size:26px">'+(perfPct!=null?(perfPct>=0?'+':'')+perfPct.toFixed(2)+'%':'—')+'</span></div><div class="kpi-sub">latent + réalisé</div></div>'
+        ].join('')+'</div>';
+    } else {
+      kpis='<div class="kpi-grid" style="margin-bottom:22px">'+
+        ['<div class="kpi-card"><div class="kpi-label">Valeur totale</div><div class="kpi-value">'+fE(totalVal)+'</div><div class="kpi-sub">'+pos.length+' positions</div></div>',
+         '<div class="kpi-card"><div class="kpi-label">Investi</div><div class="kpi-value">'+fE(totalCost)+'</div><div class="kpi-sub">Coût total</div></div>',
+         '<div class="kpi-card"><div class="kpi-label">Plus-value latente</div><div class="kpi-value"><span class="'+(totalPnlEur>=0?'c-green':'c-red')+'">'+sg(totalPnlEur)+fE(Math.abs(totalPnlEur))+'</span></div>'+
+           '<div class="kpi-sub"><span class="badge '+(totalPnlEur>=0?'badge-green':'badge-red')+'">'+(totalPnlPct!=null?(totalPnlPct>=0?'+':'')+totalPnlPct.toFixed(2)+'%':'—')+'</span>'+(totalRealized?' · réalisé '+(totalRealized>=0?'+':'')+fE(totalRealized):'')+'</div></div>',
+         '<div class="kpi-card"><div class="kpi-label">Performance</div><div class="kpi-value"><span class="'+(perfPct>=0?'c-green':'c-red')+'" style="font-size:26px">'+(perfPct!=null?(perfPct>=0?'+':'')+perfPct.toFixed(2)+'%':'—')+'</span></div>'+
+           '<div class="kpi-sub">latent + réalisé vs investi</div></div>'
+        ].join('')+'</div>';
+    }
 
     // ── Tabs ──
     var tabs='<div style="display:flex;gap:4px;margin-bottom:18px;border-bottom:1px solid var(--border);padding-bottom:0">'+
@@ -3601,10 +3648,13 @@ async function renderFriendPortfolio(friendId, friendName){
           '</div>'+
         '</div>'+
       '</div>'+
-      '<div class="card"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'+
-        '<thead id="friend-pos-thead">'+_friendHead()+'</thead>'+
-        '<tbody id="friend-pos-body">'+_friendRows(_sortFriendPos(pos))+'</tbody>'+
-      '</table></div></div>'+
+      (mask
+        ? '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px">🕶️ '+friendName+' partage ses performances mais masque les montants en €</div><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'+
+            '<thead>'+_friendHeadMasked()+'</thead><tbody>'+_friendRowsMasked(pos,totalVal)+'</tbody></table></div></div>'
+        : '<div class="card"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'+
+            '<thead id="friend-pos-thead">'+_friendHead()+'</thead>'+
+            '<tbody id="friend-pos-body">'+_friendRows(_sortFriendPos(pos))+'</tbody>'+
+          '</table></div></div>')+
       '</div>';
 
     // ── Tab Ratios ──
