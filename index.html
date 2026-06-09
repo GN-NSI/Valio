@@ -3259,13 +3259,22 @@ async function saveRename(){
 // Calcule les positions depuis transactions brutes (pour amis)
 function computePositionsFromData(accounts, transactions){
   var map={};
+  // transactions triées par date (getFriendTransactions: order=transaction_date)
   (transactions||[]).forEach(function(tx){
     var k=tx.ticker; if(!k) return;
     if(!map[k]) map[k]={ticker:k,quantity:0,totalCostEur:0};
+    var m=map[k];
     var txType=(tx.transaction_type||tx.type||'').toLowerCase();
-    var sign=txType==='buy'?1:txType==='sell'?-1:0;
-    map[k].quantity+=sign*(tx.quantity||0);
-    if(txType==='buy') map[k].totalCostEur+=(tx.price_eur||tx.price||0)*(tx.quantity||0);
+    var q=tx.quantity||0;
+    var pEur=(tx.price_eur!=null?tx.price_eur:tx.price)||0;
+    if(txType==='buy'){
+      m.quantity+=q; m.totalCostEur+=pEur*q;
+    } else if(txType==='sell'){
+      // Méthode CMP : on retire le coût MOYEN des titres vendus (comme la vue perso)
+      var avg=m.quantity>0?m.totalCostEur/m.quantity:0;
+      m.quantity-=q; m.totalCostEur-=avg*q;
+      if(m.quantity<0.0001){ m.quantity=0; m.totalCostEur=0; }
+    }
   });
   return Object.values(map).filter(function(p){return p.quantity>0.0001;});
 }
@@ -3498,7 +3507,7 @@ async function renderFriendPortfolio(friendId, friendName){
     pos.forEach(function(p){
       var px=S.prices[p.ticker];
       if(px){
-        var pEur=px.currency==='USD'?px.price/(S.eurUsd||1.1):px.price;
+        var pEur=toEur(px.price,px.currency); // toutes devises (USD, KRW, SEK, TWD…)
         p.valueEur=p.quantity*pEur;
         p.pnlEur=p.valueEur-(p.totalCostEur||0);
         p.pnlPct=p.totalCostEur>0?p.pnlEur/p.totalCostEur*100:null;
