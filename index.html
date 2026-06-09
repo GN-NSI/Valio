@@ -1331,6 +1331,200 @@ async function loadScreenerRatios(){
 // ═══ PAGE DÉTAIL ENTREPRISE ═══
 var _prevPage = 'ratios';
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ANALYSE MOAT & LEVIER IA (Modif 5) — saisie manuelle, stockée dans Supabase
+// ═══════════════════════════════════════════════════════════════════════════
+var MOAT_CRIT=[
+  {k:'network',  label:'Effet de réseau',     w:5, hint:'La valeur croît avec chaque nouvel utilisateur'},
+  {k:'switching',label:'Coûts de transfert',  w:5, hint:'Changer de fournisseur est coûteux/douloureux'},
+  {k:'intangibles',label:'Actifs incorporels',w:4, hint:'Marque forte, brevets, licences réglementaires'},
+  {k:'cost',     label:'Avantage de coût',    w:4, hint:'Coûts structurellement plus bas que les rivaux'},
+  {k:'scale',    label:'Échelle efficiente',  w:3, hint:'Marché ne nourrissant que 1-2 acteurs rentables'},
+  {k:'process',  label:'Process power',       w:2, hint:'Savoir-faire opérationnel non copiable'},
+  {k:'pricing',  label:'Pricing power',       w:2, hint:'Augmente ses prix sans perdre de clients'},
+]; // somme des poids = 25 → ×4 = 100
+var AI_CRIT=[
+  {k:'data',   label:'Données propriétaires / rares',           w:5, hint:'Jeu de données unique exploitable par l\u0027IA'},
+  {k:'whopays',label:'« Qui paye ? » (pricing / coûts / captivité)',w:5, hint:'L\u0027IA fait payer plus, baisse les coûts ou rend captif — pas un coût défensif'},
+  {k:'process',label:'Process répétitifs, fréquents, mesurables',w:4, hint:'Complexes mais pas trop, automatisables'},
+  {k:'mgmt',   label:'Management repense le cœur de métier',     w:4, hint:'Réorganisation réelle des workflows, pas de la com\u0027'},
+  {k:'proof',  label:'Preuve chiffrée ET déployée',              w:4, hint:'Métriques concrètes en production (pas un pilote)'},
+  {k:'reach',  label:'Large base clients / déploiement échelle', w:3, hint:'Capacité à déployer vite et largement'},
+]; // somme = 25 → ×4 = 100
+var AI_FLAGS=[
+  {k:'hype',    label:'Beaucoup de blabla IA, zéro métrique mesurable'},
+  {k:'costonly',label:'IA surtout un coût, marges qui stagnent'},
+  {k:'pilots',  label:'Beaucoup de pilotes, peu de déploiement'},
+  {k:'baddata', label:'Données mauvaises / dispersées'},
+]; // chaque signal présent = -5, plancher 0
+var SCALE_LABELS=['Absent','Faible','Moyen','Fort','Très fort'];
+
+function _moatScore(m){ var s=0; MOAT_CRIT.forEach(function(c){s+=(+(m&&m[c.k])||0)*c.w;}); return s; }
+function _aiScore(a,flags){ var s=0; AI_CRIT.forEach(function(c){s+=(+(a&&a[c.k])||0)*c.w;}); var pen=0; if(flags)AI_FLAGS.forEach(function(f){if(flags[f.k])pen+=5;}); return Math.max(0,s-pen); }
+function _tier(s){ return s>=70?'Large':s>=40?'Étroit':'Faible'; }
+function _scoreColor(s){ return s>=70?'var(--green)':s>=40?'var(--yellow)':'var(--red)'; }
+function _trendArrow(t){ return t==='up'?'<span style="color:var(--green)" title="En expansion">↗</span>':t==='down'?'<span style="color:var(--red)" title="En érosion">↘</span>':'<span style="color:var(--muted)" title="Stable">→</span>'; }
+function _esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+async function loadAnalysis(ticker){
+  var u=getUser(); if(!u) return null;
+  try{ var rows=await dbGet('company_analysis','user_id=eq.'+u.id+'&ticker=eq.'+encodeURIComponent(ticker)); return (rows&&rows[0])||null; }
+  catch(e){ return null; } // table absente → null (pas de crash)
+}
+async function saveAnalysisRow(ticker,data){
+  var u=getUser(); if(!u) throw new Error('Non connecté');
+  await rest('/rest/v1/company_analysis?on_conflict=user_id,ticker',{
+    method:'POST',
+    headers:{Prefer:'resolution=merge-duplicates,return=representation'},
+    body:JSON.stringify({user_id:u.id,ticker:ticker,data:data,updated_at:new Date().toISOString()})
+  });
+}
+
+function _critBars(crits,vals){
+  return crits.map(function(c){
+    var v=(vals&&vals[c.k])||0; var col=v>=3?'var(--green)':v>=2?'var(--yellow)':v>=1?'#f97316':'var(--muted2)';
+    return '<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px">'+
+      '<span style="flex:1;color:var(--muted)">'+c.label+'</span>'+
+      '<div style="width:60px;height:5px;border-radius:3px;background:var(--border2);overflow:hidden"><div style="height:100%;width:'+(v/4*100)+'%;background:'+col+'"></div></div>'+
+      '<span class="mono" style="width:14px;text-align:right;color:'+col+'">'+v+'</span></div>';
+  }).join('');
+}
+
+async function renderAnalysisCard(ticker,name){
+  var el=document.getElementById('cd-analysis-section'); if(!el) return;
+  window._cdAnaTicker=ticker; window._cdAnaName=name;
+  el.innerHTML='<div class="card" style="padding:20px"><div class="spinner"></div></div>';
+  var row=await loadAnalysis(ticker);
+  var data=(row&&row.data)||null;
+  window._cdAnaData=data;
+
+  if(!data){
+    el.innerHTML='<div class="card" style="padding:20px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">'+
+      '<div><div style="font-size:15px;font-weight:700">🏰 Analyse — MOAT &amp; Levier IA</div>'+
+      '<div style="font-size:12px;color:var(--muted);margin-top:2px">Pas encore d\u0027analyse pour '+ticker+'. Note le business à la main.</div></div>'+
+      '<button class="btn btn-primary btn-sm" onclick="editAnalysis()">+ Analyser</button></div>';
+    return;
+  }
+
+  var ms=_moatScore(data.moat), as=_aiScore(data.ai,data.ai_flags);
+  var activeFlags=AI_FLAGS.filter(function(f){return data.ai_flags&&data.ai_flags[f.k];});
+  var flagChips=activeFlags.length?('<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">'+activeFlags.map(function(f){
+    return '<span style="font-size:10px;background:rgba(239,68,68,.12);color:var(--red);border:1px solid rgba(239,68,68,.25);border-radius:5px;padding:2px 6px">−5 '+f.label+'</span>';}).join('')+'</div>'):'';
+  var rep=data.reports_url&&/^https?:\/\//.test(data.reports_url)
+    ? '<a href="'+_esc(data.reports_url)+'" target="_blank" rel="noopener" class="btn btn-ghost btn-sm" style="text-decoration:none">📄 Rapports</a>' : '';
+
+  el.innerHTML='<div class="card" style="padding:20px">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px">'+
+      '<div style="font-size:15px;font-weight:700">🏰 Analyse — MOAT &amp; Levier IA</div>'+
+      '<div style="display:flex;gap:8px">'+rep+'<button class="btn btn-ghost btn-sm" onclick="editAnalysis()">✏️ Éditer</button></div>'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px">'+
+      '<div class="panel-card">'+
+        '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">MOAT économique</div>'+
+        '<div style="display:flex;align-items:baseline;gap:10px;margin:6px 0 12px">'+
+          '<span style="font-size:34px;font-weight:800;color:'+_scoreColor(ms)+'">'+ms+'</span>'+
+          '<span style="color:var(--muted)">/100</span> <span style="font-size:22px">'+_trendArrow(data.moat_trend)+'</span>'+
+          '<span style="font-size:12px;color:var(--muted)">'+_tier(ms)+'</span></div>'+
+        _critBars(MOAT_CRIT,data.moat)+
+        (data.moat_note?'<div style="font-size:12px;color:var(--muted);margin-top:10px;padding-top:8px;border-top:1px solid var(--border2);white-space:pre-wrap">'+_esc(data.moat_note)+'</div>':'')+
+      '</div>'+
+      '<div class="panel-card">'+
+        '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Levier de croissance IA</div>'+
+        '<div style="display:flex;align-items:baseline;gap:10px;margin:6px 0 12px">'+
+          '<span style="font-size:34px;font-weight:800;color:'+_scoreColor(as)+'">'+as+'</span>'+
+          '<span style="color:var(--muted)">/100</span> <span style="font-size:22px">'+_trendArrow(data.ai_trend)+'</span></div>'+
+        _critBars(AI_CRIT,data.ai)+
+        flagChips+
+        (data.ai_note?'<div style="font-size:12px;color:var(--muted);margin-top:10px;padding-top:8px;border-top:1px solid var(--border2);white-space:pre-wrap">'+_esc(data.ai_note)+'</div>':'')+
+      '</div>'+
+    '</div>'+
+    (row.updated_at?'<div style="font-size:10px;color:var(--muted2);margin-top:12px">Mis à jour le '+new Date(row.updated_at).toLocaleDateString('fr-FR')+'</div>':'')+
+  '</div>';
+}
+
+function _critSelect(prefix,c,val){
+  return '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border2)">'+
+    '<div style="flex:1"><div style="font-size:13px;font-weight:600">'+c.label+'</div>'+
+      (c.hint?'<div style="font-size:11px;color:var(--muted)">'+c.hint+'</div>':'')+'</div>'+
+    '<select id="'+prefix+'-'+c.k+'" onchange="_recalcAna()" class="form-input" style="width:120px;flex-shrink:0;padding:6px 8px">'+
+      [0,1,2,3,4].map(function(n){return '<option value="'+n+'"'+((+val===n)?' selected':'')+'>'+n+' · '+SCALE_LABELS[n]+'</option>';}).join('')+
+    '</select></div>';
+}
+function _trendSelect(id,val){
+  var opts=[['up','↗ En expansion'],['flat','→ Stable'],['down','↘ En érosion']];
+  return '<select id="'+id+'" class="form-input" style="padding:6px 8px;width:160px">'+
+    opts.map(function(o){return '<option value="'+o[0]+'"'+((val||'flat')===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>';
+}
+
+window.editAnalysis=function(){
+  var ticker=window._cdAnaTicker, name=window._cdAnaName||ticker;
+  var d=window._cdAnaData||{};
+  var m=d.moat||{}, a=d.ai||{}, fl=d.ai_flags||{};
+  var h='<div class="modal-hd"><h2>Analyse — '+name+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div>'+
+    '<div style="font-size:12px;color:var(--muted);margin-bottom:14px">Note chaque critère de 0 (absent) à 4 (très fort). Les totaux se calculent automatiquement.</div>'+
+
+    // MOAT
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
+      '<div class="stats-section-title" style="margin:0;border:none">🏰 MOAT économique</div>'+
+      '<div style="font-weight:800;font-size:18px" id="moat-total">—</div></div>'+
+    MOAT_CRIT.map(function(c){return _critSelect('moat',c,m[c.k]);}).join('')+
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0">'+
+      '<span style="font-size:12px;color:var(--muted)">Tendance du moat</span>'+_trendSelect('moat-trend',d.moat_trend)+'</div>'+
+    '<textarea id="moat-note" class="form-input" rows="2" placeholder="Justification / notes MOAT (optionnel)" style="width:100%;resize:vertical">'+_esc(d.moat_note||'')+'</textarea>'+
+
+    // IA
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin:22px 0 6px">'+
+      '<div class="stats-section-title" style="margin:0;border:none">🤖 Levier de croissance IA</div>'+
+      '<div style="font-weight:800;font-size:18px" id="ai-total">—</div></div>'+
+    AI_CRIT.map(function(c){return _critSelect('ai',c,a[c.k]);}).join('')+
+    '<div style="font-size:11px;color:var(--muted);margin:10px 0 4px">Signaux d\u0027alerte (chacun −5 pts) :</div>'+
+    AI_FLAGS.map(function(f){return '<label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;padding:3px 0;cursor:pointer"><input type="checkbox" id="aiflag-'+f.k+'" '+(fl[f.k]?'checked':'')+' onchange="_recalcAna()"> <span>'+f.label+'</span></label>';}).join('')+
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0">'+
+      '<span style="font-size:12px;color:var(--muted)">Tendance du levier IA</span>'+_trendSelect('ai-trend',d.ai_trend)+'</div>'+
+    '<textarea id="ai-note" class="form-input" rows="2" placeholder="Justification / preuves chiffrées IA (optionnel)" style="width:100%;resize:vertical">'+_esc(d.ai_note||'')+'</textarea>'+
+
+    // Lien rapports
+    '<div class="form-group" style="margin:18px 0 8px"><label class="form-label">📄 Lien vers les rapports financiers (Investor Relations)</label>'+
+      '<input id="ana-reports" class="form-input" placeholder="https://..." value="'+_esc(d.reports_url||'')+'"></div>'+
+
+    '<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button>'+
+    '<button class="btn btn-primary" onclick="saveAnalysisForm()">Enregistrer</button></div>';
+  showModal(h);
+  _recalcAna();
+};
+
+window._recalcAna=function(){
+  var m={},a={},fl={};
+  MOAT_CRIT.forEach(function(c){var e=document.getElementById('moat-'+c.k);m[c.k]=e?+e.value:0;});
+  AI_CRIT.forEach(function(c){var e=document.getElementById('ai-'+c.k);a[c.k]=e?+e.value:0;});
+  AI_FLAGS.forEach(function(f){var e=document.getElementById('aiflag-'+f.k);fl[f.k]=e?e.checked:false;});
+  var ms=_moatScore(m), as=_aiScore(a,fl);
+  var mt=document.getElementById('moat-total'); if(mt){mt.textContent=ms+' /100'; mt.style.color=_scoreColor(ms);}
+  var at=document.getElementById('ai-total'); if(at){at.textContent=as+' /100'; at.style.color=_scoreColor(as);}
+};
+
+window.saveAnalysisForm=async function(){
+  var ticker=window._cdAnaTicker, name=window._cdAnaName||ticker;
+  var m={},a={},fl={};
+  MOAT_CRIT.forEach(function(c){m[c.k]=+document.getElementById('moat-'+c.k).value;});
+  AI_CRIT.forEach(function(c){a[c.k]=+document.getElementById('ai-'+c.k).value;});
+  AI_FLAGS.forEach(function(f){fl[f.k]=document.getElementById('aiflag-'+f.k).checked;});
+  var data={
+    moat:m, moat_trend:document.getElementById('moat-trend').value, moat_note:document.getElementById('moat-note').value.trim(),
+    ai:a, ai_flags:fl, ai_trend:document.getElementById('ai-trend').value, ai_note:document.getElementById('ai-note').value.trim(),
+    reports_url:document.getElementById('ana-reports').value.trim()
+  };
+  try{
+    await saveAnalysisRow(ticker,data);
+    closeModal(); showToast('✅ Analyse enregistrée');
+    renderAnalysisCard(ticker,name);
+  }catch(e){
+    var msg=(e&&e.message)||String(e);
+    if(/company_analysis|relation|does not exist|404|PGRST/i.test(msg)) msg='Table « company_analysis » introuvable — lance d\u0027abord le SQL fourni.';
+    showToast('❌ '+msg);
+  }
+};
+
 function openCompanyDetail(ticker, name) {
   _prevPage = S.page || 'ratios';
   S.page = 'company';
@@ -1479,6 +1673,11 @@ async function renderCompanyDetail(ticker, name) {
       '<div id="cd-fin-right" style="margin-top:14px"></div>' +
     '</div>' +
     '</div>'; // Fin grid 2 colonnes
+
+  // ── Analyse MOAT & Levier IA (Modif 5) ──
+  var anaEl=document.getElementById('cd-analysis-section');
+  if(!anaEl){ anaEl=document.createElement('div'); anaEl.id='cd-analysis-section'; anaEl.style.marginTop='20px'; document.getElementById('page').appendChild(anaEl); }
+  renderAnalysisCard(ticker, name);
 
   // Charger données graphique via endpoint dédié (5 ans par défaut)
   var chartPts = [];
@@ -2914,9 +3113,11 @@ async function loadFriends(force){
   try {
     // Récupère tous les profils sauf le sien
     var profiles = await dbGet('user_profiles','id=neq.'+u.id+'&order=display_name.asc') || [];
-    _friendsCache = profiles.map(function(p){
-      return {id:p.id, name:p.display_name||p.username||'Utilisateur'};
-    });
+    _friendsCache = profiles
+      .filter(function(p){ return p.is_public !== false; }) // Modif 4 : masque les profils privés (null/true = public)
+      .map(function(p){
+        return {id:p.id, name:p.display_name||p.username||'Utilisateur'};
+      });
     return _friendsCache;
   } catch(e){ showToast('Erreur chargement utilisateurs: '+e.message); return []; }
 }
@@ -2932,6 +3133,34 @@ async function generateInvite(){
   } catch(e){ showToast('❌ '+e.message); }
 }
 
+// ── Mode privé (Modif 4) ──────────────────────────────────────────────────
+async function _refreshPrivacyBtn(){
+  var u=getUser(); if(!u) return;
+  var btn=document.getElementById('privacy-btn'); if(!btn) return;
+  try{
+    var p=await dbGet('user_profiles','id=eq.'+u.id);
+    var isPub=!(p&&p[0]&&p[0].is_public===false);
+    btn.dataset.pub=isPub?'1':'0';
+    btn.innerHTML=isPub?'🌐 Public':'🔒 Privé';
+    btn.title=isPub
+      ? 'Ton portefeuille est visible par les autres utilisateurs. Clique pour le passer en privé.'
+      : 'Ton portefeuille est masqué pour les autres. Clique pour le repasser en public.';
+  }catch(e){}
+}
+window.togglePrivacy=async function(){
+  var u=getUser(); if(!u) return;
+  var btn=document.getElementById('privacy-btn'); if(!btn) return;
+  var newPub = btn.dataset.pub==='0'; // actuellement privé → repasse public
+  btn.disabled=true;
+  try{
+    await dbPatch('user_profiles','id=eq.'+u.id,{is_public:newPub});
+    _friendsCache=null;
+    showToast(newPub?'🌐 Profil rendu public':'🔒 Profil rendu privé — tes amis ne te voient plus');
+    await _refreshPrivacyBtn();
+  }catch(e){ showToast('❌ '+e.message); }
+  btn.disabled=false;
+};
+
 // ── Page Amis ─────────────────────────────────────────────────────────────
 async function renderAmis(){
   var pg = document.getElementById('page');
@@ -2940,11 +3169,13 @@ async function renderAmis(){
     '<div><h2 style="font-size:18px;font-weight:700">Mes amis</h2>'+
     '<p style="color:var(--muted);font-size:13px;margin-top:3px">Portefeuilles partagés entre amis</p></div>'+
     '<div style="display:flex;gap:8px">'+
+    '<button class="btn btn-ghost btn-sm" id="privacy-btn" onclick="togglePrivacy()">🌐 …</button>'+
     '<button class="btn btn-ghost btn-sm" onclick="openRenameModal()">✏️ Mon pseudo</button>'+
     '<button class="btn btn-primary" onclick="generateInvite()">🔗 Inviter un ami</button>'+
     '</div></div>'+
     '<div id="friends-list"><div style="text-align:center;padding:40px"><div class="spinner"></div></div></div>';
 
+  _refreshPrivacyBtn();
   var friends = await loadFriends(true);
   var el = document.getElementById('friends-list'); if(!el) return;
 
