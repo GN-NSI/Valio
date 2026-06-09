@@ -3259,24 +3259,26 @@ async function saveRename(){
 // Calcule les positions depuis transactions brutes (pour amis)
 function computePositionsFromData(accounts, transactions){
   var map={};
-  // transactions triées par date (getFriendTransactions: order=transaction_date)
-  (transactions||[]).forEach(function(tx){
+  // Miroir exact de computePositions() : conversion via tx.currency + frais + CMP sur ventes
+  (transactions||[]).slice().sort(function(a,b){return new Date(a.transaction_date)-new Date(b.transaction_date);}).forEach(function(tx){
     var k=tx.ticker; if(!k) return;
-    if(!map[k]) map[k]={ticker:k,quantity:0,totalCostEur:0};
+    if(!map[k]) map[k]={ticker:k,quantity:0,totalCostEur:0,buyCurrencies:[]};
     var m=map[k];
-    var txType=(tx.transaction_type||tx.type||'').toLowerCase();
+    var toE=function(v){return toEur(v,tx.currency);};
+    var type=(tx.transaction_type||tx.type||'').toLowerCase();
     var q=tx.quantity||0;
-    var pEur=(tx.price_eur!=null?tx.price_eur:tx.price)||0;
-    if(txType==='buy'){
-      m.quantity+=q; m.totalCostEur+=pEur*q;
-    } else if(txType==='sell'){
-      // Méthode CMP : on retire le coût MOYEN des titres vendus (comme la vue perso)
-      var avg=m.quantity>0?m.totalCostEur/m.quantity:0;
-      m.quantity-=q; m.totalCostEur-=avg*q;
-      if(m.quantity<0.0001){ m.quantity=0; m.totalCostEur=0; }
+    if(type==='buy'){
+      m.totalCostEur+=q*toE(tx.price)+toE(tx.fees||0);
+      m.quantity+=q;
+      if(tx.currency&&m.buyCurrencies.indexOf(tx.currency)<0)m.buyCurrencies.push(tx.currency);
+    } else if(type==='sell'){
+      if(m.quantity<=0) return;
+      var pru=m.totalCostEur/m.quantity;   // PRU CUMP au moment de la vente
+      m.totalCostEur-=q*pru;
+      m.quantity-=q;
     }
   });
-  return Object.values(map).filter(function(p){return p.quantity>0.0001;});
+  return Object.values(map).filter(function(p){return p.quantity>0.000001;});
 }
 
 // ═══ PORTEFEUILLE AMI — tri colonnes + P&L € (Modif 1) ═══
