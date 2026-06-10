@@ -1128,7 +1128,7 @@ function renderRatios(){
 }
 
 var wlSort={col:null,dir:'desc'};
-var scSort={col:null,dir:'desc'};
+var scSort={col:'poids',dir:'desc'};
 
 function sortWL(col){
   if(wlSort.col===col)wlSort.dir=wlSort.dir==='desc'?'asc':'desc';
@@ -1161,7 +1161,7 @@ function sortItems(items, sort){
 }
 function thSort(label,col,sortState,fn){
   var arrow=sortState.col===col?(sortState.dir==='desc'?'▼':'▲'):'↕';
-  return '<th style="cursor:pointer;user-select:none" onclick="'+fn+'(\''+col+'\')">'+(label)+' <span style="font-size:9px;opacity:.5">'+arrow+'</span></th>';
+  return '<th data-sortcol="'+col+'" style="cursor:pointer;user-select:none" onclick="'+fn+'(\''+col+'\')">'+(label)+' <span style="font-size:9px;opacity:.5">'+arrow+'</span></th>';
 }
 // ═══ WATCHLIST ═══
 var watchlistItems = [];
@@ -1322,7 +1322,7 @@ async function renderScreener(){
 
   var pfPos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p);});
   var wlOnly=watchlistItems.filter(function(w){return !pfPos.find(function(p){return p.ticker===w.ticker;});});
-  var allItems=pfPos.concat(wlOnly.map(function(w){return {ticker:w.ticker,name:w.name,_isWatch:true};}));
+  var allItems=sortItems(pfPos.concat(wlOnly.map(function(w){return {ticker:w.ticker,name:w.name,_isWatch:true};})),scSort);
 
   // Charger les prix manquants pour les items de la watchlist
   await Promise.all(allItems.filter(function(p){return p._isWatch && !S.prices[p.ticker];}).map(async function(p){
@@ -4021,16 +4021,20 @@ function renderScreenerTable(sort){
   var pfPos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p);});
   var wlOnly=watchlistItems.filter(function(w){return !pfPos.find(function(p){return p.ticker===w.ticker;});});
   var allItems=sortItems(pfPos.concat(wlOnly.map(function(w){return {ticker:w.ticker,name:w.name,_isWatch:true};})),sort);
+  var _totalPf=S.enrichedPos.reduce(function(s,p){return s+(p.valueEur||0);},0);
   tbody.innerHTML=allItems.map(function(p){
     var d=S.prices[p.ticker];
-    var isUsd=!(d && d.currency==='EUR');
-    var priceStr=d && d.price ? '<span class="mono">'+(isUsd?'$':'€')+fN(d.price)+'</span>' : '—';
+    var _sc2=d&&d.currency||'USD'; var _sdp2=(_sc2==='USD'||_sc2==='EUR')?d&&d.price:d&&toEur(d.price,_sc2); var _ss2=_sc2==='USD'?'$':'€';
+    var priceStr=d && d.price ? '<span class="mono">'+_ss2+fN(_sdp2)+'</span>' : '—';
     var tid=p.ticker.replace(/[^a-zA-Z0-9]/g,'_');
     var badge=p._isWatch?'<span style="font-size:10px;background:rgba(245,158,11,.15);color:#f59e0b;padding:2px 5px;border-radius:4px;margin-left:4px">WATCH</span>':'';
+    var ep=S.enrichedPos.find(function(x){return x.ticker===p.ticker;});
+    var poidsStr=ep&&_totalPf>0?'<span class="mono" style="color:var(--blue)">'+(ep.valueEur/_totalPf*100).toFixed(1)+'%</span>':'<span style="color:var(--muted)">—</span>';
     return '<tr style="user-select:none">'+
       '<td style="text-align:left;padding-left:20px"><div class="ticker-cell">'+
       mkLogoCell(p.ticker)+
-      '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+p.ticker+'">'+(p.name||p.ticker)+badge+'</div><div class="ticker-sym">'+p.ticker+'</div></div></div></td>'+
+      '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+p.ticker+'">'+(p.name||p.ticker)+badge+'</div><div class="ticker-sym">'+p.ticker+(TICKER_SUBSECTOR[p.ticker]?' · <span style="color:var(--muted2);font-size:10px">'+TICKER_SUBSECTOR[p.ticker]+'</span>':'')+'</div></div></div></td>'+
+      '<td>'+poidsStr+'</td>'+
       '<td>'+priceStr+'</td>'+
       ['per','fwdpe','peg','pocf','marge','ca1a','cafwd','eps1a','epsfwd','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '</tr>';
