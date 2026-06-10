@@ -2018,6 +2018,18 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
   if(!hasFin && !manualData.length) { el.innerHTML=''; return; }
   if(!hasFin) fin = {years:[], revenue:[], grossProfit:[], operatingIncome:[], netIncome:[], eps:[], rd:[], sga:[], operatingCF:[], capex:[], freeCF:[], equity:[], totalDebt:[]};
 
+  // Années manuelles FY absentes de Yahoo : les ajouter (sinon les saisies sont invisibles)
+  var FKEYS=['revenue','grossProfit','operatingIncome','netIncome','eps','rd','sga','operatingCF','capex','freeCF','equity','totalDebt'];
+  FKEYS.forEach(function(k){ if(!fin[k]) fin[k]=[]; while(fin[k].length<fin.years.length) fin[k].push(null); });
+  manualData.filter(function(m){return m.period&&/^FY\d{4}$/.test(m.period)&&fin.years.indexOf(m.period)<0;})
+    .forEach(function(m){ fin.years.push(m.period); FKEYS.forEach(function(k){fin[k].push(null);}); });
+  (function(){ // tri chronologique des années
+    var order=fin.years.map(function(y,i){return {y:parseInt(String(y).replace('FY',''))||0,i:i};})
+      .sort(function(a,b){return a.y-b.y;}).map(function(o){return o.i;});
+    fin.years=order.map(function(i){return fin.years[i];});
+    FKEYS.forEach(function(k){ fin[k]=order.map(function(i){return fin[k][i];}); });
+  })();
+
   // Appliquer les overrides manuels sur les données Yahoo Finance (FY = annuel)
   manualData.filter(function(m){return m.period&&m.period.includes('FY');}).forEach(function(m){
     var yr = m.period; // e.g. "FY2026"
@@ -2036,24 +2048,27 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
         fin.netIncome[idx2] = Math.round(fin.revenue[idx2] * m.net_margin_pct / 10) / 10;
       if(m.capex!=null)            fin.capex[idx2]           = m.capex;
       if(m.fcf!=null)              fin.freeCF[idx2]          = m.fcf;
+      if(m.equity!=null)           fin.equity[idx2]          = m.equity;
+      if(m.total_debt!=null)       fin.totalDebt[idx2]       = m.total_debt;
     }
   });
 
-  // Agréger les FCF trimestriels si pas de données annuelles
-  // (les trimestres "YYYY-QN" sont sommés par année fiscale)
+  // Agréger les FCF trimestriels si pas de données annuelles — ANNUALISÉ (×4/n) :
+  // 2 trimestres saisis = run-rate ×2, sinon le ratio P/FCF de l'année serait doublé
   fin.years.forEach(function(yrLabel, i) {
-    if(fin.freeCF[i] != null) return;
     var fy = yrLabel.replace('FY','');
-    var qFCFs = manualData.filter(function(m){
-      return m.period && m.period.match(/^\d{4}-Q\d$/) && m.period.startsWith(fy+'-Q') && m.fcf!=null;
-    });
-    if(qFCFs.length) fin.freeCF[i] = Math.round(qFCFs.reduce(function(s,m){return s+(m.fcf||0);},0)*10)/10;
+    if(fin.freeCF[i] == null) {
+      var qFCFs = manualData.filter(function(m){
+        return m.period && m.period.match(/^\d{4}-Q\d$/) && m.period.startsWith(fy+'-Q') && m.fcf!=null;
+      });
+      if(qFCFs.length) fin.freeCF[i] = Math.round(qFCFs.reduce(function(s,m){return s+(m.fcf||0);},0)*(4/qFCFs.length)*10)/10;
+    }
     // Même logique pour OCF
     if(fin.operatingCF[i] == null) {
       var qOCF = manualData.filter(function(m){
-        return m.period && m.period.startsWith(fy+'-Q') && m.ocf!=null;
+        return m.period && m.period.match(/^\d{4}-Q\d$/) && m.period.startsWith(fy+'-Q') && m.ocf!=null;
       });
-      if(qOCF.length) fin.operatingCF[i] = Math.round(qOCF.reduce(function(s,m){return s+(m.ocf||0);},0)*10)/10;
+      if(qOCF.length) fin.operatingCF[i] = Math.round(qOCF.reduce(function(s,m){return s+(m.ocf||0);},0)*(4/qOCF.length)*10)/10;
     }
   });
 
@@ -2130,6 +2145,12 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
     var histMktCap=mktCapCur*(py.avg/curPrice), ocfT=ocf*1e9; if(!ocfT) return null;
     return {avg:histMktCap/ocfT, hi:mktCapCur*(py.high/curPrice)/ocfT, lo:mktCapCur*(py.low/curPrice)/ocfT};
   });
+  // Point "Actuel" : priorité aux données saisies (dernier FCF/OCF annuel connu, run-rate)
+  // — le freeCashflow TTM de Yahoo est souvent sous-estimé
+  function _lastNN(arr){for(var z=arr.length-1;z>=0;z--){if(arr[z]!=null)return arr[z];}return null;}
+  var _lFCF=_lastNN(fin.freeCF), _lOCF=_lastNN(fin.operatingCF);
+  var curPFCF=(mktCapCur&&_lFCF>0)?mktCapCur/(_lFCF*1e9):(f&&f.pfcf);
+  var curPOCF=(mktCapCur&&_lOCF>0)?mktCapCur/(_lOCF*1e9):(f&&f.pocf);
 
   // Latest year waterfall data
   var ly = fin.years.length-1;
@@ -2294,8 +2315,8 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
       ], 'fin-title-cf', sym);
       cdWaterfall('cdchart-waterfall', wf, sym);
       cdValChart('cdchart-pe',   fin.years, peVals,   f&&f.trailingPE, 'P/E');
-      cdValChart('cdchart-pfcf', fin.years, pfcfVals, f&&f.pfcf,       'P/FCF');
-      cdValChart('cdchart-pocf', fin.years, pocfVals, f&&f.pocf,       'P/OCF');
+      cdValChart('cdchart-pfcf', fin.years, pfcfVals, curPFCF,          'P/FCF');
+      cdValChart('cdchart-pocf', fin.years, pocfVals, curPOCF,          'P/OCF');
       // Segments pie (données manuelles)
       if(latestWithSegments && document.getElementById('cdchart-segments')) {
         var segs = latestWithSegments.segments;
@@ -2458,6 +2479,8 @@ async function openEarningsEdit(ticker, name, entryId) {
       fld('nm-pct','Marge nette (%)',e2.net_margin_pct,0.1)+
       fld('eps','EPS dilué',e2.eps_diluted,0.01)+fld('ocf','OCF (Md)',e2.ocf)+
       fld('capex','Capex (Md)',e2.capex)+fld('fcf','FCF (Md)',e2.fcf)+
+      fld('equity','Capitaux propres (Md) <span style="font-size:9px;color:var(--muted2)">pour ROE</span>',e2.equity)+
+      fld('tdebt','Dette totale (Md) <span style="font-size:9px;color:var(--muted2)">pour ROIC</span>',e2.total_debt)+
     '</div>'+
 
     '<div class="stats-section-title" style="margin:10px 0 6px">👥 Métriques utilisateurs (optionnel)</div>'+
@@ -2569,6 +2592,7 @@ async function saveEarningsEntry(ticker, name, entryId) {
     revenue:rev_val, gross_profit:gp_val, gross_margin_pct:gm_pct,
     operating_income:fv('oi'), net_income:fv('ni'), net_margin_pct:fv('nm-pct'),
     eps_diluted:fv('eps'), ocf:fv('ocf'), capex:fv('capex'), fcf:fv('fcf'),
+    equity:fv('equity'), total_debt:fv('tdebt'),
     dau_mau:fv('dau-mau'), users_growth_pct:fv('users-growth'),
     guidance_rev_low:fv('grev-lo'), guidance_rev_high:fv('grev-hi'), guidance_eps:fv('geps'),
     guidance_notes:document.getElementById('em-gnotes').value.trim()||null,
@@ -4122,22 +4146,44 @@ async function renderLeaderboard(){
     rows.month.sort(function(a,b){return b.perf-a.perf;});
     rows.ytd.sort(function(a,b){return b.perf-a.perf;});
 
-    // ── Board des actions (détenues actuellement par ≥1 participant) ──
-    var holders={}; // ticker -> [noms]
-    people.forEach(function(p){
-      var pos=computePositionsFromData([],txByPerson[p.id]||[]);
-      pos.forEach(function(q){ if(!holders[q.ticker])holders[q.ticker]=[]; holders[q.ticker].push(p.name+(p.me?' (toi)':'')); });
-    });
+    // ── Board des actions : meilleure perf PAR DÉTENTEUR ──
+    // Achat avant le début de période → perf du titre sur la période entière.
+    // Achat EN COURS de période → perf vs son PRU (sa vraie PV depuis l'entrée).
+    function _lbUserStockPerf(txns, tk, fromTs){
+      var t=(txns||[]).filter(function(x){return x.ticker===tk;})
+        .slice().sort(function(a,b){return new Date(a.transaction_date)-new Date(b.transaction_date);});
+      if(!t.length) return null;
+      var firstBuy=null, qty=0, cost=0; // PRU en devise NATIVE (pas de FX)
+      t.forEach(function(tx){
+        var ty=(tx.transaction_type||tx.type||'').toLowerCase();
+        var ts=Math.floor(new Date(tx.transaction_date).getTime()/1000);
+        if(ty==='buy'){ if(firstBuy==null)firstBuy=ts; cost+=(tx.quantity||0)*(tx.price||0)+(tx.fees||0); qty+=(tx.quantity||0); }
+        else if(ty==='sell'&&qty>1e-9){ var avg=cost/qty; cost-=(tx.quantity||0)*avg; qty-=(tx.quantity||0); }
+      });
+      if(qty<=1e-7) return null; // plus en portefeuille
+      if(firstBuy!=null && firstBuy<=fromTs) return _lbStockPerf(tk,fromTs);
+      var pts=_lbHistCache[tk]||[]; if(!pts.length) return null;
+      var last=pts[pts.length-1].c, pru=cost/qty;
+      if(!(pru>0)||!last) return null;
+      var r=(last/pru-1)*100;
+      return (isFinite(r)&&Math.abs(r)<2000)?r:null;
+    }
     var stocks={week:[],month:[],ytd:[]};
-    Object.keys(holders).forEach(function(tk){
-      var pw=_lbStockPerf(tk,W.week), pm=_lbStockPerf(tk,W.month), py=_lbStockPerf(tk,W.ytd);
-      if(pw!=null) stocks.week.push({tk:tk,perf:pw,who:holders[tk]});
-      if(pm!=null) stocks.month.push({tk:tk,perf:pm,who:holders[tk]});
-      if(py!=null) stocks.ytd.push({tk:tk,perf:py,who:holders[tk]});
+    ['week','month','ytd'].forEach(function(w){
+      var entries=[];
+      people.forEach(function(p){
+        var tks=[...new Set((txByPerson[p.id]||[]).map(function(t){return t.ticker;}).filter(Boolean))];
+        tks.forEach(function(tk){
+          var perf=_lbUserStockPerf(txByPerson[p.id],tk,W[w]);
+          if(perf!=null) entries.push({tk:tk,perf:perf,who:[p.name+(p.me?' (toi)':'')]});
+        });
+      });
+      // fusionne les lignes identiques (même titre + même perf = détenu sur toute la période)
+      var merged={};
+      entries.forEach(function(e){var k=e.tk+'|'+e.perf.toFixed(2);
+        if(merged[k]) merged[k].who=merged[k].who.concat(e.who); else merged[k]=e;});
+      stocks[w]=Object.values(merged).sort(function(a,b){return b.perf-a.perf;});
     });
-    stocks.week.sort(function(a,b){return b.perf-a.perf;});
-    stocks.month.sort(function(a,b){return b.perf-a.perf;});
-    stocks.ytd.sort(function(a,b){return b.perf-a.perf;});
 
     // ── Rendu ──
     function medal(i){return i===0?'🥇':i===1?'🥈':i===2?'🥉':'<span style="color:var(--muted2)">'+(i+1)+'</span>';}
@@ -4157,7 +4203,7 @@ async function renderLeaderboard(){
         return '<tr style="border-bottom:1px solid var(--border2)">'+
           '<td style="padding:9px 8px;width:34px;font-size:15px">'+medal(i)+'</td>'+
           '<td style="padding:9px 8px"><span class="cd-link" data-ticker="'+r.tk+'" style="font-weight:600;font-size:13px;cursor:pointer">'+r.tk+'</span>'+
-            '<div style="font-size:10px;color:var(--muted)">détenu par '+r.who.join(', ')+'</div></td>'+
+            '<div style="font-size:10px;color:var(--muted)">par '+r.who.join(', ')+'</div></td>'+
           '<td style="padding:9px 8px;text-align:right" class="mono"><span style="color:'+pcol(r.perf)+';font-weight:700">'+(r.perf>=0?'+':'')+r.perf.toFixed(2)+'%</span></td></tr>';
       }).join('')+'</table>';
     }
@@ -4175,7 +4221,7 @@ async function renderLeaderboard(){
         card('🚀 Actions — 30 jours',stTable(stocks.month))+
         card('🚀 Actions — YTD '+W.year,stTable(stocks.ytd))+
       '</div>'+
-      '<div style="font-size:10px;color:var(--muted2);margin-top:12px">TWR = time-weighted return : mesure la qualité des choix, indépendamment des montants déposés. YTD = performance depuis la clôture du 31 décembre. Actions : variation du cours sur la période, parmi les titres détenus par le groupe.</div>';
+      '<div style="font-size:10px;color:var(--muted2);margin-top:12px">TWR = time-weighted return : mesure la qualité des choix, indépendamment des montants déposés. Actions : perf du <b>détenteur</b> — si le titre était déjà en portefeuille au début de la période, variation du cours sur la période ; s\u0027il a été acheté en cours de période, plus-value réelle vs son PRU.</div>';
   }catch(e){
     pg.innerHTML='<div class="card" style="padding:20px;color:var(--red)">Erreur classement : '+(e.message||e)+'</div>';
   }
