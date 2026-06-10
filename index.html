@@ -4161,12 +4161,24 @@ async function renderLeaderboard(){
         else if(ty==='sell'&&qty>1e-9){ var avg=cost/qty; cost-=(tx.quantity||0)*avg; qty-=(tx.quantity||0); }
       });
       if(qty<=1e-7) return null; // plus en portefeuille
-      if(firstBuy!=null && firstBuy<=fromTs) return _lbStockPerf(tk,fromTs);
       var pts=_lbHistCache[tk]||[]; if(!pts.length) return null;
-      var last=pts[pts.length-1].c, pru=cost/qty;
-      if(!(pru>0)||!last) return null;
-      var r=(last/pru-1)*100;
-      return (isFinite(r)&&Math.abs(r)<2000)?r:null;
+      var last=pts[pts.length-1].c; if(!last) return null;
+      var pru=cost/qty;
+      var sincePurchase=(pru>0)?(last/pru-1)*100:null; // PV réelle vs PRU (toujours fiable)
+
+      // Acheté EN COURS de période → sa PV réelle
+      if(firstBuy!=null && firstBuy>fromTs)
+        return (sincePurchase!=null&&isFinite(sincePurchase)&&Math.abs(sincePurchase)<3000)?sincePurchase:null;
+
+      // Détenu AVANT la période → variation du cours sur la période
+      var start=null; for(var i=0;i<pts.length;i++){ if(pts[i].t<=fromTs) start=pts[i].c; else break; }
+      if(start==null) start=(pts[0].t>=fromTs)?pts[0].c:null;
+      if(!start) return sincePurchase;
+      var r=(last/start-1)*100;
+      if(!isFinite(r)) return sincePurchase;
+      // Garde-fou : historique douteux (split mal ajusté, point aberrant) → on retombe sur la PV réelle
+      if(Math.abs(r)>600 && sincePurchase!=null && Math.abs(sincePurchase)<Math.abs(r)) return sincePurchase;
+      return r;
     }
     var stocks={week:[],month:[],ytd:[]};
     ['week','month','ytd'].forEach(function(w){
