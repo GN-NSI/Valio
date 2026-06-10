@@ -401,7 +401,10 @@ Rules:
       const d = r.ok ? await r.json() : null;
       const chart = d?.chart?.result?.[0];
       if (!chart) return res.status(404).json({ error: 'No chart data' });
-      const closes = chart.indicators?.quote?.[0]?.close || [];
+      // adjclose = ajusté splits + dividendes → corrige les reverse-splits (ex: SIVE.ST)
+      const rawC = chart.indicators?.quote?.[0]?.close || [];
+      const adjC = chart.indicators?.adjclose?.[0]?.adjclose;
+      const closes = (adjC && adjC.length === rawC.length && adjC.some(v => v != null)) ? adjC : rawC;
       const times  = chart.timestamp || [];
       const pts = closes.map((c,i) => c != null ? { c: Math.round(c * 100) / 100, t: times[i] } : null).filter(Boolean);
       return res.json({ symbol, chartData: pts });
