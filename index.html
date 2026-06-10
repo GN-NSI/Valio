@@ -4022,13 +4022,13 @@ function renderScreenerTable(sort){
 // ═══ LEADERBOARD (Classement) ═══════════════════════════════════════════
 // TWR par participant sur fenêtre (semaine calendaire / 30j glissants) +
 // board des meilleures actions détenues dans le groupe. Incognito exclus.
-var _lbHistCache={}; // ticker -> historique 3mo (partagé entre participants)
+var _lbHistCache={}; // ticker -> historique 1y journalier (couvre semaine + YTD)
 
 async function _lbFetchHists(tickers){
   var need=tickers.filter(function(tk){return !_lbHistCache[tk];});
   for(var i=0;i<need.length;i+=4){
     await Promise.all(need.slice(i,i+4).map(async function(tk){
-      try{_lbHistCache[tk]=await fetchPriceHistory(tk,'3mo');}catch(e){_lbHistCache[tk]=[];}
+      try{_lbHistCache[tk]=await fetchPriceHistory(tk,'1y');}catch(e){_lbHistCache[tk]=[];}
     }));
     if(i+4<need.length) await new Promise(function(r){setTimeout(r,300);});
   }
@@ -4083,13 +4083,14 @@ function _lbWindows(){
   var monday=new Date(now); var day=(now.getDay()+6)%7; // 0=lundi
   monday.setDate(now.getDate()-day); monday.setHours(0,0,0,0);
   var d30=new Date(now.getTime()-30*864e5);
-  return {week:Math.floor(monday.getTime()/1000), month:Math.floor(d30.getTime()/1000)};
+  var jan1=new Date(now.getFullYear(),0,1); jan1.setHours(0,0,0,0); // 1er janvier
+  return {week:Math.floor(monday.getTime()/1000), month:Math.floor(d30.getTime()/1000), ytd:Math.floor(jan1.getTime()/1000), year:now.getFullYear()};
 }
 
 async function renderLeaderboard(){
   var pg=document.getElementById('page');
   pg.innerHTML='<div style="margin-bottom:18px"><h2 style="font-size:18px;font-weight:700">🏆 Classement</h2>'+
-    '<p style="color:var(--muted);font-size:13px;margin-top:3px">Perfs TWR (neutralise les dépôts) · semaine = lundi→auj. · mois = 30 j glissants · profils incognito exclus</p></div>'+
+    '<p style="color:var(--muted);font-size:13px;margin-top:3px">Perfs TWR (neutralise les dépôts) · semaine = lundi→auj. · YTD = depuis le 1ᵉʳ janvier · profils incognito exclus</p></div>'+
     '<div style="text-align:center;padding:50px"><div class="spinner"></div><div style="color:var(--muted);font-size:12px;margin-top:10px">Calcul des performances du groupe…</div></div>';
 
   try{
@@ -4110,14 +4111,16 @@ async function renderLeaderboard(){
     var W=_lbWindows();
 
     // ── Classement portefeuilles ──
-    var rows={week:[],month:[]};
+    var rows={week:[],month:[],ytd:[]};
     people.forEach(function(p){
-      var tw=_lbTWR(txByPerson[p.id],W.week), tm=_lbTWR(txByPerson[p.id],W.month);
+      var tw=_lbTWR(txByPerson[p.id],W.week), tm=_lbTWR(txByPerson[p.id],W.month), ty=_lbTWR(txByPerson[p.id],W.ytd);
       if(tw!=null) rows.week.push({name:p.name,me:!!p.me,perf:tw});
       if(tm!=null) rows.month.push({name:p.name,me:!!p.me,perf:tm});
+      if(ty!=null) rows.ytd.push({name:p.name,me:!!p.me,perf:ty});
     });
     rows.week.sort(function(a,b){return b.perf-a.perf;});
     rows.month.sort(function(a,b){return b.perf-a.perf;});
+    rows.ytd.sort(function(a,b){return b.perf-a.perf;});
 
     // ── Board des actions (détenues actuellement par ≥1 participant) ──
     var holders={}; // ticker -> [noms]
@@ -4125,14 +4128,16 @@ async function renderLeaderboard(){
       var pos=computePositionsFromData([],txByPerson[p.id]||[]);
       pos.forEach(function(q){ if(!holders[q.ticker])holders[q.ticker]=[]; holders[q.ticker].push(p.name+(p.me?' (toi)':'')); });
     });
-    var stocks={week:[],month:[]};
+    var stocks={week:[],month:[],ytd:[]};
     Object.keys(holders).forEach(function(tk){
-      var pw=_lbStockPerf(tk,W.week), pm=_lbStockPerf(tk,W.month);
+      var pw=_lbStockPerf(tk,W.week), pm=_lbStockPerf(tk,W.month), py=_lbStockPerf(tk,W.ytd);
       if(pw!=null) stocks.week.push({tk:tk,perf:pw,who:holders[tk]});
       if(pm!=null) stocks.month.push({tk:tk,perf:pm,who:holders[tk]});
+      if(py!=null) stocks.ytd.push({tk:tk,perf:py,who:holders[tk]});
     });
     stocks.week.sort(function(a,b){return b.perf-a.perf;});
     stocks.month.sort(function(a,b){return b.perf-a.perf;});
+    stocks.ytd.sort(function(a,b){return b.perf-a.perf;});
 
     // ── Rendu ──
     function medal(i){return i===0?'🥇':i===1?'🥈':i===2?'🥉':'<span style="color:var(--muted2)">'+(i+1)+'</span>';}
@@ -4159,16 +4164,18 @@ async function renderLeaderboard(){
     function card(title,inner){return '<div class="card"><div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:8px">'+title+'</div>'+inner+'</div>';}
 
     pg.innerHTML='<div style="margin-bottom:18px"><h2 style="font-size:18px;font-weight:700">🏆 Classement</h2>'+
-      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Perfs TWR (neutralise les dépôts) · semaine = lundi→auj. · mois = 30 j glissants · profils incognito exclus</p></div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">'+
-        card('💼 Portefeuilles — Semaine',pfTable(rows.week))+
-        card('💼 Portefeuilles — 30 jours',pfTable(rows.month))+
+      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Perfs TWR (neutralise les dépôts) · semaine = lundi→auj. · 30 j glissants · YTD = depuis le 1ᵉʳ janvier · incognito exclus</p></div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:16px">'+
+        card('💼 Portef. — Semaine',pfTable(rows.week))+
+        card('💼 Portef. — 30 jours',pfTable(rows.month))+
+        card('💼 Portef. — YTD '+W.year,pfTable(rows.ytd))+
       '</div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">'+
-        card('🚀 Meilleures actions — Semaine',stTable(stocks.week))+
-        card('🚀 Meilleures actions — 30 jours',stTable(stocks.month))+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">'+
+        card('🚀 Actions — Semaine',stTable(stocks.week))+
+        card('🚀 Actions — 30 jours',stTable(stocks.month))+
+        card('🚀 Actions — YTD '+W.year,stTable(stocks.ytd))+
       '</div>'+
-      '<div style="font-size:10px;color:var(--muted2);margin-top:12px">TWR = time-weighted return : mesure la qualité des choix, indépendamment des montants déposés. Actions : variation du cours sur la période, parmi les titres détenus par le groupe.</div>';
+      '<div style="font-size:10px;color:var(--muted2);margin-top:12px">TWR = time-weighted return : mesure la qualité des choix, indépendamment des montants déposés. YTD = performance depuis la clôture du 31 décembre. Actions : variation du cours sur la période, parmi les titres détenus par le groupe.</div>';
   }catch(e){
     pg.innerHTML='<div class="card" style="padding:20px;color:var(--red)">Erreur classement : '+(e.message||e)+'</div>';
   }
