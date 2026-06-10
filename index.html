@@ -133,7 +133,39 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 .cd-metric:last-child{border-bottom:none;}
 .cd-label{font-size:13px;color:var(--muted);}
 .cd-val{font-size:14px;font-weight:600;font-family:'SF Mono',monospace;}
+/* ═══ MOBILE (≤768px) : sidebar → barre de nav en bas, grilles 1 colonne ═══ */
+@media (max-width:768px){
+  .app-layout{flex-direction:column;height:100dvh}
+  #sidebar{position:fixed;bottom:0;left:0;right:0;top:auto;width:100%!important;height:60px;flex-direction:row;border-right:none;border-top:1px solid var(--border);z-index:100;overflow:visible}
+  #sidebar.collapsed{width:100%!important}
+  .sidebar-logo,.sidebar-footer,.sb-toggle,.nav-section,.nav-soon{display:none!important}
+  #sidebar nav{display:flex;flex-direction:row;align-items:stretch;overflow-x:auto;overflow-y:hidden;width:100%;padding:0 2px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  #sidebar nav::-webkit-scrollbar{display:none}
+  .nav-item{flex-direction:column!important;justify-content:center;gap:2px!important;padding:6px 10px!important;font-size:9.5px!important;white-space:nowrap;flex-shrink:0;border-radius:0!important}
+  .nav-item .nav-icon{font-size:18px}
+  #main{height:calc(100dvh - 60px);overflow:hidden}
+  #page{padding:14px 12px 24px;overflow-y:auto}
+  #topbar{padding:0 14px;height:48px}
+  .topbar-title{font-size:14px}
+  #topbar>*:not(.topbar-title):not(button){display:none} /* masque le taux de change, garde Actualiser */
+  .kpi-grid{grid-template-columns:1fr 1fr;gap:10px}
+  .kpi-card{padding:12px}.kpi-value{font-size:19px!important}
+  .pf-row{grid-template-columns:1fr!important}
+  .stats-2col{grid-template-columns:1fr}
+  .form-row{grid-template-columns:1fr}
+  /* Toutes les grilles inline multi-colonnes passent en 1 colonne */
+  #page div[style*="grid-template-columns"]{grid-template-columns:1fr!important}
+  /* Tables : scroll horizontal dans leurs cartes */
+  .card{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .card table{min-width:520px}
+  /* Anti-zoom iOS : inputs ≥16px */
+  input.form-input,select.form-input,textarea.form-input{font-size:16px!important}
+  .modal{width:94vw!important;max-width:94vw!important;max-height:86dvh}
+  .chart-wrap{height:240px!important}
+  #bm-chart-wrap{height:300px!important}
+}
 </style>
+
 </head>
 <body>
 <div id="auth-screen">
@@ -164,6 +196,7 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
         <div class="nav-section">Social</div>
         <div class="nav-item" id="nav-amis" onclick="navigate('amis')"><span class="nav-icon">👥</span><span>Amis</span></div>
         <div class="nav-item" id="nav-benchmark" onclick="navigate('benchmark')"><span class="nav-icon">📊</span><span>Benchmark</span></div>
+        <div class="nav-item" id="nav-leaderboard" onclick="navigate('leaderboard')"><span class="nav-icon">🏆</span><span>Classement</span></div>
       <div class="nav-section-label" style="font-size:10px;color:var(--muted);padding:12px 16px 4px;letter-spacing:.08em;font-weight:600">SUIVI</div>
       <div class="nav-item" id="nav-deposits" onclick="navigate('deposits')"><span class="nav-icon">💸</span><span>Dépôts & Solde</span></div>
       <div class="nav-item" id="nav-liquidity" onclick="navigate('liquidity')"><span class="nav-icon">💰</span><span>Liquidités</span></div>
@@ -569,7 +602,7 @@ function navigate(page){
   S.page=page;
   document.querySelectorAll('.nav-item:not(.disabled)').forEach(e=>e.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes',ratios:'Screener',watchlist:'Watchlist',screener:'Screener',amis:'Amis',benchmark:'Benchmark'}[page]||page;
+  document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes',ratios:'Screener',watchlist:'Watchlist',screener:'Screener',amis:'Amis',benchmark:'Benchmark',leaderboard:'Classement'}[page]||page;
   const pfDiv=document.getElementById('page-portfolio');
   const pgDiv=document.getElementById('page');
   if(page==='portfolio'){
@@ -585,6 +618,7 @@ function navigate(page){
     else if(page==='screener')renderScreener();
     else if(page==='amis')renderAmis();
     else if(page==='benchmark')renderBenchmark();
+    else if(page==='leaderboard')renderLeaderboard();
     else if(page==='deposits')renderDeposits();
     else if(page==='liquidity')renderLiquidity();
   }
@@ -2477,12 +2511,12 @@ async function autoFillEarnings(ticker, name){
     if(!resp.ok||!resp.data){showToast('Erreur: '+(resp.error||'extraction échouée'));return;}
 
     var d=resp.data; var filled=0; var skipped=[];
-    var map={'em-revenue':d.revenue,'em-gp':d.gross_profit,'em-gmpct':d.gross_margin_pct,
-      'em-oi':d.operating_income,'em-ni':d.net_income,'em-nmpct':d.net_margin_pct,
+    var map={'em-rev':d.revenue,'em-gp':d.gross_profit,'em-gm-pct':d.gross_margin_pct,
+      'em-oi':d.operating_income,'em-ni':d.net_income,'em-nm-pct':d.net_margin_pct,
       'em-eps':d.eps_diluted,'em-ocf':d.ocf,'em-capex':d.capex,'em-fcf':d.fcf};
     Object.keys(map).forEach(function(id){
       var v=map[id]; var el=document.getElementById(id); if(!el) return;
-      if(v!=null){el.value=Math.round(v*100)/100; el.style.outline='2px solid var(--accent)'; filled++;}
+      if(v!=null){el.value=Math.round(v*100)/100; el.style.outline='2px solid var(--blue)'; filled++;}
       else skipped.push(id);
     });
 
@@ -2491,8 +2525,8 @@ async function autoFillEarnings(ticker, name){
       var sc=document.getElementById('seg-container'); if(sc){sc.innerHTML='';
         d.segments.forEach(function(seg){addEarningsSegment();
           var rows=sc.querySelectorAll('.seg-row');var last=rows[rows.length-1];if(!last)return;
-          var ni=last.querySelector('input[placeholder="Nom du segment"]');
-          var vi=last.querySelector('input[placeholder="Md$"]');
+          var ni=last.querySelector('.seg-name');
+          var vi=last.querySelector('.seg-val');
           if(ni)ni.value=seg.name; if(vi)vi.value=Math.round(seg.value*10)/10;
         });
       }
@@ -3737,71 +3771,56 @@ async function getFriendTransactions(friendId){
 // ── Performance portefeuille (positions actuelles × prix historiques) ────────
 // Utilise le coût total comme dénominateur → P&L% cohérent avec la page portefeuille
 async function buildPortfolioLine(transactions, range){
-  // VRAIE perf : reconstruit les positions réelles dans le temps (depuis les transactions)
-  // et calcule un TWR chaîné (neutralise dépôts/achats/ventes). Plus de biais "hindsight".
+  // VRAI TWR : sur chaque sous-période, on valorise les MÊMES positions (celles détenues
+  // au début) aux prix de début et de fin → pur effet marché. Les flux (achats/ventes) ne
+  // tombent qu'aux frontières (on découpe à chaque date de transaction). Aucun biais.
   var txns=(transactions||[]).filter(function(t){return t.ticker;})
     .slice().sort(function(a,b){return new Date(a.transaction_date)-new Date(b.transaction_date);});
   if(!txns.length) return [];
   var tickers=[...new Set(txns.map(function(t){return t.ticker;}))];
 
-  // Fetch historiques en batch
   var hists={}; var BATCH=4, DELAY=300;
   for(var i=0;i<tickers.length;i+=BATCH){
-    await Promise.all(tickers.slice(i,i+BATCH).map(async function(tk){
-      hists[tk]=await fetchPriceHistory(tk,range);
-    }));
+    await Promise.all(tickers.slice(i,i+BATCH).map(async function(tk){ hists[tk]=await fetchPriceHistory(tk,range); }));
     if(i+BATCH<tickers.length) await new Promise(function(r){setTimeout(r,DELAY);});
   }
 
-  // Timestamps communs, à partir de la 1re transaction, sous-échantillonnés
-  var tsSet={}; Object.values(hists).forEach(function(pts){(pts||[]).forEach(function(p){tsSet[p.t]=true;});});
-  var timestamps=Object.keys(tsSet).map(Number).sort(function(a,b){return a-b;});
-  var firstTx=new Date(txns[0].transaction_date).getTime()/1000;
-  timestamps=timestamps.filter(function(t){return t>=firstTx;});
-  if(timestamps.length<2) return [];
-  var step=Math.max(1,Math.floor(timestamps.length/60));
-  timestamps=timestamps.filter(function(_,i){return i%step===0||i===timestamps.length-1;});
+  var firstTx=Math.floor(new Date(txns[0].transaction_date).getTime()/1000);
+  var tsSet={}; Object.values(hists).forEach(function(pts){(pts||[]).forEach(function(p){if(p.t>=firstTx)tsSet[p.t]=true;});});
+  var priceTs=Object.keys(tsSet).map(Number).sort(function(a,b){return a-b;});
+  if(priceTs.length<2) return [];
+  var step=Math.max(1,Math.floor(priceTs.length/60));
+  priceTs=priceTs.filter(function(_,i){return i%step===0||i===priceTs.length-1;});
+  // + toutes les dates de transaction comme frontières de flux
+  var txTs=txns.map(function(t){return Math.floor(new Date(t.transaction_date).getTime()/1000);});
+  var allSet={}; priceTs.concat(txTs).forEach(function(t){if(t>=firstTx)allSet[t]=true;});
+  var D=Object.keys(allSet).map(Number).sort(function(a,b){return a-b;});
+  if(D.length<2) return [];
 
   function cur(tk){ return (S.prices[tk]&&S.prices[tk].currency)||'USD'; }
   function priceAt(tk,t){ var pts=(hists[tk]||[]).filter(function(q){return q.t<=t;}); return pts.length?pts[pts.length-1].c:null; }
-  // Valeur de marché des positions réellement détenues à la date t
-  function valueAt(t){
-    var hold={};
+  function holdingsAt(t){
+    var h={};
     txns.forEach(function(tx){
-      if(new Date(tx.transaction_date).getTime()/1000>t) return;
+      if(Math.floor(new Date(tx.transaction_date).getTime()/1000)>t) return;
       var ty=(tx.transaction_type||tx.type||'').toLowerCase();
-      hold[tx.ticker]=(hold[tx.ticker]||0)+(ty==='buy'?1:ty==='sell'?-1:0)*(tx.quantity||0);
+      h[tx.ticker]=(h[tx.ticker]||0)+(ty==='buy'?1:ty==='sell'?-1:0)*(tx.quantity||0);
     });
-    var v=0;
-    Object.keys(hold).forEach(function(tk){var q=hold[tk]; if(q<=1e-7)return; var pr=priceAt(tk,t); if(pr==null)return; v+=q*toEur(pr,cur(tk));});
+    return h;
+  }
+  function valHoldings(h,t){
+    var v=0; Object.keys(h).forEach(function(tk){var q=h[tk]; if(q<=1e-7)return; var pr=priceAt(tk,t); if(pr==null)return; v+=q*toEur(pr,cur(tk));});
     return v;
   }
-  // Flux net investi (achats - ventes, à leur valeur de transaction en €) sur (tPrev, t]
-  function netFlow(tPrev,t){
-    var f=0;
-    txns.forEach(function(tx){
-      var tt=new Date(tx.transaction_date).getTime()/1000;
-      if(tt<=tPrev||tt>t) return;
-      var ty=(tx.transaction_type||tx.type||'').toLowerCase();
-      var amt=(tx.quantity||0)*toEur(tx.price||0,tx.currency);
-      if(ty==='buy') f+=amt+toEur(tx.fees||0,tx.currency);
-      else if(ty==='sell') f-=amt;
-    });
-    return f;
-  }
 
-  // TWR chaîné : r_sousPériode = (V_fin - flux) / V_début - 1
-  var cum=1, out=[], prevT=null, prevV=null;
-  timestamps.forEach(function(t){
-    var v=valueAt(t);
-    if(prevT==null){ prevT=t; prevV=v; out.push({t:t,pct:0}); return; }
-    if(prevV>0.01){
-      var r=(v-netFlow(prevT,t))/prevV - 1;
-      if(isFinite(r)) cum*=(1+r);
-    }
-    out.push({t:t,pct:(cum-1)*100});
-    prevT=t; prevV=v;
-  });
+  var cum=1, out=[{t:D[0],pct:0}];
+  for(var k=1;k<D.length;k++){
+    var hPrev=holdingsAt(D[k-1]);           // positions détenues sur (D[k-1], D[k]]
+    var vStart=valHoldings(hPrev,D[k-1]);
+    var vEnd=valHoldings(hPrev,D[k]);       // MÊMES positions, prix de fin
+    if(vStart>0.01 && vEnd>0){ var r=vEnd/vStart-1; if(isFinite(r)&&Math.abs(r)<5) cum*=(1+r); }
+    out.push({t:D[k],pct:(cum-1)*100});
+  }
   return out;
 }
 
@@ -4000,6 +4019,161 @@ function renderScreenerTable(sort){
     s.textContent=col&&scSort.col===col?(scSort.dir==='desc'?'▼':'▲'):'↕';
   });
 }
+// ═══ LEADERBOARD (Classement) ═══════════════════════════════════════════
+// TWR par participant sur fenêtre (semaine calendaire / 30j glissants) +
+// board des meilleures actions détenues dans le groupe. Incognito exclus.
+var _lbHistCache={}; // ticker -> historique 3mo (partagé entre participants)
+
+async function _lbFetchHists(tickers){
+  var need=tickers.filter(function(tk){return !_lbHistCache[tk];});
+  for(var i=0;i<need.length;i+=4){
+    await Promise.all(need.slice(i,i+4).map(async function(tk){
+      try{_lbHistCache[tk]=await fetchPriceHistory(tk,'3mo');}catch(e){_lbHistCache[tk]=[];}
+    }));
+    if(i+4<need.length) await new Promise(function(r){setTimeout(r,300);});
+  }
+}
+
+// TWR constant-holdings sur [fromTs, now] à partir des transactions d'une personne
+function _lbTWR(txns, fromTs){
+  txns=(txns||[]).filter(function(t){return t.ticker;})
+    .slice().sort(function(a,b){return new Date(a.transaction_date)-new Date(b.transaction_date);});
+  if(!txns.length) return null;
+  function holdingsAt(t){
+    var h={};
+    txns.forEach(function(tx){
+      if(Math.floor(new Date(tx.transaction_date).getTime()/1000)>t) return;
+      var ty=(tx.transaction_type||tx.type||'').toLowerCase();
+      h[tx.ticker]=(h[tx.ticker]||0)+(ty==='buy'?1:ty==='sell'?-1:0)*(tx.quantity||0);
+    });
+    return h;
+  }
+  function priceAt(tk,t){var pts=(_lbHistCache[tk]||[]).filter(function(q){return q.t<=t;});return pts.length?pts[pts.length-1].c:null;}
+  function curOf(tk){return (S.prices[tk]&&S.prices[tk].currency)||'USD';}
+  function val(h,t){var v=0;Object.keys(h).forEach(function(tk){var q=h[tk];if(q<=1e-7)return;var pr=priceAt(tk,t);if(pr==null)return;v+=q*toEur(pr,curOf(tk));});return v;}
+
+  var nowTs=Math.floor(Date.now()/1000);
+  // Frontières : fromTs + dates de transaction dans la fenêtre + now
+  var D=[fromTs];
+  txns.forEach(function(tx){var t=Math.floor(new Date(tx.transaction_date).getTime()/1000);if(t>fromTs&&t<nowTs)D.push(t);});
+  D.push(nowTs); D=[...new Set(D)].sort(function(a,b){return a-b;});
+
+  var cum=1, valid=false;
+  for(var k=1;k<D.length;k++){
+    var h=holdingsAt(D[k-1]);
+    var v0=val(h,D[k-1]), v1=val(h,D[k]);
+    if(v0>0.01&&v1>0){var r=v1/v0-1;if(isFinite(r)&&Math.abs(r)<5){cum*=(1+r);valid=true;}}
+  }
+  return valid?(cum-1)*100:null;
+}
+
+// Meilleure variation d'une action sur [fromTs, now]
+function _lbStockPerf(tk, fromTs){
+  var pts=_lbHistCache[tk]||[]; if(pts.length<2) return null;
+  var start=null; for(var i=0;i<pts.length;i++){ if(pts[i].t<=fromTs) start=pts[i].c; else break; }
+  if(start==null) start=pts[0].t>=fromTs?pts[0].c:null;
+  var last=pts[pts.length-1].c;
+  if(!start||!last) return null;
+  var r=(last/start-1)*100;
+  return isFinite(r)?r:null;
+}
+
+function _lbWindows(){
+  var now=new Date();
+  var monday=new Date(now); var day=(now.getDay()+6)%7; // 0=lundi
+  monday.setDate(now.getDate()-day); monday.setHours(0,0,0,0);
+  var d30=new Date(now.getTime()-30*864e5);
+  return {week:Math.floor(monday.getTime()/1000), month:Math.floor(d30.getTime()/1000)};
+}
+
+async function renderLeaderboard(){
+  var pg=document.getElementById('page');
+  pg.innerHTML='<div style="margin-bottom:18px"><h2 style="font-size:18px;font-weight:700">🏆 Classement</h2>'+
+    '<p style="color:var(--muted);font-size:13px;margin-top:3px">Perfs TWR (neutralise les dépôts) · semaine = lundi→auj. · mois = 30 j glissants · profils incognito exclus</p></div>'+
+    '<div style="text-align:center;padding:50px"><div class="spinner"></div><div style="color:var(--muted);font-size:12px;margin-top:10px">Calcul des performances du groupe…</div></div>';
+
+  try{
+    var u=getUser();
+    var myName=await getMyName();
+    var friends=await loadFriends(true); // public + perfs (incognito déjà filtré)
+    var people=[{id:u.id,name:myName,me:true}].concat(friends.map(function(f){return {id:f.id,name:f.name};}));
+
+    // Transactions de chacun (les miennes sont déjà en mémoire)
+    var txByPerson={};
+    txByPerson[u.id]=S.transactions||[];
+    await Promise.all(friends.map(async function(f){ txByPerson[f.id]=await getFriendTransactions(f.id)||[]; }));
+
+    // Historique des tickers (union) + s'assurer d'avoir devise des prix
+    var allTickers=[...new Set([].concat.apply([],people.map(function(p){return (txByPerson[p.id]||[]).map(function(t){return t.ticker;});})).filter(Boolean))];
+    await _lbFetchHists(allTickers);
+
+    var W=_lbWindows();
+
+    // ── Classement portefeuilles ──
+    var rows={week:[],month:[]};
+    people.forEach(function(p){
+      var tw=_lbTWR(txByPerson[p.id],W.week), tm=_lbTWR(txByPerson[p.id],W.month);
+      if(tw!=null) rows.week.push({name:p.name,me:!!p.me,perf:tw});
+      if(tm!=null) rows.month.push({name:p.name,me:!!p.me,perf:tm});
+    });
+    rows.week.sort(function(a,b){return b.perf-a.perf;});
+    rows.month.sort(function(a,b){return b.perf-a.perf;});
+
+    // ── Board des actions (détenues actuellement par ≥1 participant) ──
+    var holders={}; // ticker -> [noms]
+    people.forEach(function(p){
+      var pos=computePositionsFromData([],txByPerson[p.id]||[]);
+      pos.forEach(function(q){ if(!holders[q.ticker])holders[q.ticker]=[]; holders[q.ticker].push(p.name+(p.me?' (toi)':'')); });
+    });
+    var stocks={week:[],month:[]};
+    Object.keys(holders).forEach(function(tk){
+      var pw=_lbStockPerf(tk,W.week), pm=_lbStockPerf(tk,W.month);
+      if(pw!=null) stocks.week.push({tk:tk,perf:pw,who:holders[tk]});
+      if(pm!=null) stocks.month.push({tk:tk,perf:pm,who:holders[tk]});
+    });
+    stocks.week.sort(function(a,b){return b.perf-a.perf;});
+    stocks.month.sort(function(a,b){return b.perf-a.perf;});
+
+    // ── Rendu ──
+    function medal(i){return i===0?'🥇':i===1?'🥈':i===2?'🥉':'<span style="color:var(--muted2)">'+(i+1)+'</span>';}
+    function pcol(v){return v>=0?'var(--green)':'var(--red)';}
+    function pfTable(arr){
+      if(!arr.length) return '<div style="color:var(--muted);font-size:12px;padding:14px">Pas assez de données sur la période.</div>';
+      return '<table style="width:100%;border-collapse:collapse">'+arr.map(function(r,i){
+        return '<tr style="border-bottom:1px solid var(--border2)'+(r.me?';background:rgba(91,126,245,.07)':'')+'">'+
+          '<td style="padding:9px 8px;width:34px;font-size:15px">'+medal(i)+'</td>'+
+          '<td style="padding:9px 8px;font-weight:600;font-size:13px">'+r.name+(r.me?' <span style="font-size:10px;color:var(--blue)">— toi</span>':'')+'</td>'+
+          '<td style="padding:9px 8px;text-align:right" class="mono"><span style="color:'+pcol(r.perf)+';font-weight:700">'+(r.perf>=0?'+':'')+r.perf.toFixed(2)+'%</span></td></tr>';
+      }).join('')+'</table>';
+    }
+    function stTable(arr){
+      if(!arr.length) return '<div style="color:var(--muted);font-size:12px;padding:14px">Pas assez de données.</div>';
+      return '<table style="width:100%;border-collapse:collapse">'+arr.slice(0,8).map(function(r,i){
+        return '<tr style="border-bottom:1px solid var(--border2)">'+
+          '<td style="padding:9px 8px;width:34px;font-size:15px">'+medal(i)+'</td>'+
+          '<td style="padding:9px 8px"><span class="cd-link" data-ticker="'+r.tk+'" style="font-weight:600;font-size:13px;cursor:pointer">'+r.tk+'</span>'+
+            '<div style="font-size:10px;color:var(--muted)">détenu par '+r.who.join(', ')+'</div></td>'+
+          '<td style="padding:9px 8px;text-align:right" class="mono"><span style="color:'+pcol(r.perf)+';font-weight:700">'+(r.perf>=0?'+':'')+r.perf.toFixed(2)+'%</span></td></tr>';
+      }).join('')+'</table>';
+    }
+    function card(title,inner){return '<div class="card"><div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:8px">'+title+'</div>'+inner+'</div>';}
+
+    pg.innerHTML='<div style="margin-bottom:18px"><h2 style="font-size:18px;font-weight:700">🏆 Classement</h2>'+
+      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Perfs TWR (neutralise les dépôts) · semaine = lundi→auj. · mois = 30 j glissants · profils incognito exclus</p></div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">'+
+        card('💼 Portefeuilles — Semaine',pfTable(rows.week))+
+        card('💼 Portefeuilles — 30 jours',pfTable(rows.month))+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">'+
+        card('🚀 Meilleures actions — Semaine',stTable(stocks.week))+
+        card('🚀 Meilleures actions — 30 jours',stTable(stocks.month))+
+      '</div>'+
+      '<div style="font-size:10px;color:var(--muted2);margin-top:12px">TWR = time-weighted return : mesure la qualité des choix, indépendamment des montants déposés. Actions : variation du cours sur la période, parmi les titres détenus par le groupe.</div>';
+  }catch(e){
+    pg.innerHTML='<div class="card" style="padding:20px;color:var(--red)">Erreur classement : '+(e.message||e)+'</div>';
+  }
+}
+
 // ═══ ACCOUNTS PAGE ═══
 function renderAccounts(){
   const pg=document.getElementById('page');
