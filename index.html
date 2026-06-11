@@ -261,6 +261,9 @@ const META_OVERRIDE={
   'SMNG' :{country:'KR',sector:'Information Technology'},
   'SIV'  :{country:'SE',sector:'Information Technology'},
   '2DG'  :{country:'SE',sector:'Information Technology'},
+  'SIVE.ST':{country:'SE',sector:'Information Technology'},
+  '005930.KS':{country:'KR',sector:'Information Technology'},
+  'XFAB.PA':{country:'DE',sector:'Information Technology'},
   'ESE.PA':{country:'US',sector:'ETF'},
   'ESE'    :{country:'US',sector:'ETF'},
   'PAASI.PA':{country:'CN',sector:'ETF'},
@@ -276,7 +279,7 @@ const TICKER_COUNTRY={
   // Asie
   TSM:'TW',TSMC:'TW',ATEYY:'JP',SMNG:'KR','SMSN.L':'KR',
   // Europe
-  'BESI.AS':'NL',SIV:'SE','2DG':'SE',ASML:'NL','ASML.AS':'NL',SAP:'DE',
+  'BESI.AS':'NL',SIV:'SE','2DG':'SE','SIVE.ST':'SE','XFAB.PA':'DE','005930.KS':'KR',ASML:'NL','ASML.AS':'NL',SAP:'DE',
   // ETFs (exposition économique, pas domicile)
   'ESE.PA':'US',ESE:'US','PAASI.PA':'CN',PAASI:'CN',CW8:'US',
   // Actions françaises
@@ -303,6 +306,8 @@ const TICKER_SECTOR={
   ATEYY:'Information Technology',SMNG:'Information Technology',
   'SMSN.L':'Information Technology','BESI.AS':'Information Technology',
   SIV:'Information Technology','2DG':'Information Technology',
+  'SIVE.ST':'Information Technology','005930.KS':'Information Technology',
+  'XFAB.PA':'Information Technology',
   NVTS:'Information Technology',ASML:'Information Technology',
   // Industrials
   VRT:'Industrials',
@@ -394,6 +399,9 @@ const TICKER_SUBSECTOR={
   ATEYY:'Tests & Mesure semi',
   'BESI.AS':'Équipements semi',
   SIV:'Semi spécialisés (RF/mmWave)',
+  'SIVE.ST':'Photonique & Lasers (IA)',
+  '005930.KS':'Mémoires (HBM / DRAM)',
+  'XFAB.PA':'Fonderies (Fabrication)',
   NVTS:'Semi puissance (GaN)',
   ASML:'Lithographie',
   // Cloud & Software
@@ -2291,6 +2299,16 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
     '</div>';
   }
 
+  // ── Séries temporelles de ratios (granularité hebdo, 3 ans) ──
+  // TTM à chaque date à partir des FY (Yahoo+manuel) et des trimestres saisis
+  var ratioHist=[]; try{ ratioHist=await fetchPriceHistory(ticker,'3y')||[]; }catch(e){}
+  var peTS  =_ratioTimeSeries(ratioHist,_ttmKnots(fin,manualData,'eps_diluted','eps'),
+    function(px,ttm){ return ttm>0?px/ttm:null; });
+  var pfcfTS=_ratioTimeSeries(ratioHist,_ttmKnots(fin,manualData,'fcf','freeCF'),
+    function(px,ttm){ return (ttm>0&&mktCapCur&&curPrice)?(mktCapCur*(px/curPrice))/(ttm*1e9):null; });
+  var pocfTS=_ratioTimeSeries(ratioHist,_ttmKnots(fin,manualData,'ocf','operatingCF'),
+    function(px,ttm){ return (ttm>0&&mktCapCur&&curPrice)?(mktCapCur*(px/curPrice))/(ttm*1e9):null; });
+
   // Draw all charts (setTimeout for DOM settle)
   setTimeout(function(){
     try {
@@ -2314,9 +2332,12 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
         {label:'Capex',data:fin.capex,       color:'#ef4444'},
       ], 'fin-title-cf', sym);
       cdWaterfall('cdchart-waterfall', wf, sym);
-      cdValChart('cdchart-pe',   fin.years, peVals,   f&&f.trailingPE, 'P/E');
-      cdValChart('cdchart-pfcf', fin.years, pfcfVals, curPFCF,          'P/FCF');
-      cdValChart('cdchart-pocf', fin.years, pocfVals, curPOCF,          'P/OCF');
+      if(peTS.length>=8)   cdRatioTimeChart('cdchart-pe',  'P/E',  peTS,  f&&f.trailingPE);
+      else cdValChart('cdchart-pe',   fin.years, peVals,   f&&f.trailingPE, 'P/E');
+      if(pfcfTS.length>=8) cdRatioTimeChart('cdchart-pfcf','P/FCF',pfcfTS,curPFCF);
+      else cdValChart('cdchart-pfcf', fin.years, pfcfVals, curPFCF,          'P/FCF');
+      if(pocfTS.length>=8) cdRatioTimeChart('cdchart-pocf','P/OCF',pocfTS,curPOCF);
+      else cdValChart('cdchart-pocf', fin.years, pocfVals, curPOCF,          'P/OCF');
       // Segments pie (données manuelles)
       if(latestWithSegments && document.getElementById('cdchart-segments')) {
         var segs = latestWithSegments.segments;
@@ -2710,6 +2731,58 @@ function cdLineChart(id, labels, datasets, unit) {
       scales:{ x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',font:{size:9}}}, y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',font:{size:9},callback:function(v){return v.toFixed(0)+(unit||'');}},position:'right'} }
     }
   });
+}
+
+// ── Séries temporelles de ratios (P/E, P/FCF, P/OCF "comme une courbe de prix") ──
+// Knots = valeurs TTM connues à partir d'une date (annuels FY + trimestres saisis annualisés)
+function _ttmKnots(fin, manualData, mKey, finKey){
+  var knots=[];
+  (fin.years||[]).forEach(function(y,i){
+    var v=(fin[finKey]||[])[i]; if(v==null) return;
+    var yr=parseInt(String(y).replace('FY',''))||null; if(!yr) return;
+    knots.push({t:Date.UTC(yr,11,31)/1000, v:v}); // fin d'exercice ≈ 31 déc (approx.)
+  });
+  var qs=(manualData||[]).filter(function(m){return m.period&&/^\d{4}-Q[1-4]$/.test(m.period)&&m[mKey]!=null;})
+    .map(function(m){var p=m.period.split('-Q');return {y:+p[0],q:+p[1],v:+m[mKey]};})
+    .sort(function(a,b){return (a.y*4+a.q)-(b.y*4+b.q);});
+  qs.forEach(function(cur,idx){
+    var last4=qs.slice(Math.max(0,idx-3),idx+1);
+    // trimestres consécutifs uniquement (évite de mixer des années à trous)
+    var ttm=last4.reduce(function(s,x){return s+x.v;},0)*(4/last4.length);
+    knots.push({t:Date.UTC(cur.y,cur.q*3-1,28)/1000, v:ttm}); // fin de trimestre calendaire ≈
+  });
+  knots.sort(function(a,b){return a.t-b.t;});
+  return knots;
+}
+function _knotAt(knots,t){ var v=null; for(var i=0;i<knots.length;i++){ if(knots[i].t<=t) v=knots[i].v; else break; } return v; }
+function _ratioTimeSeries(hist,knots,fn){
+  if(!hist||!hist.length||!knots.length) return [];
+  var out=[];
+  hist.forEach(function(p){
+    var ttm=_knotAt(knots,p.t); if(ttm==null) return;
+    var v=fn(p.c,ttm);
+    if(v!=null&&isFinite(v)&&v>0&&v<2000) out.push({t:p.t,v:v});
+  });
+  return out;
+}
+function cdRatioTimeChart(id,label,series,current){
+  var cv=document.getElementById(id); if(!cv) return;
+  if(window['_ch_'+id]){ try{window['_ch_'+id].destroy();}catch(e){} }
+  var labels=series.map(function(p){var d=new Date(p.t*1000);return d.toLocaleDateString('fr-FR',{month:'short',year:'2-digit'});});
+  var data=series.map(function(p){return Math.round(p.v*100)/100;});
+  if(current!=null&&isFinite(current)&&current>0){ labels=labels.concat(['Actuel']); data=data.concat([Math.round(current*100)/100]); }
+  var sortedV=data.slice().sort(function(a,b){return a-b;});
+  var median=sortedV.length?sortedV[Math.floor(sortedV.length/2)]:null;
+  window['_ch_'+id]=new Chart(cv,{type:'line',data:{labels:labels,datasets:[
+    {label:label,data:data,borderColor:'#5b7ef5',backgroundColor:'rgba(91,126,245,.08)',fill:true,tension:.25,
+     pointRadius:data.map(function(_,i){return i===data.length-1?4:0;}),
+     pointBackgroundColor:'#5b7ef5',borderWidth:2},
+    {label:'Médiane',data:data.map(function(){return median;}),borderColor:'#f59e0b',borderDash:[6,4],pointRadius:0,borderWidth:1.5,fill:false}
+  ]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+    plugins:{legend:{display:true,labels:{boxWidth:10,font:{size:10},color:'#8b93a7'}},
+      tooltip:{callbacks:{label:function(c){return c.dataset.label+': '+c.parsed.y+'x';}}}},
+    scales:{x:{ticks:{maxTicksLimit:8,font:{size:10},color:'#6b7280'},grid:{color:'rgba(255,255,255,.04)'}},
+      y:{position:'right',ticks:{font:{size:10},color:'#6b7280',callback:function(v){return v+'x';}},grid:{color:'rgba(255,255,255,.05)'}}}}});
 }
 
 function cdValChart(id, years, vals, currentRatio, label) {
@@ -3795,9 +3868,10 @@ async function getFriendTransactions(friendId){
 // ── Performance portefeuille (positions actuelles × prix historiques) ────────
 // Utilise le coût total comme dénominateur → P&L% cohérent avec la page portefeuille
 async function buildPortfolioLine(transactions, range){
-  // VRAI TWR : sur chaque sous-période, on valorise les MÊMES positions (celles détenues
-  // au début) aux prix de début et de fin → pur effet marché. Les flux (achats/ventes) ne
-  // tombent qu'aux frontières (on découpe à chaque date de transaction). Aucun biais.
+  // Courbe = P&L réelle vs capital investi à chaque date :
+  //   perf(t) = (valeur(t) − coût(t) + réalisé(t)) / coût(t)
+  // C'est EXACTEMENT la définition de la KPI "Performance" (latent + réalisé vs investi)
+  // → la courbe finit pile sur le chiffre affiché dans le portefeuille. Cohérence garantie.
   var txns=(transactions||[]).filter(function(t){return t.ticker;})
     .slice().sort(function(a,b){return new Date(a.transaction_date)-new Date(b.transaction_date);});
   if(!txns.length) return [];
@@ -3811,41 +3885,49 @@ async function buildPortfolioLine(transactions, range){
 
   var firstTx=Math.floor(new Date(txns[0].transaction_date).getTime()/1000);
   var tsSet={}; Object.values(hists).forEach(function(pts){(pts||[]).forEach(function(p){if(p.t>=firstTx)tsSet[p.t]=true;});});
-  var priceTs=Object.keys(tsSet).map(Number).sort(function(a,b){return a-b;});
-  if(priceTs.length<2) return [];
-  var step=Math.max(1,Math.floor(priceTs.length/60));
-  priceTs=priceTs.filter(function(_,i){return i%step===0||i===priceTs.length-1;});
-  // + toutes les dates de transaction comme frontières de flux
-  var txTs=txns.map(function(t){return Math.floor(new Date(t.transaction_date).getTime()/1000);});
-  var allSet={}; priceTs.concat(txTs).forEach(function(t){if(t>=firstTx)allSet[t]=true;});
-  var D=Object.keys(allSet).map(Number).sort(function(a,b){return a-b;});
-  if(D.length<2) return [];
+  var timestamps=Object.keys(tsSet).map(Number).sort(function(a,b){return a-b;});
+  if(timestamps.length<2) return [];
+  var step=Math.max(1,Math.floor(timestamps.length/80));
+  timestamps=timestamps.filter(function(_,i){return i%step===0||i===timestamps.length-1;});
 
   function cur(tk){ return (S.prices[tk]&&S.prices[tk].currency)||'USD'; }
   function priceAt(tk,t){ var pts=(hists[tk]||[]).filter(function(q){return q.t<=t;}); return pts.length?pts[pts.length-1].c:null; }
-  function holdingsAt(t){
-    var h={};
+
+  // État du portefeuille (CMP) reconstruit à la date t :
+  // hold = quantités, cost = coût résiduel (€), realized = P&L acté (€)
+  function stateAt(t){
+    var hold={}, costTk={}, realized=0;
     txns.forEach(function(tx){
       if(Math.floor(new Date(tx.transaction_date).getTime()/1000)>t) return;
       var ty=(tx.transaction_type||tx.type||'').toLowerCase();
-      h[tx.ticker]=(h[tx.ticker]||0)+(ty==='buy'?1:ty==='sell'?-1:0)*(tx.quantity||0);
+      var tk=tx.ticker, q=tx.quantity||0;
+      var amtEur=q*toEur(tx.price||0,tx.currency)+toEur(tx.fees||0,tx.currency);
+      if(ty==='buy'){ hold[tk]=(hold[tk]||0)+q; costTk[tk]=(costTk[tk]||0)+amtEur; }
+      else if(ty==='sell'&&(hold[tk]||0)>1e-9){
+        var avg=costTk[tk]/hold[tk];
+        var proceeds=q*toEur(tx.price||0,tx.currency)-toEur(tx.fees||0,tx.currency);
+        realized+=proceeds-q*avg;
+        costTk[tk]-=q*avg; hold[tk]-=q;
+      }
     });
-    return h;
-  }
-  function valHoldings(h,t){
-    var v=0; Object.keys(h).forEach(function(tk){var q=h[tk]; if(q<=1e-7)return; var pr=priceAt(tk,t); if(pr==null)return; v+=q*toEur(pr,cur(tk));});
-    return v;
+    return {hold:hold,costTk:costTk,realized:realized};
   }
 
-  var cum=1, out=[{t:D[0],pct:0}];
-  for(var k=1;k<D.length;k++){
-    var hPrev=holdingsAt(D[k-1]);           // positions détenues sur (D[k-1], D[k]]
-    var vStart=valHoldings(hPrev,D[k-1]);
-    var vEnd=valHoldings(hPrev,D[k]);       // MÊMES positions, prix de fin
-    if(vStart>0.01 && vEnd>0){ var r=vEnd/vStart-1; if(isFinite(r)&&Math.abs(r)<5) cum*=(1+r); }
-    out.push({t:D[k],pct:(cum-1)*100});
-  }
-  return out;
+  var out=[];
+  timestamps.forEach(function(t){
+    var st=stateAt(t);
+    var cost=0; Object.keys(st.costTk).forEach(function(tk){ if((st.hold[tk]||0)>1e-7) cost+=st.costTk[tk]; });
+    if(cost<=0.01){ out.push({t:t,pct:st.realized!==0?null:0}); return; }
+    var v=0;
+    Object.keys(st.hold).forEach(function(tk){
+      var q=st.hold[tk]; if(q<=1e-7) return;
+      var pr=priceAt(tk,t); if(pr==null){ v+= (st.costTk[tk]||0); return; } // pas de prix → au coût (neutre)
+      v+=q*toEur(pr,cur(tk));
+    });
+    var pct=((v-cost+st.realized)/cost)*100;
+    out.push({t:t,pct:isFinite(pct)?pct:null});
+  });
+  return out.filter(function(p){return p.pct!=null;});
 }
 
 // ── Performance indice
@@ -4132,8 +4214,15 @@ async function renderLeaderboard(){
     txByPerson[u.id]=S.transactions||[];
     await Promise.all(friends.map(async function(f){ txByPerson[f.id]=await getFriendTransactions(f.id)||[]; }));
 
-    // Historique des tickers (union) + s'assurer d'avoir devise des prix
+    // Historique des tickers (union) + quotes live manquants (prix + devise exacts)
     var allTickers=[...new Set([].concat.apply([],people.map(function(p){return (txByPerson[p.id]||[]).map(function(t){return t.ticker;});})).filter(Boolean))];
+    var missingQuotes=allTickers.filter(function(tk){return !S.prices[tk];});
+    for(var mq=0;mq<missingQuotes.length;mq+=4){
+      await Promise.all(missingQuotes.slice(mq,mq+4).map(async function(tk){
+        try{var r=await fetch(API+'?symbol='+encodeURIComponent(tk),{signal:AbortSignal.timeout(9000)});var d=await r.json();if(d&&d.price)S.prices[tk]=d;}catch(e){}
+      }));
+      if(mq+4<missingQuotes.length) await new Promise(function(r){setTimeout(r,250);});
+    }
     await _lbFetchHists(allTickers);
 
     var W=_lbWindows();
@@ -4153,35 +4242,41 @@ async function renderLeaderboard(){
     // ── Board des actions : meilleure perf PAR DÉTENTEUR ──
     // Achat avant le début de période → perf du titre sur la période entière.
     // Achat EN COURS de période → perf vs son PRU (sa vraie PV depuis l'entrée).
+    // Perf du détenteur sur [fromTs, now] — tout en EUR, comme le portefeuille
     function _lbUserStockPerf(txns, tk, fromTs){
       var t=(txns||[]).filter(function(x){return x.ticker===tk;})
         .slice().sort(function(a,b){return new Date(a.transaction_date)-new Date(b.transaction_date);});
       if(!t.length) return null;
-      var firstBuy=null, qty=0, cost=0; // PRU en devise NATIVE (pas de FX)
+      var firstBuy=null, qty=0, costEur=0; // CMP en EUR via toEur (gère achats EUR sur titres SEK/KRW…)
       t.forEach(function(tx){
         var ty=(tx.transaction_type||tx.type||'').toLowerCase();
         var ts=Math.floor(new Date(tx.transaction_date).getTime()/1000);
-        if(ty==='buy'){ if(firstBuy==null)firstBuy=ts; cost+=(tx.quantity||0)*(tx.price||0)+(tx.fees||0); qty+=(tx.quantity||0); }
-        else if(ty==='sell'&&qty>1e-9){ var avg=cost/qty; cost-=(tx.quantity||0)*avg; qty-=(tx.quantity||0); }
+        if(ty==='buy'){ if(firstBuy==null)firstBuy=ts;
+          costEur+=(tx.quantity||0)*toEur(tx.price||0,tx.currency)+toEur(tx.fees||0,tx.currency); qty+=(tx.quantity||0); }
+        else if(ty==='sell'&&qty>1e-9){ var avg=costEur/qty; costEur-=(tx.quantity||0)*avg; qty-=(tx.quantity||0); }
       });
       if(qty<=1e-7) return null; // plus en portefeuille
-      var pts=_lbHistCache[tk]||[]; if(!pts.length) return null;
-      var last=pts[pts.length-1].c; if(!last) return null;
-      var pru=cost/qty;
-      var sincePurchase=(pru>0)?(last/pru-1)*100:null; // PV réelle vs PRU (toujours fiable)
+      var live=S.prices[tk]; // quote live = source de vérité (prix + devise exacts)
+      var pts=_lbHistCache[tk]||[];
+      var histLast=pts.length?pts[pts.length-1].c:null;
+      var curNative=(live&&live.price)||histLast; if(!curNative) return null;
+      var curEur=toEur(curNative,(live&&live.currency)||'USD');
+      var pru=costEur/qty;
+      var sincePurchase=(pru>0)?(curEur/pru-1)*100:null; // = P&L % du portefeuille
 
-      // Acheté EN COURS de période → sa PV réelle
+      // Acheté EN COURS de période → sa PV réelle (cohérente avec son portefeuille)
       if(firstBuy!=null && firstBuy>fromTs)
         return (sincePurchase!=null&&isFinite(sincePurchase)&&Math.abs(sincePurchase)<3000)?sincePurchase:null;
 
-      // Détenu AVANT la période → variation du cours sur la période
+      // Détenu AVANT la période → variation du cours sur la période (historique)
+      if(!pts.length) return null;
+      // Sanity : si l'historique dévie fortement du prix live (split mal ajusté…), il est inutilisable
+      if(live&&live.price&&histLast&&Math.abs(histLast/live.price-1)>0.2) return null;
       var start=null; for(var i=0;i<pts.length;i++){ if(pts[i].t<=fromTs) start=pts[i].c; else break; }
       if(start==null) start=(pts[0].t>=fromTs)?pts[0].c:null;
-      if(!start) return sincePurchase;
-      var r=(last/start-1)*100;
-      if(!isFinite(r)) return sincePurchase;
-      // Garde-fou : historique douteux (split mal ajusté, point aberrant) → on retombe sur la PV réelle
-      if(Math.abs(r)>600 && sincePurchase!=null && Math.abs(sincePurchase)<Math.abs(r)) return sincePurchase;
+      if(!start) return null;
+      var r=(histLast/start-1)*100;
+      if(!isFinite(r)||Math.abs(r)>600) return null;
       return r;
     }
     var stocks={week:[],month:[],ytd:[]};
