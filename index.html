@@ -725,18 +725,18 @@ async function renderPortfolio(){
       <div class="right-panel">
         <div class="panel-card"><div class="panel-title">Mes comptes</div>${acctsMini}</div>
         <div class="panel-card">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-            <div class="panel-title" style="margin-bottom:0">Ratios principaux</div>
-            <button class="btn btn-ghost btn-sm" id="ratios-btn" onclick="loadRatios()">Charger</button>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0;cursor:pointer" onclick="togglePanel('ratios-wrap',this)">
+            <div class="panel-title" style="margin-bottom:0">Ratios principaux <span class="pc-chev" style="font-size:10px;color:var(--muted)">▸</span></div>
+            <button class="btn btn-ghost btn-sm" id="ratios-btn" onclick="event.stopPropagation();expandPanel('ratios-wrap');loadRatios()">Charger</button>
           </div>
-          <div id="ratios-content" style="color:var(--muted);font-size:12px">Clique "Charger" pour calculer les moyennes pondérées.</div>
+          <div id="ratios-wrap" style="display:none;margin-top:12px"><div id="ratios-content" style="color:var(--muted);font-size:12px">Clique "Charger" pour calculer les moyennes pondérées.</div></div>
         </div>
         <div class="panel-card">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-            <div class="panel-title" style="margin-bottom:0">📐 Risque</div>
-            <button class="btn btn-ghost btn-sm" id="risk-btn" onclick="loadRiskMetrics()">Charger</button>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0;cursor:pointer" onclick="togglePanel('risk-wrap',this)">
+            <div class="panel-title" style="margin-bottom:0">📐 Risque <span class="pc-chev" style="font-size:10px;color:var(--muted)">▸</span></div>
+            <button class="btn btn-ghost btn-sm" id="risk-btn" onclick="event.stopPropagation();expandPanel('risk-wrap');loadRiskMetrics()">Charger</button>
           </div>
-          <div id="risk-content" style="color:var(--muted);font-size:12px">Bêta, Sharpe, alpha, volatilité, drawdown — sur 1 an, composition actuelle.</div>
+          <div id="risk-wrap" style="display:none;margin-top:12px"><div id="risk-content" style="color:var(--muted);font-size:12px">Bêta, Sharpe, alpha, volatilité, drawdown — sur 1 an, composition actuelle.</div></div>
         </div>
       </div>
     </div>
@@ -1234,8 +1234,8 @@ function renderWatchlistTable(){
     if(w.target_pe!=null){ tgt.push('P/E ≤ '+(+w.target_pe).toFixed(1)); if(f&&f.trailingPE&&f.trailingPE<=w.target_pe) hit=true; }
     if(w.target_fwdpe!=null){ tgt.push('Fwd ≤ '+(+w.target_fwdpe).toFixed(1)); if(f&&f.forwardPE&&f.forwardPE<=w.target_fwdpe) hit=true; }
     var tgtCell=tgt.length
-      ? '<div style="font-size:10px;color:var(--muted)">'+tgt.join('<br>')+'</div>'+(hit?'<span style="font-size:9px;font-weight:800;background:rgba(34,197,94,.15);color:#22c55e;padding:2px 6px;border-radius:4px">🎯 ATTEINT</span>':'')
-      : '<span style="color:var(--muted2);font-size:11px">—</span>';
+      ? '<div onclick="editTargets(\''+w.id+'\')" style="cursor:pointer"><div style="font-size:10px;color:var(--muted)">'+tgt.join('<br>')+'</div>'+(hit?'<span style="font-size:9px;font-weight:800;background:rgba(34,197,94,.15);color:#22c55e;padding:2px 6px;border-radius:4px">🎯 ATTEINT</span>':'')+'</div>'
+      : '<span onclick="editTargets(\''+w.id+'\')" style="color:var(--blue);font-size:11px;cursor:pointer">+ Définir 🎯</span>';
     return '<tr'+(hit?' style="background:rgba(34,197,94,.05)"':'')+'>'+
       '<td style="text-align:left;padding-left:20px"><div class="ticker-cell">'+
       mkLogoCell(w.ticker)+
@@ -2268,6 +2268,20 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
 
   el.innerHTML =
     '<div style="margin-top:4px;padding-top:24px;border-top:1px solid var(--border)">' +
+    '<div id="cd-tabbar" style="display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:18px;overflow-x:auto">'+
+      ['val|📈 Valorisation','fin|📊 Historique financier','mat|🎯 Matrice','moat|🏰 MOAT & IA'].map(function(t){var p=t.split('|');
+        return '<button id="cdtb-'+p[0]+'" onclick="showCdTab(\''+p[0]+'\')" style="padding:9px 16px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;white-space:nowrap;color:'+(p[0]==='val'?'var(--text)':'var(--muted)')+';border-bottom:2px solid '+(p[0]==='val'?'var(--blue)':'transparent')+';margin-bottom:-1px">'+p[1]+'</button>';
+      }).join('')+'</div>' +
+    '<div id="cdtab-val">' +
+    '<h3 style="font-size:15px;font-weight:700;margin:4px 0 16px">📈 Valorisation historique</h3>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
+      '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">P/E</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-pe"></canvas></div></div>' +
+      '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Fwd P/E <span style="text-transform:none;font-weight:400">(EPS exercice suivant)</span></div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-pefwd"></canvas></div></div>' +
+      '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">P/FCF</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-pfcf"></canvas></div></div>' +
+      '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">P/OCF</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-pocf"></canvas></div></div>' +
+    '</div>' +
+    '</div>' +
+    '<div id="cdtab-fin" style="display:none">' +
     '<div class="cd-charts-grid"><div style="display:flex;gap:6px;margin-bottom:14px;grid-column:1/-1;align-items:center"><span style="font-size:11px;color:var(--muted)">Vue :</span><button id="fin-btn-annual" onclick="switchFinMode(&quot;annual&quot;,&quot;'+ticker+'&quot;)" style="padding:3px 10px;font-size:11px;border:1px solid var(--accent);border-radius:20px;background:var(--accent)22;color:var(--accent);cursor:pointer">Annuel</button><button id="fin-btn-quarterly" onclick="switchFinMode(&quot;quarterly&quot;,&quot;'+ticker+'&quot;)" style="padding:3px 10px;font-size:11px;border:1px solid var(--border2);border-radius:20px;background:transparent;color:var(--muted);cursor:pointer">Trimestriel</button></div><h3 style="font-size:15px;font-weight:700;margin-bottom:16px">📊 Historique financier</h3>' +
     '<div style="'+grids3+'">' +
       '<div class="card"><div id="fin-title-rev" style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Revenus & Bénéfices (Md'+sym+')</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-rev"></canvas></div></div>' +
@@ -2293,17 +2307,20 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
       }).join('');
       return '<div class="card" style="margin-bottom:16px"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase">👥 Croissance utilisateurs <span style="color:var(--green);font-size:10px">● Données manuelles</span></div>'+rows+'</div>';
     })() +
-    '<h3 style="font-size:15px;font-weight:700;margin:4px 0 16px">📈 Valorisation historique</h3>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
-      '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">P/E</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-pe"></canvas></div></div>' +
-      '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Fwd P/E <span style="text-transform:none;font-weight:400">(EPS exercice suivant)</span></div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-pefwd"></canvas></div></div>' +
-      '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">P/FCF</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-pfcf"></canvas></div></div>' +
-      '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">P/OCF</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-pocf"></canvas></div></div>' +
     '</div>' +
-    '<h3 style="font-size:15px;font-weight:700;margin:20px 0 4px">🎯 Matrice de rendement — 5 ans</h3>' +
-    '<p style="font-size:11px;color:var(--muted);margin:0 0 12px">Rendement annualisé selon croissance de l\u0027EPS × multiple de sortie. Clique une cellule pour choisir ton scénario.</p>' +
+    '<div id="cdtab-mat" style="display:none">' +
+    '<h3 style="font-size:15px;font-weight:700;margin:4px 0 4px">🎯 Matrice de rendement — 5 ans</h3>' +
+    '<p style="font-size:11px;color:var(--muted);margin:0 0 12px">Rendement annualisé selon croissance de l\u0027EPS × multiple de sortie. Clique une cellule pour choisir ton scénario — les hypothèses sont éditables.</p>' +
     '<div class="card" id="cd-yield-matrix"><div style="color:var(--muted);font-size:12px;padding:10px">Calcul…</div></div>' +
-    '</div></div>';
+    '</div>' +
+    '<div id="cdtab-moat" style="display:none"></div>' +
+    '</div>';
+
+  // MOAT & IA : déplace la section existante dans son onglet
+  setTimeout(function(){
+    var ana=document.getElementById('cd-analysis-section'), host=document.getElementById('cdtab-moat');
+    if(ana&&host&&ana.parentElement!==host) host.appendChild(ana);
+  },80);
 
   function _buildSegmentCard(latest, allManual){
     // YoY : cherche exactement le même trimestre/exercice un an avant
@@ -2368,13 +2385,13 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
   var ratioHist=[]; try{ ratioHist=await fetchPriceHistory(ticker,'3y')||[]; }catch(e){}
   var peTS  =_ratioTimeSeries(ratioHist,_ttmKnots(fin,manualData,'eps_diluted','eps'),
     function(px,ttm){ return ttm>0?px/ttm:null; });
-  // Fwd P/E : à chaque date, prix de l'époque ÷ EPS de l'exercice SUIVANT (réalisé)
-  // → knots EPS annuels décalés d'un an en arrière
+  // Fwd P/E : à chaque date de l'année calendaire Y, prix ÷ EPS de l'exercice étiqueté Y+1 (réalisé)
+  // (knots décalés de 2 ans : gère les exercices décalés type NVDA où FY2026 ≈ calendaire 2025)
   var _fwdKnots=[];
   (fin.years||[]).forEach(function(y,i){
     var v=(fin.eps||[])[i]; if(v==null) return;
     var yr=parseInt(String(y).replace('FY',''))||null; if(!yr) return;
-    _fwdKnots.push({t:Date.UTC(yr-1,11,31)/1000, v:v});
+    _fwdKnots.push({t:Date.UTC(yr-2,11,31)/1000, v:v});
   });
   _fwdKnots.sort(function(a,b){return a.t-b.t;});
   var pefwdTS=_ratioTimeSeries(ratioHist,_fwdKnots,function(px,eps){ return eps>0?px/eps:null; });
@@ -2414,13 +2431,13 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
         {label:'Capex',data:fin.capex,       color:'#ef4444'},
       ], 'fin-title-cf', sym);
       cdWaterfall('cdchart-waterfall', wf, sym);
-      if(peTS.length>=8)   cdRatioTimeChart('cdchart-pe',  'P/E',  peTS,  f&&f.trailingPE,_buyTs,_sellTs);
+      if(peTS.length>=8)   cdRatioTimeChart('cdchart-pe',  'P/E',  peTS,  null,_buyTs,_sellTs);
       else cdValChart('cdchart-pe',   fin.years, peVals,   f&&f.trailingPE, 'P/E');
       if(pefwdTS.length>=8) cdRatioTimeChart('cdchart-pefwd','Fwd P/E',pefwdTS,f&&f.forwardPE,_buyTs,_sellTs);
       else if(document.getElementById('cdchart-pefwd')) cdValChart('cdchart-pefwd', fin.years, peVals, f&&f.forwardPE, 'Fwd P/E');
-      if(pfcfTS.length>=8) cdRatioTimeChart('cdchart-pfcf','P/FCF',pfcfTS,curPFCF,_buyTs,_sellTs);
+      if(pfcfTS.length>=8) cdRatioTimeChart('cdchart-pfcf','P/FCF',pfcfTS,null,_buyTs,_sellTs);
       else cdValChart('cdchart-pfcf', fin.years, pfcfVals, curPFCF,          'P/FCF');
-      if(pocfTS.length>=8) cdRatioTimeChart('cdchart-pocf','P/OCF',pocfTS,curPOCF,_buyTs,_sellTs);
+      if(pocfTS.length>=8) cdRatioTimeChart('cdchart-pocf','P/OCF',pocfTS,null,_buyTs,_sellTs);
       else cdValChart('cdchart-pocf', fin.years, pocfVals, curPOCF,          'P/OCF');
       try{ window._cdLastFin=fin; window._cdLastNativePrice=curPrice; renderYieldMatrix(ticker, curPrice, f, fin); }catch(e){ var ym=document.getElementById('cd-yield-matrix'); if(ym) ym.innerHTML='<div style="color:var(--muted);font-size:12px">Données insuffisantes (EPS manquant).</div>'; }
       // Segments pie (données manuelles)
@@ -2901,6 +2918,16 @@ function cdRatioTimeChart(id,label,series,current,buyTs,sellTs){
       y:{position:'right',ticks:{font:{size:10},color:'#6b7280',callback:function(v){return v+'x';}},grid:{color:'rgba(255,255,255,.05)'}}}}});
 }
 
+// Onglets de la fiche entreprise (Valorisation / Financier / Matrice / MOAT)
+window.showCdTab=function(t){
+  ['val','fin','mat','moat'].forEach(function(k){
+    var c=document.getElementById('cdtab-'+k), b=document.getElementById('cdtb-'+k);
+    if(c) c.style.display=(k===t?'':'none');
+    if(b){ b.style.color=(k===t?'var(--text)':'var(--muted)'); b.style.borderBottom='2px solid '+(k===t?'var(--blue)':'transparent'); }
+  });
+  setTimeout(function(){ window.dispatchEvent(new Event('resize')); },60); // Chart.js recalcule les tailles
+};
+
 // ═══ MATRICE DE RENDEMENT (5 ans) — inspirée baggr ═══════════════════════
 // Rendement annualisé = ((EPS0 × (1+g)^5 × multiple) / prix)^(1/5) − 1
 // Prix juste = valeur future actualisée à 10 %/an · Marge de sécurité = 1 − prix/prix juste
@@ -2908,17 +2935,20 @@ var _ymSel={};
 function renderYieldMatrix(ticker, price, f, fin){
   var el=document.getElementById('cd-yield-matrix'); if(!el) return;
   function lastNN(arr){ if(!arr)return null; for(var i=arr.length-1;i>=0;i--){ if(arr[i]!=null) return arr[i]; } return null; }
-  // EPS de départ : TTM via P/E Yahoo, sinon dernier EPS annuel connu
-  var eps0=(f&&f.trailingPE&&price)?(price/f.trailingPE):lastNN(fin&&fin.eps);
+  var st=_ymSel[ticker]||{};
+  // EPS de départ : éditable ; défaut = TTM via P/E Yahoo, sinon dernier EPS annuel connu
+  var eps0=st.eps!=null?st.eps:((f&&f.trailingPE&&price)?(price/f.trailingPE):lastNN(fin&&fin.eps));
   if(!(eps0>0)||!(price>0)){ el.innerHTML='<div style="color:var(--muted);font-size:12px">EPS indisponible — saisis un EPS annuel dans les résultats pour activer la matrice.</div>'; return; }
-  // Centres : croissance analystes (fwd 5y > fwd 1y > 15 %) et multiple forward actuel
-  var gC=Math.round((f&&(f.epsGrowthFwd5Y!=null?f.epsGrowthFwd5Y:f.epsGrowthFwd1Y))||15); gC=Math.min(35,Math.max(6,gC));
-  var mCur=Math.round((f&&(f.forwardPE||f.trailingPE))||20); mCur=Math.min(60,Math.max(8,mCur));
-  if(!_ymSel[ticker]) _ymSel[ticker]={g:gC,m:mCur};
-  var sel=_ymSel[ticker];
+  // Centres éditables : croissance (déf. = consensus analystes 5 ans Yahoo) et multiple (déf. = fwd P/E actuel)
+  var gC=st.gC!=null?st.gC:Math.min(35,Math.max(6,Math.round((f&&(f.epsGrowthFwd5Y!=null?f.epsGrowthFwd5Y:f.epsGrowthFwd1Y))||15)));
+  var mCur=st.mC!=null?st.mC:Math.min(60,Math.max(8,Math.round((f&&(f.forwardPE||f.trailingPE))||20)));
+  if(st.g==null||st.m==null){ st={g:gC,m:mCur,eps:eps0,gC:gC,mC:mCur}; _ymSel[ticker]=st; }
+  st.eps=eps0; st.gC=gC; st.mC=mCur;
+  var sel=st;
   var gRows=[],mCols=[];
   for(var g=Math.max(2,gC-7);g<=gC+7;g++) gRows.push(g);
   for(var m=Math.max(5,mCur-7);m<=mCur+7;m++) mCols.push(m);
+  if(gRows.indexOf(sel.g)<0) sel.g=gC; if(mCols.indexOf(sel.m)<0) sel.m=mCur;
 
   function annRet(g,m){ return (Math.pow((eps0*Math.pow(1+g/100,5)*m)/price,1/5)-1)*100; }
   function cellColor(r){ return r<8?'#ef4444':r<12?'#f59e0b':'#22c55e'; }
@@ -2928,11 +2958,19 @@ function renderYieldMatrix(ticker, price, f, fin){
   var marge=(1-price/fair)*100;
   var cSym=(S.prices[ticker]&&S.prices[ticker].currency==='EUR')?'€':'$';
 
-  var html='<div style="display:flex;gap:26px;flex-wrap:wrap;margin-bottom:14px">'+
+  var html='<div style="display:flex;gap:26px;flex-wrap:wrap;margin-bottom:10px">'+
     '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Prix juste (10 %/an)</div><div style="font-size:20px;font-weight:800;color:#5b7ef5" class="mono">'+fair.toFixed(2)+' '+cSym+'</div></div>'+
     '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Rendement estimé</div><div style="font-size:20px;font-weight:800;color:'+cellColor(selRet)+'" class="mono">'+selRet.toFixed(2)+' %/an</div></div>'+
     '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Marge de sécurité</div><div style="font-size:20px;font-weight:800;color:'+(marge>=0?'#22c55e':'#f59e0b')+'" class="mono">'+(marge>=0?'+':'')+marge.toFixed(2)+' %</div></div>'+
-    '<div style="align-self:end;font-size:10px;color:var(--muted2)">Scénario : EPS +'+sel.g+' %/an × multiple '+sel.m+'x · EPS base '+eps0.toFixed(2)+' '+cSym+'</div>'+
+  '</div>'+
+  // Hypothèses éditables
+  '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin-bottom:14px;padding:10px;background:var(--bg2,rgba(255,255,255,.02));border-radius:8px">'+
+    '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">EPS de base ('+cSym+')</label><br><input id="ym-eps" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+eps0.toFixed(2)+'"></div>'+
+    '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Croissance centrale %</label><br><input id="ym-g" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+gC+'"></div>'+
+    '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Multiple central</label><br><input id="ym-m" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+mCur+'"></div>'+
+    '<button class="btn btn-ghost btn-sm" onclick="window._ymApply(\''+ticker.replace(/'/g,"\\'")+'\')">Appliquer</button>'+
+    '<button class="btn btn-ghost btn-sm" onclick="window._ymReset(\''+ticker.replace(/'/g,"\\'")+'\')" title="Revenir au consensus analystes">↺ Consensus</button>'+
+    '<span style="font-size:10px;color:var(--muted2)">Défauts : croissance = consensus analystes EPS 5 ans (Yahoo) · multiple = fwd P/E actuel</span>'+
   '</div>'+
   '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:11px;white-space:nowrap" class="mono">'+
   '<tr><th style="padding:5px 8px;color:var(--muted);font-size:9px;text-align:left">CROISS. \\ MULT.</th>'+
@@ -2944,13 +2982,27 @@ function renderYieldMatrix(ticker, price, f, fin){
         return '<td onclick="window._ymPick(\''+ticker.replace(/'/g,"\\'")+'\','+g+','+m+')" style="padding:5px 8px;text-align:right;cursor:pointer;color:'+cellColor(r)+';'+(isSel?'outline:1.5px solid #5b7ef5;border-radius:4px;font-weight:800;':'')+(m===mCur?'background:rgba(91,126,245,.07);':'')+'">'+r.toFixed(2)+'%</td>';
       }).join('')+'</tr>';
   }).join('')+'</table></div>'+
-  '<div style="font-size:10px;color:var(--muted2);margin-top:10px">Modèle simplifié : EPS TTM projeté 5 ans au taux choisi, valorisé au multiple de sortie, hors dividendes/rachats. Colonne bleue = multiple forward actuel ('+mCur+'x). Vert ≥ 12 %/an · Orange 8–12 % · Rouge < 8 %.</div>';
+  '<div style="font-size:10px;color:var(--muted2);margin-top:10px">Scénario : EPS +'+sel.g+' %/an × multiple '+sel.m+'x · EPS base '+eps0.toFixed(2)+' '+cSym+'. Modèle simplifié : EPS projeté 5 ans, valorisé au multiple de sortie (= P/E <i>trailing</i> en année 5), hors dividendes/rachats. Vert ≥ 12 %/an · Orange 8–12 % · Rouge < 8 %.</div>';
   el.innerHTML=html;
 }
-window._ymPick=function(ticker,g,m){ _ymSel[ticker]={g:g,m:m};
+window._ymApply=function(ticker){
+  function v(id){ var x=parseFloat((document.getElementById(id).value||'').replace(',','.')); return isFinite(x)?x:null; }
+  var st=_ymSel[ticker]||{};
+  var e=v('ym-eps'), g=v('ym-g'), m=v('ym-m');
+  if(e>0) st.eps=e;
+  if(g!=null) st.gC=Math.round(Math.min(60,Math.max(2,g)));
+  if(m!=null) st.mC=Math.round(Math.min(120,Math.max(5,m)));
+  st.g=st.gC; st.m=st.mC; _ymSel[ticker]=st;
+  window._ymRerender(ticker);
+};
+window._ymReset=function(ticker){ delete _ymSel[ticker]; window._ymRerender(ticker); };
+window._ymRerender=function(ticker){
   var f=(S.fundamentals&&S.fundamentals[ticker])||null;
   var price=window._cdLastNativePrice||(S.prices[ticker]&&S.prices[ticker].price);
   renderYieldMatrix(ticker, price, f, window._cdLastFin||{eps:[]});
+};
+window._ymPick=function(ticker,g,m){ var st=_ymSel[ticker]||{}; st.g=g; st.m=m; _ymSel[ticker]=st;
+  window._ymRerender(ticker);
 };
 
 function cdValChart(id, years, vals, currentRatio, label) {
@@ -3911,6 +3963,8 @@ async function renderFriendPortfolio(friendId, friendName, friendVis){
     var tabs='<div style="display:flex;gap:4px;margin-bottom:18px;border-bottom:1px solid var(--border);padding-bottom:0">'+
       '<button id="ftab-ptf" onclick="switchFriendTab(\'ptf\')" style="padding:8px 16px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;color:var(--text);border-bottom:2px solid var(--accent);margin-bottom:-1px">📊 Portefeuille</button>'+
       '<button id="ftab-rat" onclick="switchFriendTab(\'rat\')" style="padding:8px 16px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px">📐 Ratios</button>'+
+      '<button id="ftab-risk" onclick="switchFriendTab(\'risk\')" style="padding:8px 16px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px">📉 Risque</button>'+
+      '<button id="ftab-tgt" onclick="switchFriendTab(\'tgt\');loadFriendTargets()" style="padding:8px 16px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px">🎯 Cibles</button>'+
       '</div>';
 
     // ── Tab Portefeuille (tri + P&L € : voir _friendRows / clickFriendSort) ──
@@ -3979,10 +4033,19 @@ async function renderFriendPortfolio(friendId, friendName, friendVis){
           '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">CA 1A</th>'+
         '</tr></thead><tbody>'+ratRows+'</tbody></table></div></div>';
 
+    var riskTab='<div id="ftab-risk-content" style="display:none">'+
+      '<div class="card" style="max-width:520px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+      '<div class="panel-title" style="margin:0">📐 Risque (1 an, composition actuelle)</div>'+
+      '<button class="btn btn-ghost btn-sm" onclick="loadFriendRisk()">Charger</button></div>'+
+      '<div id="friend-risk-content" style="color:var(--muted);font-size:12px">Bêta, Sharpe, alpha, volatilité, drawdown.</div></div></div>';
+    var tgtTab='<div id="ftab-tgt-content" style="display:none">'+
+      '<div id="friend-targets" class="card"><div style="color:var(--muted);font-size:12px">Chargement…</div></div></div>';
+    window._friendPos=pos; window._friendId=friendId;
+
     pg.innerHTML='<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">'+
       '<button class="btn btn-ghost btn-sm" onclick="navigate(\'amis\')">← Retour</button>'+
       '<h2 style="font-size:18px;font-weight:700">📊 '+friendName+'</h2></div>'+
-      kpis+tabs+ptfTab+ratTab;
+      kpis+tabs+ptfTab+ratTab+riskTab+tgtTab;
 
     // ── Donut (multi-modes via renderFriendChart) ──
     setTimeout(function(){ renderFriendChart(); },80);
@@ -4009,7 +4072,7 @@ async function renderFriendPortfolio(friendId, friendName, friendVis){
 }
 
 window.switchFriendTab=function(tab){
-  ['ptf','rat'].forEach(function(t){
+  ['ptf','rat','risk','tgt'].forEach(function(t){
     var btn=document.getElementById('ftab-'+t);
     var cnt=document.getElementById('ftab-'+t+'-content');
     if(!btn||!cnt) return;
@@ -4018,6 +4081,33 @@ window.switchFriendTab=function(tab){
     btn.style.borderBottomColor=active?'var(--accent)':'transparent';
     cnt.style.display=active?'':'none';
   });
+};
+
+// Risque du portefeuille d'un ami (même moteur que le sien)
+window.loadFriendRisk=function(){ _riskCompute(window._friendPos||[], 'friend-risk-content'); };
+
+// Cibles d'achat d'un ami (watchlist + niveaux) — nécessite la policy RLS élargie
+window.loadFriendTargets=async function(){
+  var el=document.getElementById('friend-targets'); if(!el) return;
+  if(el.dataset.loaded) return; 
+  try{
+    var rows=await dbGet('watchlist','user_id=eq.'+window._friendId+'&order=created_at')||[];
+    el.dataset.loaded='1';
+    if(!rows.length){ el.innerHTML='<div style="color:var(--muted);font-size:12px">Aucune cible définie (ou partage non activé côté base — policy SQL à lancer).</div>'; return; }
+    el.innerHTML='<table style="width:100%;border-collapse:collapse">'+
+      '<thead><tr style="border-bottom:1px solid var(--border)">'+
+      '<th style="padding:8px;text-align:left;font-size:11px;color:var(--muted)">TITRE</th>'+
+      '<th style="padding:8px;text-align:left;font-size:11px;color:var(--muted)">🎯 CIBLES</th></tr></thead><tbody>'+
+      rows.map(function(w){
+        var tgt=[];
+        if(w.target_price!=null) tgt.push('Prix ≤ '+(+w.target_price).toFixed(2));
+        if(w.target_pe!=null) tgt.push('P/E ≤ '+(+w.target_pe).toFixed(1));
+        if(w.target_fwdpe!=null) tgt.push('Fwd P/E ≤ '+(+w.target_fwdpe).toFixed(1));
+        return '<tr style="border-bottom:1px solid var(--border2)">'+
+          '<td style="padding:9px 8px"><span class="cd-link" data-ticker="'+w.ticker+'" style="font-weight:600;cursor:pointer;color:var(--blue)">'+(w.name||w.ticker)+'</span> <span style="font-size:10px;color:var(--muted)">'+w.ticker+'</span></td>'+
+          '<td style="padding:9px 8px;font-size:12px;color:var(--muted)">'+(tgt.length?tgt.join(' · '):'<span style="color:var(--muted2)">en watchlist, sans niveau</span>')+'</td></tr>';
+      }).join('')+'</tbody></table>';
+  }catch(e){ el.innerHTML='<div style="color:var(--red);font-size:12px">'+(e.message||e)+'</div>'; }
 };
 
 
@@ -4514,13 +4604,30 @@ async function renderLeaderboard(){
   }
 }
 
+// Panneaux repliables (Ratios principaux / Risque)
+window.togglePanel=function(id,hd){
+  var w=document.getElementById(id); if(!w) return;
+  var open=w.style.display==='none';
+  w.style.display=open?'':'none';
+  var ch=hd&&hd.querySelector('.pc-chev'); if(ch) ch.textContent=open?'▾':'▸';
+};
+window.expandPanel=function(id){
+  var w=document.getElementById(id); if(w&&w.style.display==='none'){ w.style.display='';
+    var hd=w.previousElementSibling; var ch=hd&&hd.querySelector('.pc-chev'); if(ch) ch.textContent='▾'; }
+};
+
 // ═══ RISQUE PORTEFEUILLE (1 an, composition actuelle, hebdo vs S&P 500) ═══
 async function loadRiskMetrics(){
-  var el=document.getElementById('risk-content'); var btn=document.getElementById('risk-btn');
-  if(!el) return; if(btn) btn.disabled=true;
+  var btn=document.getElementById('risk-btn'); if(btn) btn.disabled=true;
+  var pos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return p.quantity>1e-7;});
+  await _riskCompute(pos,'risk-content');
+  if(btn) btn.disabled=false;
+}
+async function _riskCompute(pos, containerId){
+  var el=document.getElementById(containerId); if(!el) return;
   el.innerHTML='<div style="text-align:center;padding:10px"><div class="spinner"></div></div>';
   try{
-    var pos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return p.quantity>1e-7;});
+    pos=(pos||[]).filter(function(p){return p.quantity>1e-7;});
     if(!pos.length) throw new Error('Aucune position');
     var tickers=pos.map(function(p){return p.ticker;});
     var hists={};
@@ -4572,7 +4679,6 @@ async function loadRiskMetrics(){
       row('Max drawdown 1A',(maxDD*100).toFixed(1)+' %','var(--red)')+
       '<div style="font-size:10px;color:var(--muted2);margin-top:8px">Hebdo, 1 an, composition actuelle projetée (pas tes flux réels). Perf ann. implicite : '+(retAnn*100).toFixed(1)+' % vs S&P '+(retSpx*100).toFixed(1)+' %.</div>';
   }catch(e){ el.innerHTML='<div style="color:var(--red);font-size:12px">'+(e.message||e)+'</div>'; }
-  if(btn) btn.disabled=false;
 }
 
 // ═══ JOURNAL DE DÉCISIONS ═════════════════════════════════════════════════
