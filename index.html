@@ -2,8 +2,17 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Valio</title>
+<!-- PWA : app installable sur mobile -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0a0e1a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Valio">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="icon" type="image/png" href="/icon-192.png">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -2283,7 +2292,7 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
 
   var grids3 = 'display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:16px';
   var grids2 = 'display:grid;grid-template-columns:1fr 2fr;gap:16px;margin-bottom:16px';
-  var cH = '190px'; // chart height
+  var cH = '250px'; // chart height
 
   el.innerHTML =
     '<div style="margin-top:4px">' +
@@ -2990,7 +2999,12 @@ window.showCdTab=function(t,noScroll){
     });
   }
   window.scrollTo({top:0,behavior:'smooth'});
-  setTimeout(function(){ window.dispatchEvent(new Event('resize')); },60);
+  // Forcer Chart.js à recalculer la taille (les graphes dessinés en display:none
+  // gardent une largeur figée → on les redimensionne une fois l'onglet visible)
+  setTimeout(function(){
+    window.dispatchEvent(new Event('resize'));
+    Object.keys(window).forEach(function(k){ if(k.indexOf('_ch_cdchart')===0 && window[k] && window[k].resize){ try{window[k].resize();}catch(e){} } });
+  },80);
 };
 
 // ═══ MATRICE DE RENDEMENT (5 ans) — inspirée baggr ═══════════════════════
@@ -4995,6 +5009,14 @@ document.addEventListener('click', function(e){
   var el = e.target.closest ? e.target.closest('.cd-link') : null;
   if(el) openCompanyDetail(el.dataset.ticker, el.textContent.trim());
 });
+</script>
+<script>
+// Enregistrement du service worker (PWA installable). Sans effet en local file://.
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('/sw.js').catch(function(){});
+  });
+}
 </script>
 </body>
 </html>
