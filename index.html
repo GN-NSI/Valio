@@ -1745,13 +1745,6 @@ async function renderCompanyDetail(ticker, name) {
         metric('EPS 1A', f && f.epsGrowth1Y, pct, col_grw) +
         metric('FCF Growth', f && f.fcfGrowth, pct, col_grw) +
       '</div>' +
-      // Santé financière
-      '<div class="card"><div class="stats-section-title" style="margin-bottom:12px">Santé financière</div>' +
-        metric('Dette / EBITDA', f && f.netDebtToEBITDA, xs, col_debt) +
-        metric('Current Ratio', f && f.currentRatio, xs, function(v){return v>2?'var(--green)':v>1?'var(--yellow)':'var(--red)';}) +
-        (f && f.freeCashflow ? metric('Free Cash Flow', f.freeCashflow/1e9, function(v){return v.toFixed(2)+' Md $';}, function(v){return v>0?'var(--green)':'var(--red)';}) : '') +
-        (f && f.mktCap ? metric('Market Cap', f.mktCap/1e9, function(v){return v.toFixed(0)+' Md $';}, function(){return 'var(--text)';}) : '') +
-      '</div>' +
     '</div>' + // Fin grille gauche
     '</div>' + // Fin colonne gauche
     '<div>' + // Colonne droite : graphique
@@ -1773,6 +1766,15 @@ async function renderCompanyDetail(ticker, name) {
         '</div>' +
       '</div>' +
       '<div id="cd-fin-right" style="margin-top:14px"></div>' +
+      // Santé financière déplacée ici pour combler le vide à droite (équilibrage colonnes)
+      '<div class="card" style="margin-top:14px"><div class="stats-section-title" style="margin-bottom:12px">Santé financière</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px">' +
+        metric('Dette / EBITDA', f && f.netDebtToEBITDA, xs, col_debt) +
+        metric('Current Ratio', f && f.currentRatio, xs, function(v){return v>2?'var(--green)':v>1?'var(--yellow)':'var(--red)';}) +
+        (f && f.freeCashflow ? metric('Free Cash Flow', f.freeCashflow/1e9, function(v){return v.toFixed(2)+' Md $';}, function(v){return v>0?'var(--green)':'var(--red)';}) : '') +
+        (f && f.mktCap ? metric('Market Cap', f.mktCap/1e9, function(v){return v.toFixed(0)+' Md $';}, function(){return 'var(--text)';}) : '') +
+        '</div>' +
+      '</div>' +
     '</div>' +
     '</div>'; // Fin grid 2 colonnes
 
@@ -2121,6 +2123,17 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
     }
   });
 
+  // EPS manquant chez Yahoo (fréquent : META, SPGI… l'API modules renvoie dilutedEps=null)
+  // → dérivé du résultat net ÷ actions en circulation (approx. via actions actuelles).
+  var _shrs=(f&&f.sharesOutstanding>0)?f.sharesOutstanding:null;
+  if(_shrs){
+    fin.years.forEach(function(_,i){
+      if((fin.eps[i]==null||fin.eps[i]===0) && fin.netIncome[i]!=null){
+        fin.eps[i]=fin.netIncome[i]*1e9/_shrs; // netIncome est en Md → ×1e9
+      }
+    });
+  }
+
   // Agréger les FCF trimestriels si pas de données annuelles — ANNUALISÉ (×4/n) :
   // 2 trimestres saisis = run-rate ×2, sinon le ratio P/FCF de l'année serait doublé
   fin.years.forEach(function(yrLabel, i) {
@@ -2384,22 +2397,25 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
   // ── Séries temporelles de ratios (granularité hebdo, 3 ans) ──
   // TTM à chaque date à partir des FY (Yahoo+manuel) et des trimestres saisis
   var ratioHist=[]; try{ ratioHist=await fetchPriceHistory(ticker,'3y')||[]; }catch(e){}
-  var epsKnots=_ttmKnots(fin,manualData,'eps_diluted','eps');
+  var epsKnots=_ttmKnots(fin,manualData,'eps_diluted','eps',(f&&f.trailingPE>0&&curPrice)?curPrice/f.trailingPE:null,(f&&f.epsGrowth1Y));
   var peTS  =_ratioTimeSeries(ratioHist,epsKnots,
     function(px,ttm){ return ttm>0?px/ttm:null; }, true);
-  // Fwd P/E : prix ÷ EPS prospectif. On approxime l'EPS "exercice suivant" en faisant
-  // croître l'EPS TTM de l'époque au rythme de croissance attendu (consensus analystes).
-  // → Fwd P/E < P/E en phase de croissance (on divise par un BNPA plus élevé). Correct.
-  var _gFwd=(f&&(f.epsGrowthFwd1Y!=null?f.epsGrowthFwd1Y:(f.epsGrowthFwd5Y!=null?f.epsGrowthFwd5Y:null)));
-  // calibrage : si on connaît P/E et Fwd P/E actuels, le ratio donne la croissance implicite
-  if((!_gFwd||_gFwd<=0) && f && f.trailingPE>0 && f.forwardPE>0) _gFwd=(f.trailingPE/f.forwardPE-1)*100;
+  // Fwd P/E : prix ÷ EPS prospectif. On fait croître l'EPS TTM au rythme attendu.
+  // Calibrage PRIORITAIRE sur le couple (P/E, Fwd P/E) Yahoo actuels : la croissance
+  // implicite = trailingPE/forwardPE − 1 garantit que le DERNIER point = Fwd P/E réel.
+  var _gFwd=null;
+  if(f && f.trailingPE>0 && f.forwardPE>0) _gFwd=(f.trailingPE/f.forwardPE-1)*100;
+  else if(f && f.epsGrowthFwd1Y!=null) _gFwd=f.epsGrowthFwd1Y;
+  else if(f && f.epsGrowthFwd5Y!=null) _gFwd=f.epsGrowthFwd5Y;
   if(_gFwd==null||!isFinite(_gFwd)) _gFwd=0;
-  var _gf=Math.max(-30,Math.min(150,_gFwd))/100; // borne raisonnable
+  var _gf=Math.max(-30,Math.min(200,_gFwd))/100;
   var pefwdTS=_ratioTimeSeries(ratioHist,epsKnots,
     function(px,ttm){ var fwdEps=ttm*(1+_gf); return fwdEps>0?px/fwdEps:null; }, true);
-  var pfcfTS=_ratioTimeSeries(ratioHist,_ttmKnots(fin,manualData,'fcf','freeCF'),
+  var fcfNow=(f&&f.freeCashflow>0&&f.sharesOutstanding>0)?f.freeCashflow/f.sharesOutstanding:null;
+  var ocfNow=(f&&f.operatingCashFlow>0&&f.sharesOutstanding>0)?f.operatingCashFlow/f.sharesOutstanding:null;
+  var pfcfTS=_ratioTimeSeries(ratioHist,_ttmKnots(fin,manualData,'fcf','freeCF',fcfNow?fcfNow*(f.sharesOutstanding/1e9):null,(f&&f.epsGrowth1Y)),
     function(px,ttm){ return (ttm>0&&mktCapCur&&curPrice)?(mktCapCur*(px/curPrice))/(ttm*1e9):null; }, true);
-  var pocfTS=_ratioTimeSeries(ratioHist,_ttmKnots(fin,manualData,'ocf','operatingCF'),
+  var pocfTS=_ratioTimeSeries(ratioHist,_ttmKnots(fin,manualData,'ocf','operatingCF',ocfNow?ocfNow*(f.sharesOutstanding/1e9):null,(f&&f.epsGrowth1Y)),
     function(px,ttm){ return (ttm>0&&mktCapCur&&curPrice)?(mktCapCur*(px/curPrice))/(ttm*1e9):null; }, true);
 
   // Dates d'achat ET de vente du titre (marqueurs sur les courbes)
@@ -2839,7 +2855,7 @@ function cdLineChart(id, labels, datasets, unit) {
 
 // ── Séries temporelles de ratios (P/E, P/FCF, P/OCF "comme une courbe de prix") ──
 // Knots = valeurs TTM connues à partir d'une date (annuels FY + trimestres saisis annualisés)
-function _ttmKnots(fin, manualData, mKey, finKey){
+function _ttmKnots(fin, manualData, mKey, finKey, currentMetric, growthPct){
   var knots=[];
   (fin.years||[]).forEach(function(y,i){
     var v=(fin[finKey]||[])[i]; if(v==null) return;
@@ -2856,6 +2872,15 @@ function _ttmKnots(fin, manualData, mKey, finKey){
     knots.push({t:Date.UTC(cur.y,cur.q*3-1,28)/1000, v:ttm}); // fin de trimestre calendaire ≈
   });
   knots.sort(function(a,b){return a.t-b.t;});
+  // FILET DE SÉCURITÉ : si Yahoo ne fournit pas l'historique (EPS souvent null dans
+  // l'API modules pour META, SPGI…), on synthétise 4 ancres à partir de la valeur
+  // actuelle (currentMetric) qu'on déroule en arrière au taux de croissance attendu.
+  if(knots.length<2 && currentMetric>0){
+    var g=Math.max(-20,Math.min(80,(growthPct!=null&&isFinite(growthPct))?growthPct:12))/100;
+    var now=Date.now()/1000, yr=365.25*86400;
+    knots=[];
+    for(var k=4;k>=0;k--){ knots.push({t:now-k*yr, v:currentMetric/Math.pow(1+g,k)}); }
+  }
   return knots;
 }
 function _knotAt(knots,t){ var v=null; for(var i=0;i<knots.length;i++){ if(knots[i].t<=t) v=knots[i].v; else break; } return v; }
@@ -2901,6 +2926,9 @@ function cdRatioTimeChart(id,label,series,current,buyTs,sellTs){
     return arr;
   }
   var buys=_mark(buyTs), sells=_mark(sellTs);
+  // Ratio médian auquel j'ai acheté (situe mes entrées vs la médiane historique)
+  var buyVals=buys.filter(function(v){return v!=null;}).sort(function(a,b){return a-b;});
+  var buyMed=buyVals.length?buyVals[Math.floor(buyVals.length/2)]:null;
   if(current!=null&&isFinite(current)&&current>0){ labels=labels.concat(['Actuel']); data=data.concat([Math.round(current*100)/100]); buys=buys.concat([null]); sells=sells.concat([null]); }
   var sortedV=data.slice().sort(function(a,b){return a-b;});
   var median=sortedV.length?sortedV[Math.floor(sortedV.length/2)]:null;
@@ -2914,13 +2942,15 @@ function cdRatioTimeChart(id,label,series,current,buyTs,sellTs){
     '<span style="color:#5b7ef5;font-weight:700">'+label+' '+_cur.toFixed(1)+'x</span>'+
     '<span style="color:#ef4444">High '+_hi.toFixed(1)+'x</span>'+
     '<span style="color:#f59e0b">Médiane '+(median!=null?median.toFixed(1):'—')+'x</span>'+
-    '<span style="color:#22c55e">Low '+_lo.toFixed(1)+'x</span>';
+    '<span style="color:#22c55e">Low '+_lo.toFixed(1)+'x</span>'+
+    (buyMed!=null?'<span style="color:#a855f7;font-weight:700">⌀ Mes achats '+buyMed.toFixed(1)+'x</span>':'');
   var datasets=[
     {label:label,data:data,borderColor:'#5b7ef5',backgroundColor:'rgba(91,126,245,.08)',fill:true,tension:.25,
      pointRadius:data.map(function(_,i){return i===data.length-1?4:0;}),
      pointBackgroundColor:'#5b7ef5',borderWidth:2},
     {label:'Médiane',data:data.map(function(){return median;}),borderColor:'#f59e0b',borderDash:[6,4],pointRadius:0,borderWidth:1.5,fill:false}
   ];
+  if(buyMed!=null) datasets.push({label:'Médiane achats',data:data.map(function(){return buyMed;}),borderColor:'#a855f7',borderDash:[2,3],pointRadius:0,borderWidth:1.5,fill:false});
   if(buys.some(function(v){return v!=null;})) datasets.push({label:'Mes achats',data:buys,borderColor:'#22c55e',backgroundColor:'#22c55e',
     showLine:false,pointRadius:5,pointHoverRadius:7,pointStyle:'circle',fill:false});
   if(sells.some(function(v){return v!=null;})) datasets.push({label:'Mes ventes',data:sells,borderColor:'#ef4444',backgroundColor:'#ef4444',
@@ -2957,8 +2987,14 @@ function renderYieldMatrix(ticker, price, f, fin){
   // EPS de départ : éditable ; défaut = TTM via P/E Yahoo, sinon dernier EPS annuel connu
   var eps0=st.eps!=null?st.eps:((f&&f.trailingPE&&price)?(price/f.trailingPE):lastNN(fin&&fin.eps));
   if(!(eps0>0)||!(price>0)){ el.innerHTML='<div style="color:var(--muted);font-size:12px">EPS indisponible — saisis un EPS annuel dans les résultats pour activer la matrice.</div>'; return; }
-  // Centres éditables : croissance (déf. = consensus analystes 5 ans Yahoo) et multiple (déf. = fwd P/E actuel)
-  var gC=st.gC!=null?st.gC:Math.min(35,Math.max(6,Math.round((f&&(f.epsGrowthFwd5Y!=null?f.epsGrowthFwd5Y:f.epsGrowthFwd1Y))||15)));
+  // Centres éditables : croissance et multiple.
+  // Croissance : on privilégie le forward 1 an (fiable) car le champ "5 ans" de Yahoo
+  // est souvent corrompu/vide (renvoyait 6% pour META/GOOGL — absurde). Ordre :
+  // fwd1Y → fwd5Y → croissance EPS historique → 12% par défaut.
+  var _gcand=(f&&f.epsGrowthFwd1Y!=null&&f.epsGrowthFwd1Y>0)?f.epsGrowthFwd1Y
+            :(f&&f.epsGrowthFwd5Y!=null&&f.epsGrowthFwd5Y>0)?f.epsGrowthFwd5Y
+            :(f&&f.epsGrowth1Y!=null&&f.epsGrowth1Y>0?f.epsGrowth1Y:12);
+  var gC=st.gC!=null?st.gC:Math.min(40,Math.max(4,Math.round(_gcand)));
   var mCur=st.mC!=null?st.mC:Math.min(60,Math.max(8,Math.round((f&&(f.forwardPE||f.trailingPE))||20)));
   if(st.g==null||st.m==null){ st={g:gC,m:mCur,eps:eps0,gC:gC,mC:mCur}; _ymSel[ticker]=st; }
   st.eps=eps0; st.gC=gC; st.mC=mCur;
@@ -4146,16 +4182,18 @@ async function getFriendTransactions(friendId){
 // ── Performance portefeuille (positions actuelles × prix historiques) ────────
 // Utilise le coût total comme dénominateur → P&L% cohérent avec la page portefeuille
 async function buildPortfolioLine(transactions, range){
-  // Courbe = P&L réelle vs capital investi à chaque date :
-  //   perf(t) = (valeur(t) − coût(t) + réalisé(t)) / coût(t)
-  // C'est EXACTEMENT la définition de la KPI "Performance" (latent + réalisé vs investi)
-  // → la courbe finit pile sur le chiffre affiché dans le portefeuille. Cohérence garantie.
+  // ════════════════════════════════════════════════════════════════════════
+  // TWR (Time-Weighted Return) — méthode "holdings constants" par sous-période.
+  // C'est LE standard pour comparer des performances entre personnes : insensible
+  // aux apports/retraits (acheter ou vendre n'affecte pas la courbe, seul le
+  // mouvement des prix compte). C'est ce qu'utilise baggr.
+  //   r_période = V(titres détenus en t0, reprice en t1) / V(mêmes titres en t0)
+  //   TWR(t) = ∏(1 + r_période) − 1
+  // ════════════════════════════════════════════════════════════════════════
   var txns=(transactions||[]).filter(function(t){return t.ticker;})
     .slice().sort(function(a,b){return new Date(a.transaction_date)-new Date(b.transaction_date);});
   if(!txns.length) return [];
   var tickers=[...new Set(txns.map(function(t){return t.ticker;}))];
-  // Devise par ticker : déduite des transactions (fiable pour un AMI dont les titres
-  // ne sont pas dans S.prices du spectateur). Évite de traiter un titre EUR comme USD.
   var curByTk={};
   txns.forEach(function(t){ if(t.currency&&!curByTk[t.ticker]) curByTk[t.ticker]=t.currency.toUpperCase(); });
 
@@ -4169,51 +4207,41 @@ async function buildPortfolioLine(transactions, range){
   var tsSet={}; Object.values(hists).forEach(function(pts){(pts||[]).forEach(function(p){if(p.t>=firstTx)tsSet[p.t]=true;});});
   var timestamps=Object.keys(tsSet).map(Number).sort(function(a,b){return a-b;});
   if(timestamps.length<2) return [];
-  var step=Math.max(1,Math.floor(timestamps.length/80));
+  var step=Math.max(1,Math.floor(timestamps.length/90));
   timestamps=timestamps.filter(function(_,i){return i%step===0||i===timestamps.length-1;});
 
   function cur(tk){ return curByTk[tk]||(S.prices[tk]&&S.prices[tk].currency)||'USD'; }
-  function priceAt(tk,t){ var pts=(hists[tk]||[]).filter(function(q){return q.t<=t;}); return pts.length?pts[pts.length-1].c:null; }
-
-  // État du portefeuille (CMP) reconstruit à la date t :
-  // hold = quantités, cost = coût résiduel (€), realized = P&L acté (€)
-  function stateAt(t){
-    var hold={}, costTk={}, realized=0;
+  function priceAt(tk,t){ var pts=(hists[tk]||[]); var v=null; for(var j=0;j<pts.length;j++){ if(pts[j].t<=t) v=pts[j].c; else break; } return v; }
+  function holdAt(t){
+    var hold={};
     txns.forEach(function(tx){
       if(Math.floor(new Date(tx.transaction_date).getTime()/1000)>t) return;
-      var ty=(tx.transaction_type||tx.type||'').toLowerCase();
-      var tk=tx.ticker, q=tx.quantity||0;
-      var amtEur=q*toEur(tx.price||0,tx.currency)+toEur(tx.fees||0,tx.currency);
-      if(ty==='buy'){ hold[tk]=(hold[tk]||0)+q; costTk[tk]=(costTk[tk]||0)+amtEur; }
-      else if(ty==='sell'&&(hold[tk]||0)>1e-9){
-        var avg=costTk[tk]/hold[tk];
-        var proceeds=q*toEur(tx.price||0,tx.currency)-toEur(tx.fees||0,tx.currency);
-        realized+=proceeds-q*avg;
-        costTk[tk]-=q*avg; hold[tk]-=q;
-      }
+      var ty=(tx.transaction_type||tx.type||'').toLowerCase(); var tk=tx.ticker, q=tx.quantity||0;
+      if(ty==='buy') hold[tk]=(hold[tk]||0)+q;
+      else if(ty==='sell') hold[tk]=(hold[tk]||0)-q;
     });
-    return {hold:hold,costTk:costTk,realized:realized};
+    return hold;
+  }
+  // Rendement d'une sous-période : mêmes titres (ceux détenus en t0), reprice t0→t1
+  function periodFactor(t0,t1){
+    var hold=holdAt(t0); var v0=0,v1=0,any=false;
+    Object.keys(hold).forEach(function(tk){
+      var q=hold[tk]; if(q<=1e-9) return;
+      var p0=priceAt(tk,t0), p1=priceAt(tk,t1);
+      if(p0==null||p1==null) return;
+      v0+=q*toEur(p0,cur(tk)); v1+=q*toEur(p1,cur(tk)); any=true;
+    });
+    if(!any||v0<=0) return null;
+    return v1/v0;
   }
 
-  var out=[];
-  timestamps.forEach(function(t){
-    var st=stateAt(t);
-    var cost=0; Object.keys(st.costTk).forEach(function(tk){ if((st.hold[tk]||0)>1e-7) cost+=st.costTk[tk]; });
-    if(cost<=0.01){ out.push({t:t,pct:st.realized!==0?null:0}); return; }
-    var v=0;
-    Object.keys(st.hold).forEach(function(tk){
-      var q=st.hold[tk]; if(q<=1e-7) return;
-      var pr=priceAt(tk,t); if(pr==null){ v+= (st.costTk[tk]||0); return; } // pas de prix → au coût (neutre)
-      v+=q*toEur(pr,cur(tk));
-    });
-    var pct=((v-cost+st.realized)/cost)*100;
-    out.push({t:t,pct:isFinite(pct)?pct:null});
-  });
-  var series=out.filter(function(p){return p.pct!=null;});
-  // Base 0 commune : tout le monde part de 0 au début de la fenêtre affichée
-  // (sinon une P&L déjà acquise avant la fenêtre fausse la comparaison)
-  if(series.length){ var base=series[0].pct; series=series.map(function(p){return {t:p.t,pct:p.pct-base};}); }
-  return series;
+  var cum=1; var out=[{t:timestamps[0],pct:0}];
+  for(var k=1;k<timestamps.length;k++){
+    var f=periodFactor(timestamps[k-1],timestamps[k]);
+    if(f!=null&&isFinite(f)&&f>0) cum*=f;
+    out.push({t:timestamps[k],pct:(cum-1)*100});
+  }
+  return out;
 }
 
 // ── Performance indice
