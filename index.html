@@ -15,7 +15,7 @@
 <link rel="icon" type="image/png" href="/icon-192.png">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js">
 // Délégation d'événement pour ouvrir la fiche société
 document.addEventListener('click', function(e){
@@ -25,15 +25,18 @@ document.addEventListener('click', function(e){
 </script>
 <style>
 :root{--bg:#080811;--bg2:#0d0d1a;--card:#111120;--card2:#18182a;--border:#1e1e35;--border2:#2a2a45;
-  --text:#e8e8f5;--muted:#6b6b8a;--muted2:#3d3d5c;--blue:#5b7ef5;--blue2:#3a5ce4;
-  --green:#22c55e;--red:#ef4444;--yellow:#f59e0b;--purple:#8b5cf6;--font:'Inter',sans-serif}
+  --text:#e8e8f5;--muted:#6b6b8a;--muted2:#3d3d5c;--blue:#634BE4;--blue2:#5038c9;
+  --cyan:#26C5DE;--green:#00E676;--red:#ef4444;--yellow:#f59e0b;--purple:#26C5DE;--font:'Inter',sans-serif;
+  --font-display:'Plus Jakarta Sans','Inter',sans-serif;--grad:linear-gradient(135deg,#634BE4,#26C5DE)}
 *{margin:0;padding:0;box-sizing:border-box}html,body{height:100%}
 body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px}
+h1,h2,h3,.topbar-title,.kpi-value,.cd-price,.auth-logo h1,.sidebar-logo .name{font-family:var(--font-display);letter-spacing:-.01em}
 input,select,button{font-family:var(--font)}
-#auth-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(91,126,245,.2) 0%,transparent 60%)}
+#auth-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(99,75,228,.2) 0%,transparent 60%)}
 .auth-box{width:420px;background:var(--card);border:1px solid var(--border2);border-radius:20px;padding:40px}
 .auth-logo{text-align:center;margin-bottom:32px}
-.auth-logo .mark{width:52px;height:52px;background:linear-gradient(135deg,var(--blue),var(--purple));border-radius:14px;display:inline-flex;align-items:center;justify-content:center;font-size:24px;font-weight:800;color:#fff;margin-bottom:14px;box-shadow:0 8px 30px rgba(91,126,245,.35)}
+.auth-logo .mark{width:64px;height:64px;border-radius:18px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:14px;box-shadow:0 8px 30px rgba(99,75,228,.4);overflow:hidden}
+.mark img{width:100%;height:100%;object-fit:cover;border-radius:inherit;display:block}
 .auth-logo h1{font-size:24px;font-weight:700}.auth-logo p{font-size:13px;color:var(--muted);margin-top:4px}
 .auth-tabs{display:flex;margin-bottom:28px;border-bottom:1px solid var(--border)}
 .auth-tab{flex:1;text-align:center;padding:10px 0;cursor:pointer;font-size:14px;font-weight:500;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .15s}
@@ -43,33 +46,33 @@ input,select,button{font-family:var(--font)}
 .form-input{width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:10px 14px;color:var(--text);font-size:14px;outline:none;transition:border-color .15s;-webkit-appearance:none}
 .form-input:focus{border-color:var(--blue)}.form-input::placeholder{color:var(--muted2)}
 select.form-input{cursor:pointer}.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 18px;border-radius:9px;border:none;cursor:pointer;font-size:14px;font-weight:500;transition:all .15s}
-.btn-primary{background:var(--blue2);color:#fff}.btn-primary:hover{background:var(--blue)}.btn-primary:disabled{opacity:.55;cursor:not-allowed}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 18px;border-radius:12px;border:none;cursor:pointer;font-size:14px;font-weight:600;transition:all .15s}
+.btn-primary{background:var(--grad);color:#fff;box-shadow:0 4px 18px rgba(99,75,228,.35)}.btn-primary:hover{filter:brightness(1.08);box-shadow:0 6px 22px rgba(99,75,228,.45)}.btn-primary:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
 .btn-ghost{background:var(--card2);color:var(--text);border:1px solid var(--border)}.btn-ghost:hover{border-color:var(--border2);background:var(--card)}
 .btn-danger{background:rgba(239,68,68,.12);color:var(--red);border:1px solid rgba(239,68,68,.25)}.btn-danger:hover{background:rgba(239,68,68,.22)}
-.btn-edit{background:rgba(91,126,245,.12);color:var(--blue);border:1px solid rgba(91,126,245,.25)}.btn-edit:hover{background:rgba(91,126,245,.22)}
-.btn-full{width:100%}.btn-sm{padding:5px 10px;font-size:12px;border-radius:7px}
+.btn-edit{background:rgba(99,75,228,.14);color:var(--blue);border:1px solid rgba(99,75,228,.28)}.btn-edit:hover{background:rgba(99,75,228,.24)}
+.btn-full{width:100%}.btn-sm{padding:5px 10px;font-size:12px;border-radius:9px}
 #app-screen{display:none;height:100vh;overflow:hidden}
 .app-layout{display:flex;height:100vh}
 #sidebar{width:224px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;height:100vh;transition:width .2s ease;overflow:hidden;position:relative}#sidebar.collapsed{width:52px}.sb-toggle{position:absolute;right:-12px;top:22px;width:24px;height:24px;background:var(--bg2);border:1px solid var(--border);border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:11px;z-index:20;color:var(--muted);transition:transform .2s ease}#sidebar.collapsed .sb-toggle{transform:rotate(180deg)}#sidebar.collapsed .name,#sidebar.collapsed nav .nav-item span:not(.nav-icon),#sidebar.collapsed .nav-section,#sidebar.collapsed .sidebar-user,#sidebar.collapsed .nav-soon{display:none}#sidebar.collapsed .nav-item{justify-content:center;padding:9px 6px}#sidebar.collapsed .sidebar-logo{padding:14px 8px;justify-content:center}#sidebar.collapsed .sidebar-footer{padding:10px 8px;justify-content:center}
 .sidebar-logo{padding:20px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:11px}
-.sidebar-logo .mark{width:34px;height:34px;background:linear-gradient(135deg,var(--blue),var(--purple));border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;color:#fff;flex-shrink:0}
+.sidebar-logo .mark{width:34px;height:34px;border-radius:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden}
 .sidebar-logo .name{font-size:18px;font-weight:700}
 nav{flex:1;padding:10px 8px;overflow-y:auto}
 .nav-section{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--muted2);padding:14px 10px 5px}
 .nav-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;cursor:pointer;font-size:13.5px;font-weight:500;color:var(--muted);transition:all .12s;margin-bottom:1px}
-.nav-item:hover:not(.disabled){background:var(--card);color:var(--text)}.nav-item.active{background:rgba(91,126,245,.14);color:var(--blue);font-weight:600}.nav-item.disabled{opacity:.35;cursor:default}
+.nav-item:hover:not(.disabled){background:var(--card);color:var(--text)}.nav-item.active{background:rgba(99,75,228,.16);color:var(--blue);font-weight:600}.nav-item.disabled{opacity:.35;cursor:default}
 .nav-icon{font-size:15px;width:20px;text-align:center;flex-shrink:0}.nav-soon{font-size:9px;background:var(--card2);color:var(--muted2);padding:2px 6px;border-radius:4px;margin-left:auto;font-weight:600}
 .sidebar-footer{padding:16px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;cursor:pointer;transition:background .12s}.sidebar-footer:hover{background:var(--card)}
-.avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0;background:rgba(91,126,245,.18);color:var(--blue)}
+.avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0;background:rgba(99,75,228,.18);color:var(--blue)}
 .sidebar-user .uname{font-size:13px;font-weight:600}.sidebar-user .logout{font-size:11px;color:var(--muted);margin-top:1px}
 #main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
 #topbar{height:56px;flex-shrink:0;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 28px;gap:12px}
 .topbar-title{font-size:16px;font-weight:700;flex:1}
 #page,#page-portfolio{flex:1;overflow-y:auto;padding:28px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:13px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px}
 .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}
-.kpi-card{background:var(--card);border:1px solid var(--border);border-radius:13px;padding:22px}
+.kpi-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px}
 .kpi-label{font-size:12px;font-weight:500;color:var(--muted);margin-bottom:10px}
 .kpi-value{font-size:26px;font-weight:700;line-height:1.1;margin-bottom:8px}.kpi-sub{font-size:12px;color:var(--muted)}
 .badge{display:inline-flex;align-items:center;gap:3px;padding:4px 9px;border-radius:20px;font-size:12px;font-weight:600}
@@ -119,7 +122,7 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 .acct-tag{display:inline-flex;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:600;font-family:monospace;margin:1px}
 .account-card{background:var(--card);border:1px solid var(--border);border-radius:13px;margin-bottom:16px;overflow:hidden}
 .account-header{display:flex;align-items:center;gap:10px;padding:18px 20px;border-bottom:1px solid var(--border);flex-wrap:wrap}
-.account-icon{width:40px;height:40px;border-radius:10px;background:rgba(91,126,245,.14);color:var(--blue);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.account-icon{width:40px;height:40px;border-radius:10px;background:rgba(99,75,228,.14);color:var(--blue);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;display:none;align-items:center;justify-content:center;backdrop-filter:blur(2px)}
 .modal-overlay.open{display:flex}
 .modal{background:var(--card);border:1px solid var(--border2);border-radius:18px;padding:28px;width:520px;max-width:95vw;max-height:90vh;overflow-y:auto}
@@ -144,6 +147,8 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 .cd-val{font-size:14px;font-weight:600;font-family:'SF Mono',monospace;}
 /* ═══ MOBILE (≤768px) : sidebar → barre de nav en bas, grilles 1 colonne ═══ */
 @media (max-width:768px){
+  html,body{overflow-x:hidden;max-width:100vw}
+  #app-screen,#main,#page{overflow-x:hidden;max-width:100vw}
   .app-layout{flex-direction:column;height:100dvh}
   #sidebar{position:fixed;bottom:0;left:0;right:0;top:auto;width:100%!important;height:60px;flex-direction:row;border-right:none;border-top:1px solid var(--border);z-index:100;overflow:visible}
   #sidebar.collapsed{width:100%!important}
@@ -153,25 +158,45 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
   .nav-item{flex-direction:column!important;justify-content:center;gap:2px!important;padding:6px 10px!important;font-size:9.5px!important;white-space:nowrap;flex-shrink:0;border-radius:0!important}
   .nav-item .nav-icon{font-size:18px}
   #main{height:calc(100dvh - 60px);overflow:hidden}
-  #page{padding:14px 12px 24px;overflow-y:auto}
+  #page{padding:12px 12px 20px;overflow-y:auto}
   #topbar{padding:0 14px;height:48px}
   .topbar-title{font-size:14px}
-  #topbar>*:not(.topbar-title):not(button){display:none} /* masque le taux de change, garde Actualiser */
+  #topbar>*:not(.topbar-title):not(button){display:none}
+
+  /* Densité : titres et grands nombres réduits pour voir plus à l'écran */
+  h2{font-size:17px!important}
+  h3{font-size:14px!important}
   .kpi-grid{grid-template-columns:1fr 1fr;gap:10px}
-  .kpi-card{padding:12px}.kpi-value{font-size:19px!important}
-  .pf-row{grid-template-columns:1fr!important}
-  .stats-2col{grid-template-columns:1fr}
-  .form-row{grid-template-columns:1fr}
-  /* Toutes les grilles inline multi-colonnes passent en 1 colonne */
+  .kpi-card{padding:14px}
+  .kpi-value{font-size:18px!important}
+  .kpi-sub{font-size:11px}
+  .card{padding:14px!important}
+  .cd-price{font-size:24px!important}
+  .cd-label{font-size:12px}
+  .cd-val{font-size:12px}
+
+  /* Toutes les grilles multi-colonnes → 1 colonne (anti-débordement) */
   #page div[style*="grid-template-columns"]{grid-template-columns:1fr!important}
-  /* Tables : scroll horizontal dans leurs cartes */
+  .pf-row{grid-template-columns:1fr!important}
+  .stats-2col,.form-row{grid-template-columns:1fr!important}
+
+  /* Graphiques : hauteurs fixes, jamais plus larges que l'écran */
+  canvas{max-width:100%!important}
+  .chart-wrap{height:230px!important;min-height:0!important;flex:none!important}
+  #bm-chart-wrap{height:280px!important}
+
+  /* Tableaux : défilement horizontal de leur carte au lieu d'être coupés
+     (on garde la structure <table> pour ne pas désaligner les colonnes) */
   .card{overflow-x:auto;-webkit-overflow-scrolling:touch}
-  .card table{min-width:520px}
+  .card table{min-width:540px}
+
+  /* Onglets fiche entreprise : défilables, pas de retour à la ligne */
+  #cd-tabbar{gap:0}
+  #cd-tabbar button{padding:9px 12px!important;font-size:12px!important}
+
   /* Anti-zoom iOS : inputs ≥16px */
   input.form-input,select.form-input,textarea.form-input{font-size:16px!important}
   .modal{width:94vw!important;max-width:94vw!important;max-height:86dvh}
-  .chart-wrap{height:240px!important}
-  #bm-chart-wrap{height:300px!important}
 }
 </style>
 
@@ -179,7 +204,7 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 <body>
 <div id="auth-screen">
   <div class="auth-box">
-    <div class="auth-logo"><div class="mark">V</div><h1>Valio</h1><p>Votre portefeuille intelligent</p></div>
+    <div class="auth-logo"><div class="mark"><img src="/logo.png" alt="Valio"></div><h1>Valio</h1><p>Votre portefeuille intelligent</p></div>
     <div class="auth-tabs">
       <div class="auth-tab active" id="tab-login" onclick="switchTab('login')">Connexion</div>
       <div class="auth-tab" id="tab-signup" onclick="switchTab('signup')">Inscription</div>
@@ -194,7 +219,7 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 <div id="app-screen">
   <div class="app-layout">
     <aside id="sidebar">
-      <div class="sidebar-logo"><div class="mark">V</div><span class="name">Valio</span></div><div class="sb-toggle" onclick="toggleSidebar()" id="sb-toggle">‹</div>
+      <div class="sidebar-logo"><div class="mark"><img src="/logo.png" alt="Valio"></div><span class="name">Valio</span></div><div class="sb-toggle" onclick="toggleSidebar()" id="sb-toggle">‹</div>
       <nav>
         <div class="nav-item active" id="nav-portfolio" onclick="navigate('portfolio')"><span class="nav-icon">📊</span><span>Portefeuille</span></div>
         <div class="nav-item" id="nav-accounts" onclick="navigate('accounts')"><span class="nav-icon">💳</span><span>Comptes</span></div>
@@ -259,7 +284,7 @@ const BRAND={
   CW8:'#7c3aed',        // MSCI World — violet
   SP5C:'#f59e0b',       // S&P 500 — ambre
 };
-const PALETTE=['#5b7ef5','#8b5cf6','#22c55e','#f59e0b','#ef4444','#06b6d4','#ec4899','#f97316','#10b981','#a78bfa','#64748b','#34d399','#f472b6','#60a5fa','#fbbf24'];
+const PALETTE=['#634BE4','#8b5cf6','#22c55e','#f59e0b','#ef4444','#06b6d4','#ec4899','#f97316','#10b981','#a78bfa','#64748b','#34d399','#f472b6','#60a5fa','#fbbf24'];
 function tickerColor(t,i){return BRAND[t]||PALETTE[i%PALETTE.length];}
 
 // ═══ OVERRIDES MANUELS (pays/secteur pour tickers exotiques) ═══
@@ -903,7 +928,7 @@ function buildChartData(){
       const m={};
       allPos.forEach(p=>{const k=isETF(p)?'ETF':'Stock picking';m[k]=(m[k]||0)+(p.valueEur||p.totalCostEur||0);});
       const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
-      return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((_,i)=>i===0?'#5b7ef5':'#22c55e'),clickable:true};
+      return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((_,i)=>i===0?'#634BE4':'#22c55e'),clickable:true};
     }
     const sel=drill[0];
     const filt=allPos.filter(p=>(isETF(p)?'ETF':'Stock picking')===sel);
@@ -1725,7 +1750,7 @@ async function renderCompanyDetail(ticker, name) {
     // Prix + perf
     '<div class="card" style="margin-bottom:16px">' +
       '<div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap">' +
-        '<div><div style="font-size:32px;font-weight:800">'+priceStr+'</div>' +
+        '<div><div class="cd-price" style="font-size:32px;font-weight:800">'+priceStr+'</div>' +
         '<div style="font-size:16px;color:'+chgColor+';margin-top:2px">'+chgStr+' aujourd&#x27;hui</div></div>' +
         (sub ? '<div style="color:var(--muted);font-size:13px">'+sub+'</div>' : '') +
         '<div style="display:flex;gap:16px;margin-left:auto">' +
@@ -1875,7 +1900,7 @@ function drawCdChart(pts, price, ticker, pos) {
       var baseVal = data[0].c;
       datasets.push({
         data: data.map(function(p){return baseVal>0?(p.c/baseVal-1)*100:0;}),
-        borderColor: '#5b7ef5', backgroundColor:'transparent',
+        borderColor: '#634BE4', backgroundColor:'transparent',
         fill:false, tension:0.2, pointRadius:0, pointHoverRadius:5, borderWidth:2.5,
         label: _ticker.toUpperCase()
       });
@@ -2075,7 +2100,7 @@ async function switchFinMode(mode, ticker){
           '<div style="position:relative;height:190px"><canvas id="cdchart-fcf-q"></canvas></div></div>'+
       '</div>';
 
-    cdBarChartYoY('cdchart-ca-q',    q.quarters, [{label:'CA',       data:q.revenue,   color:'#5b7ef5'}], 'fin-title-ca-q',    sym, caYoY);
+    cdBarChartYoY('cdchart-ca-q',    q.quarters, [{label:'CA',       data:q.revenue,   color:'#634BE4'}], 'fin-title-ca-q',    sym, caYoY);
     cdBarChartYoY('cdchart-ni-q',    q.quarters, [{label:'Rés. net', data:q.netIncome, color:'#22c55e'}], 'fin-title-ni-q',    sym, niYoY);
     cdBarChart('cdchart-capex-q', q.quarters, [{label:'Capex',    data:capexQ,      color:'#ef4444'}], 'fin-title-capex-q', sym);
     cdBarChart('cdchart-fcf-q',   q.quarters, [{label:'FCF',      data:q.freeCF,    color:'#06b6d4'}], 'fin-title-fcf-q',   sym);
@@ -2441,22 +2466,22 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
   setTimeout(function(){
     try {
       cdBarChart('cdchart-rev', fin.years, [
-        {label:'CA',       data:fin.revenue,   color:'#5b7ef5'},
+        {label:'CA',       data:fin.revenue,   color:'#634BE4'},
         {label:'Rés. net', data:fin.netIncome, color:'#22c55e'},
         {label:'FCF',      data:fin.freeCF,    color:'#06b6d4'},
       ], 'fin-title-rev', sym);
       cdLineChart('cdchart-margins', fin.years, [
-        {label:'Brute', data:grossMargins, color:'#5b7ef5'},
+        {label:'Brute', data:grossMargins, color:'#634BE4'},
         {label:'Opé.',  data:opMargins,   color:'#22c55e'},
         {label:'Nette', data:netMargins,  color:'#f59e0b'},
       ], '%');
       cdLineChart('cdchart-returns', fin.years, [
-        {label:'ROE',  data:roe,  color:'#5b7ef5'},
+        {label:'ROE',  data:roe,  color:'#634BE4'},
         {label:'ROIC', data:roic, color:'#22c55e'},
       ], '%');
       cdBarChart('cdchart-cf', fin.years, [
         {label:'FCF',  data:fin.freeCF,      color:'#22c55e'},
-        {label:'OCF',  data:fin.operatingCF, color:'#5b7ef5'},
+        {label:'OCF',  data:fin.operatingCF, color:'#634BE4'},
         {label:'Capex',data:fin.capex,       color:'#ef4444'},
       ], 'fin-title-cf', sym);
       cdWaterfall('cdchart-waterfall', wf, sym);
@@ -2475,7 +2500,7 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
         var segC = document.getElementById('cdchart-segments');
         var segKey = '_cdc_cdchart-segments';
         if(window[segKey]){try{window[segKey].destroy();}catch(e){}}
-        window[segKey] = new Chart(segC, {type:'doughnut', data:{labels:segs.map(function(s){return s.name;}), datasets:[{data:segs.map(function(s){return s.value;}), backgroundColor:['#5b7ef5','#22c55e','#f59e0b','#06b6d4','#a855f7','#ef4444','#f97316','#84cc16'], borderColor:'rgba(0,0,0,.1)', borderWidth:1, hoverOffset:6}]}, options:{cutout:'55%', responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right',labels:{color:'#6b7280',font:{size:11},padding:12}}, tooltip:{callbacks:{label:function(ctx){var tot=ctx.dataset.data.reduce(function(s,v){return s+v;},0);return ctx.label+': '+ctx.raw.toFixed(1)+'Md ('+((ctx.raw/tot*100).toFixed(1))+'%)';}}}}}});
+        window[segKey] = new Chart(segC, {type:'doughnut', data:{labels:segs.map(function(s){return s.name;}), datasets:[{data:segs.map(function(s){return s.value;}), backgroundColor:['#634BE4','#22c55e','#f59e0b','#06b6d4','#a855f7','#ef4444','#f97316','#84cc16'], borderColor:'rgba(0,0,0,.1)', borderWidth:1, hoverOffset:6}]}, options:{cutout:'55%', responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right',labels:{color:'#6b7280',font:{size:11},padding:12}}, tooltip:{callbacks:{label:function(ctx){var tot=ctx.dataset.data.reduce(function(s,v){return s+v;},0);return ctx.label+': '+ctx.raw.toFixed(1)+'Md ('+((ctx.raw/tot*100).toFixed(1))+'%)';}}}}}});
       }
     } catch(chartErr) {
       console.error('[Valio] Chart rendering error:', chartErr);
@@ -2950,15 +2975,15 @@ function cdRatioTimeChart(id,label,series,current,buyTs,sellTs){
     statsEl.style.cssText='display:flex;gap:14px;flex-wrap:wrap;font-size:11px;margin-top:8px;font-family:var(--mono,monospace)';
     cv.parentElement.insertAdjacentElement('afterend',statsEl); }
   statsEl.innerHTML=
-    '<span style="color:#5b7ef5;font-weight:700">'+label+' '+_cur.toFixed(1)+'x</span>'+
+    '<span style="color:#634BE4;font-weight:700">'+label+' '+_cur.toFixed(1)+'x</span>'+
     '<span style="color:#ef4444">High '+_hi.toFixed(1)+'x</span>'+
     '<span style="color:#f59e0b">Médiane '+(median!=null?median.toFixed(1):'—')+'x</span>'+
     '<span style="color:#22c55e">Low '+_lo.toFixed(1)+'x</span>'+
     (buyMed!=null?'<span style="color:#a855f7;font-weight:700">⌀ Mes achats '+buyMed.toFixed(1)+'x</span>':'');
   var datasets=[
-    {label:label,data:data,borderColor:'#5b7ef5',backgroundColor:'rgba(91,126,245,.08)',fill:true,tension:.25,
+    {label:label,data:data,borderColor:'#634BE4',backgroundColor:'rgba(99,75,228,.08)',fill:true,tension:.25,
      pointRadius:data.map(function(_,i){return i===data.length-1?4:0;}),
-     pointBackgroundColor:'#5b7ef5',borderWidth:2},
+     pointBackgroundColor:'#634BE4',borderWidth:2},
     {label:'Médiane',data:data.map(function(){return median;}),borderColor:'#f59e0b',borderDash:[6,4],pointRadius:0,borderWidth:1.5,fill:false}
   ];
   if(buyMed!=null) datasets.push({label:'Médiane achats',data:data.map(function(){return buyMed;}),borderColor:'#a855f7',borderDash:[2,3],pointRadius:0,borderWidth:1.5,fill:false});
@@ -3046,7 +3071,7 @@ function renderYieldMatrix(ticker, price, f, fin){
   var cSym=(S.prices[ticker]&&S.prices[ticker].currency==='EUR')?'€':'$';
 
   var html='<div style="display:flex;gap:26px;flex-wrap:wrap;margin-bottom:10px">'+
-    '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Prix juste (10 %/an)</div><div style="font-size:20px;font-weight:800;color:#5b7ef5" class="mono">'+fair.toFixed(2)+' '+cSym+'</div></div>'+
+    '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Prix juste (10 %/an)</div><div style="font-size:20px;font-weight:800;color:#634BE4" class="mono">'+fair.toFixed(2)+' '+cSym+'</div></div>'+
     '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Rendement estimé</div><div style="font-size:20px;font-weight:800;color:'+cellColor(selRet)+'" class="mono">'+selRet.toFixed(2)+' %/an</div></div>'+
     '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Marge de sécurité</div><div style="font-size:20px;font-weight:800;color:'+(marge>=0?'#22c55e':'#f59e0b')+'" class="mono">'+(marge>=0?'+':'')+marge.toFixed(2)+' %</div></div>'+
   '</div>'+
@@ -3061,12 +3086,12 @@ function renderYieldMatrix(ticker, price, f, fin){
   '</div>'+
   '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:11px;white-space:nowrap" class="mono">'+
   '<tr><th style="padding:5px 8px;color:var(--muted);font-size:9px;text-align:left">CROISS. \\ MULT.</th>'+
-    mCols.map(function(m){return '<th style="padding:5px 8px;color:'+(m===mCur?'#5b7ef5':'var(--muted)')+';font-weight:'+(m===mCur?'800':'600')+'">'+m+'</th>';}).join('')+'</tr>'+
+    mCols.map(function(m){return '<th style="padding:5px 8px;color:'+(m===mCur?'#634BE4':'var(--muted)')+';font-weight:'+(m===mCur?'800':'600')+'">'+m+'</th>';}).join('')+'</tr>'+
   gRows.map(function(g){
-    return '<tr'+(g===sel.g?' style="background:rgba(91,126,245,.10)"':'')+'><td style="padding:5px 8px;color:'+(g===sel.g?'#5b7ef5':'var(--muted)')+';font-weight:700">'+g.toFixed(1)+' %</td>'+
+    return '<tr'+(g===sel.g?' style="background:rgba(99,75,228,.10)"':'')+'><td style="padding:5px 8px;color:'+(g===sel.g?'#634BE4':'var(--muted)')+';font-weight:700">'+g.toFixed(1)+' %</td>'+
       mCols.map(function(m){
         var r=annRet(g,m); var isSel=(g===sel.g&&m===sel.m);
-        return '<td onclick="window._ymPick(\''+ticker.replace(/'/g,"\\'")+'\','+g+','+m+')" style="padding:5px 8px;text-align:right;cursor:pointer;color:'+cellColor(r)+';'+(isSel?'outline:1.5px solid #5b7ef5;border-radius:4px;font-weight:800;':'')+(m===mCur?'background:rgba(91,126,245,.07);':'')+'">'+r.toFixed(2)+'%</td>';
+        return '<td onclick="window._ymPick(\''+ticker.replace(/'/g,"\\'")+'\','+g+','+m+')" style="padding:5px 8px;text-align:right;cursor:pointer;color:'+cellColor(r)+';'+(isSel?'outline:1.5px solid #634BE4;border-radius:4px;font-weight:800;':'')+(m===mCur?'background:rgba(99,75,228,.07);':'')+'">'+r.toFixed(2)+'%</td>';
       }).join('')+'</tr>';
   }).join('')+'</table></div>'+
   '<div style="font-size:10px;color:var(--muted2);margin-top:10px">Scénario : EPS +'+sel.g+' %/an × multiple '+sel.m+'x · EPS base '+eps0.toFixed(2)+' '+cSym+'. Modèle simplifié : EPS projeté 5 ans, valorisé au multiple de sortie (= P/E <i>trailing</i> en année 5), hors dividendes/rachats. Vert ≥ 12 %/an · Orange 8–12 % · Rouge < 8 %.</div>';
@@ -3114,7 +3139,7 @@ function cdValChart(id, years, vals, currentRatio, label) {
   }
 
   var datasets = [
-    {label:label,      data:allAvgs,  borderColor:'#5b7ef5', backgroundColor:'rgba(91,126,245,0.08)', fill:false, borderWidth:2, pointRadius:4, pointBackgroundColor:'#5b7ef5', tension:0.3},
+    {label:label,      data:allAvgs,  borderColor:'#634BE4', backgroundColor:'rgba(99,75,228,0.08)', fill:false, borderWidth:2, pointRadius:4, pointBackgroundColor:'#634BE4', tension:0.3},
     {label:'Haut',     data:allHi,    borderColor:'rgba(239,68,68,0.5)',   backgroundColor:'transparent', fill:false, borderWidth:1, borderDash:[3,3], pointRadius:2, tension:0.3},
     {label:'Bas',      data:allLo,    borderColor:'rgba(34,197,94,0.5)',   backgroundColor:'rgba(34,197,94,0.05)', fill:'-1', borderWidth:1, borderDash:[3,3], pointRadius:2, tension:0.3},
   ];
@@ -3137,7 +3162,7 @@ function cdWaterfall(containerId, d, sym) {
   function bar(label, val, type) {
     if(val==null) return '';
     var pct = Math.min(Math.abs(val/rev*100), 100);
-    var color = type==='pos'?'#22c55e': type==='neg'?'#ef4444':'#5b7ef5';
+    var color = type==='pos'?'#22c55e': type==='neg'?'#ef4444':'#634BE4';
     var prefix = type==='neg' ? '−' : '';
     return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">' +
       '<div style="width:120px;text-align:right;font-size:11px;color:var(--muted);flex-shrink:0">'+label+'</div>' +
@@ -3178,10 +3203,10 @@ async function fetchPriceHistory(ticker, range){
   }catch(e){return [];}
 }
 
-var BM_COLORS = ['#5b7ef5','#22c55e','#f59e0b','#ef4444','#a855f7','#06b6d4'];
+var BM_COLORS = ['#634BE4','#22c55e','#f59e0b','#ef4444','#a855f7','#06b6d4'];
 // Couleurs fixes par ID → évite les doublons lors des désélections/sélections
 var BM_ITEM_COLORS = {
-  '__me__': '#5b7ef5',   // bleu — mon portefeuille
+  '__me__': '#634BE4',   // bleu — mon portefeuille
   'sp500':  '#f59e0b',   // ambre — S&P 500
   'ndx':    '#f97316',   // orange — Nasdaq
   'msci':   '#06b6d4',   // cyan — MSCI
@@ -3433,7 +3458,7 @@ async function _drawDepositChart(allDeposits, totalVal){
   if(window._depChart){try{window._depChart.destroy();}catch(e){}}
   window._depChart=new Chart(cv,{type:'line',
     data:{labels:depLabels,datasets:[
-      {label:'Valeur portefeuille'+sfx,data:ptfSeries,borderColor:'#5b7ef5',backgroundColor:'rgba(91,126,245,0.08)',fill:true,tension:0.3,pointRadius:3,borderWidth:2.5},
+      {label:'Valeur portefeuille'+sfx,data:ptfSeries,borderColor:'#634BE4',backgroundColor:'rgba(99,75,228,0.08)',fill:true,tension:0.3,pointRadius:3,borderWidth:2.5},
       {label:'Dépôts cumulés'+sfx,data:depSeries,borderColor:'#f59e0b',backgroundColor:'transparent',fill:false,stepped:true,pointRadius:3,borderWidth:2,borderDash:[5,4]},
     ]},
     options:{responsive:true,maintainAspectRatio:false,
@@ -3824,7 +3849,7 @@ function _friendChartData(){
     if(!drill.length){
       var m={}; pos.forEach(function(p){var k=isETF(p)?'ETF':'Stock picking';m[k]=(m[k]||0)+(p.valueEur||0);});
       var ent=Object.entries(m).filter(function(e){return e[1]>0;}).sort(function(a,b){return b[1]-a[1];});
-      return {labels:ent.map(function(e){return e[0];}),values:ent.map(function(e){return e[1];}),colors:ent.map(function(_,i){return i===0?'#5b7ef5':'#22c55e';}),clickable:true};
+      return {labels:ent.map(function(e){return e[0];}),values:ent.map(function(e){return e[1];}),colors:ent.map(function(_,i){return i===0?'#634BE4':'#22c55e';}),clickable:true};
     }
     var filt=pos.filter(function(p){return (isETF(p)?'ETF':'Stock picking')===drill[0];});
     return {...groupByKey(filt,function(p){return p.ticker;},function(t,i){return tickerColor(t,i);}),clickable:false};
@@ -4677,7 +4702,7 @@ async function renderLeaderboard(){
     function pfTable(arr){
       if(!arr.length) return '<div style="color:var(--muted);font-size:12px;padding:14px">Pas assez de données sur la période.</div>';
       return '<table style="width:100%;border-collapse:collapse">'+arr.map(function(r,i){
-        return '<tr style="border-bottom:1px solid var(--border2)'+(r.me?';background:rgba(91,126,245,.07)':'')+'">'+
+        return '<tr style="border-bottom:1px solid var(--border2)'+(r.me?';background:rgba(99,75,228,.07)':'')+'">'+
           '<td style="padding:9px 8px;width:34px;font-size:15px">'+medal(i)+'</td>'+
           '<td style="padding:9px 8px;font-weight:600;font-size:13px">'+r.name+(r.me?' <span style="font-size:10px;color:var(--blue)">— toi</span>':'')+'</td>'+
           '<td style="padding:9px 8px;text-align:right" class="mono"><span style="color:'+pcol(r.perf)+';font-weight:700">'+(r.perf>=0?'+':'')+r.perf.toFixed(2)+'%</span></td></tr>';
@@ -4995,7 +5020,7 @@ async function setManualPrice(ticker){
     updateKPIs(S.enrichedPos);renderDonut();
   }
 }
-function acctColor(n){const s=(n||'').toLowerCase();if(s.includes('ibkr')||s.includes('interactive'))return{bg:'rgba(239,68,68,.18)',color:'#f87171'};if(s.includes('bourso'))return{bg:'rgba(91,126,245,.2)',color:'#7b9ef7'};if(s.includes('trade')||s.includes('republic'))return{bg:'rgba(220,220,220,.1)',color:'#d0d0e0'};return{bg:'rgba(91,126,245,.12)',color:'#5b7ef5'};}
+function acctColor(n){const s=(n||'').toLowerCase();if(s.includes('ibkr')||s.includes('interactive'))return{bg:'rgba(239,68,68,.18)',color:'#f87171'};if(s.includes('bourso'))return{bg:'rgba(99,75,228,.2)',color:'#7b9ef7'};if(s.includes('trade')||s.includes('republic'))return{bg:'rgba(220,220,220,.1)',color:'#d0d0e0'};return{bg:'rgba(99,75,228,.12)',color:'#634BE4'};}
 function acctTag(n){const c=acctColor(n);const w=n.split(' ');const s=w.length<=1?n:w[0]+' '+w.slice(1).map(x=>x[0]).join('');return`<span class="acct-tag" style="background:${c.bg};color:${c.color}">${s}</span>`;}
 function fE(v){if(v==null||isNaN(v))return '—';return v.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';}
 function fN(v){if(v==null||isNaN(v))return '—';return v.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2});}
