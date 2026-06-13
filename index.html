@@ -1639,11 +1639,16 @@ function openCompanyDetail(ticker, name) {
 
 async function renderCompanyDetail(ticker, name) {
   var pg = document.getElementById('page');
-  pg.innerHTML = '<div style="display:flex;align-items:center;gap:12px;margin-bottom:24px">' +
+  pg.innerHTML = '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">' +
     '<button class="btn btn-ghost btn-sm" onclick="navigate(\''+_prevPage+'\')">← Retour</button>' +
-    '<button class="btn btn-ghost btn-sm" onclick="openEarningsForm(\''+ticker+'\',\''+name+'\')">✏️ Résultats</button>' +
     '<h2 style="font-size:20px;font-weight:700">'+name+' <span style="color:var(--muted);font-size:14px;font-weight:400">'+ticker+'</span></h2>' +
+    '<button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="openEarningsForm(\''+ticker+'\',\''+name+'\')">✏️ Saisir mes résultats</button>' +
     '</div>' +
+    // Barre de sous-onglets en HAUT (plus besoin de descendre la page)
+    '<div id="cd-tabbar" style="display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:20px;overflow-x:auto">'+
+      ['val|📈 Valorisation','fin|📊 Historique financier','mat|🎯 Matrice','moat|🏰 MOAT & IA'].map(function(t){var p=t.split('|');
+        return '<button id="cdtb-'+p[0]+'" onclick="showCdTab(\''+p[0]+'\')" style="padding:9px 16px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;white-space:nowrap;color:'+(p[0]==='val'?'var(--text)':'var(--muted)')+';border-bottom:2px solid '+(p[0]==='val'?'var(--blue)':'transparent')+';margin-bottom:-1px">'+p[1]+'</button>';
+      }).join('')+'</div>' +
     '<div id="cd-content"><div style="text-align:center;padding:60px"><div class="spinner"></div> Chargement des données…</div></div>';
 
   // Get fundamentals (use cache if available)
@@ -1755,7 +1760,7 @@ async function renderCompanyDetail(ticker, name) {
             ['1M','6M','1A','3A','5A'].map(function(p){ return '<button class="btn btn-ghost btn-sm cd-period-btn" style="padding:3px 9px;font-size:11px'+(p==='5A'?';background:var(--card2)':'')+';" data-period="'+p+'" onclick="changeCdPeriod(this,\''+ticker+'\')">'+p+'</button>'; }).join('') +
           '</div>' +
         '</div>' +
-        '<div style="position:relative;width:100%;height:280px"><canvas id="company-price-chart"></canvas></div>' +
+        '<div style="position:relative;width:100%;height:380px"><canvas id="company-price-chart"></canvas></div>' +
         '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap" id="cd-compare-row">'+
           '<span style="font-size:11px;color:var(--muted);align-self:center">Comparer :</span>'+
           ['S&P 500|^GSPC|#22c55e','Nasdaq 100|^NDX|#f97316','Mon portefeuille|__ptf__|#a855f7'].map(function(s){
@@ -2281,10 +2286,6 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
 
   el.innerHTML =
     '<div style="margin-top:4px;padding-top:24px;border-top:1px solid var(--border)">' +
-    '<div id="cd-tabbar" style="display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:18px;overflow-x:auto">'+
-      ['val|📈 Valorisation','fin|📊 Historique financier','mat|🎯 Matrice','moat|🏰 MOAT & IA'].map(function(t){var p=t.split('|');
-        return '<button id="cdtb-'+p[0]+'" onclick="showCdTab(\''+p[0]+'\')" style="padding:9px 16px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;white-space:nowrap;color:'+(p[0]==='val'?'var(--text)':'var(--muted)')+';border-bottom:2px solid '+(p[0]==='val'?'var(--blue)':'transparent')+';margin-bottom:-1px">'+p[1]+'</button>';
-      }).join('')+'</div>' +
     '<div id="cdtab-val">' +
     '<h3 style="font-size:15px;font-weight:700;margin:4px 0 16px">📈 Valorisation historique</h3>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
@@ -2906,7 +2907,7 @@ function _ratioTimeSeries(hist,knots,fn,interp){
   hist.forEach(function(p){
     var ttm=interp?_knotInterp(knots,p.t):_knotAt(knots,p.t); if(ttm==null) return;
     var v=fn(p.c,ttm);
-    if(v!=null&&isFinite(v)&&v>0&&v<2000) out.push({t:p.t,v:v});
+    if(v!=null&&isFinite(v)&&v>0&&v<200) out.push({t:p.t,v:v});
   });
   return out;
 }
@@ -2967,13 +2968,15 @@ function cdRatioTimeChart(id,label,series,current,buyTs,sellTs){
 }
 
 // Onglets de la fiche entreprise (Valorisation / Financier / Matrice / MOAT)
-window.showCdTab=function(t){
+window.showCdTab=function(t,noScroll){
   ['val','fin','mat','moat'].forEach(function(k){
     var c=document.getElementById('cdtab-'+k), b=document.getElementById('cdtb-'+k);
     if(c) c.style.display=(k===t?'':'none');
     if(b){ b.style.color=(k===t?'var(--text)':'var(--muted)'); b.style.borderBottom='2px solid '+(k===t?'var(--blue)':'transparent'); }
   });
-  setTimeout(function(){ window.dispatchEvent(new Event('resize')); },60); // Chart.js recalcule les tailles
+  // amène la section détaillée sous les yeux (les onglets sont en haut de page)
+  if(!noScroll){ var s=document.getElementById('cd-fin-section'); if(s) s.scrollIntoView({behavior:'smooth',block:'start'}); }
+  setTimeout(function(){ window.dispatchEvent(new Event('resize')); },60);
 };
 
 // ═══ MATRICE DE RENDEMENT (5 ans) — inspirée baggr ═══════════════════════
@@ -4183,12 +4186,14 @@ async function getFriendTransactions(friendId){
 // Utilise le coût total comme dénominateur → P&L% cohérent avec la page portefeuille
 async function buildPortfolioLine(transactions, range){
   // ════════════════════════════════════════════════════════════════════════
-  // TWR (Time-Weighted Return) — méthode "holdings constants" par sous-période.
-  // C'est LE standard pour comparer des performances entre personnes : insensible
-  // aux apports/retraits (acheter ou vendre n'affecte pas la courbe, seul le
-  // mouvement des prix compte). C'est ce qu'utilise baggr.
-  //   r_période = V(titres détenus en t0, reprice en t1) / V(mêmes titres en t0)
-  //   TWR(t) = ∏(1 + r_période) − 1
+  // MÉTHODE DÉFINITIVE — P&L cumulée rapportée au CAPITAL ACTUEL (dénominateur
+  // constant). Pourquoi : les méthodes "P&L vs coût du moment" (÷ coût(t)) et TWR
+  // explosent quand le capital de départ est minuscule (gains énormes en % sur peu
+  // d'argent). En divisant par le coût ACTUEL (constant, grand), c'est :
+  //   • STABLE : jamais d'explosion (dénominateur fixe)
+  //   • COHÉRENT : la courbe finit EXACTEMENT sur la perf affichée (P&L global)
+  //   • COMPARABLE : rebasé à 0 en début de fenêtre → on lit la perf de la période
+  //   pnl(t) = V(t) − coût_détenu(t) + réalisé(t)   ·   pct(t) = pnl(t) / coût_actuel
   // ════════════════════════════════════════════════════════════════════════
   var txns=(transactions||[]).filter(function(t){return t.ticker;})
     .slice().sort(function(a,b){return new Date(a.transaction_date)-new Date(b.transaction_date);});
@@ -4212,36 +4217,51 @@ async function buildPortfolioLine(transactions, range){
 
   function cur(tk){ return curByTk[tk]||(S.prices[tk]&&S.prices[tk].currency)||'USD'; }
   function priceAt(tk,t){ var pts=(hists[tk]||[]); var v=null; for(var j=0;j<pts.length;j++){ if(pts[j].t<=t) v=pts[j].c; else break; } return v; }
-  function holdAt(t){
-    var hold={};
+
+  // État reconstruit à t : quantités détenues, coût des titres détenus (€), P&L réalisé (€)
+  function stateAt(t){
+    var hold={}, costTk={}, realized=0;
     txns.forEach(function(tx){
       if(Math.floor(new Date(tx.transaction_date).getTime()/1000)>t) return;
       var ty=(tx.transaction_type||tx.type||'').toLowerCase(); var tk=tx.ticker, q=tx.quantity||0;
-      if(ty==='buy') hold[tk]=(hold[tk]||0)+q;
-      else if(ty==='sell') hold[tk]=(hold[tk]||0)-q;
+      var buyEur=q*toEur(tx.price||0,cur(tk))+toEur(tx.fees||0,cur(tk));
+      if(ty==='buy'){ hold[tk]=(hold[tk]||0)+q; costTk[tk]=(costTk[tk]||0)+buyEur; }
+      else if(ty==='sell'&&(hold[tk]||0)>1e-9){
+        var avg=costTk[tk]/hold[tk];
+        var proceeds=q*toEur(tx.price||0,cur(tk))-toEur(tx.fees||0,cur(tk));
+        realized+=proceeds-q*avg; costTk[tk]-=q*avg; hold[tk]-=q;
+      }
     });
-    return hold;
+    return {hold:hold,costTk:costTk,realized:realized};
   }
-  // Rendement d'une sous-période : mêmes titres (ceux détenus en t0), reprice t0→t1
-  function periodFactor(t0,t1){
-    var hold=holdAt(t0); var v0=0,v1=0,any=false;
-    Object.keys(hold).forEach(function(tk){
-      var q=hold[tk]; if(q<=1e-9) return;
-      var p0=priceAt(tk,t0), p1=priceAt(tk,t1);
-      if(p0==null||p1==null) return;
-      v0+=q*toEur(p0,cur(tk)); v1+=q*toEur(p1,cur(tk)); any=true;
+  function costOf(st){ var c=0; Object.keys(st.costTk).forEach(function(tk){ if((st.hold[tk]||0)>1e-7) c+=st.costTk[tk]; }); return c; }
+  function pnlAt(t){
+    var st=stateAt(t), v=0, priced=false;
+    Object.keys(st.hold).forEach(function(tk){
+      var q=st.hold[tk]; if(q<=1e-7) return;
+      var pr=priceAt(tk,t);
+      if(pr==null){ v+=(st.costTk[tk]||0); return; } // pas de prix → au coût (neutre)
+      v+=q*toEur(pr,cur(tk)); priced=true;
     });
-    if(!any||v0<=0) return null;
-    return v1/v0;
+    return {pnl:v-costOf(st)+st.realized, priced:priced};
   }
 
-  var cum=1; var out=[{t:timestamps[0],pct:0}];
-  for(var k=1;k<timestamps.length;k++){
-    var f=periodFactor(timestamps[k-1],timestamps[k]);
-    if(f!=null&&isFinite(f)&&f>0) cum*=f;
-    out.push({t:timestamps[k],pct:(cum-1)*100});
-  }
-  return out;
+  // Dénominateur CONSTANT = coût actuel des titres détenus (≈ "Investi" du portefeuille)
+  var now=Math.floor(Date.now()/1000);
+  var denom=costOf(stateAt(now));
+  if(denom<=1) denom=costOf(stateAt(timestamps[timestamps.length-1]));
+  if(denom<=1) return [];
+
+  var out=[];
+  timestamps.forEach(function(t){
+    var r=pnlAt(t);
+    if(!r.priced && out.length===0) return; // attendre d'avoir des prix
+    out.push({t:t,pct:r.pnl/denom*100});
+  });
+  if(out.length<2) return [];
+  // Rebase à 0 en début de fenêtre → lecture de la performance DE LA PÉRIODE affichée
+  var base=out[0].pct;
+  return out.map(function(p){return {t:p.t,pct:p.pct-base};});
 }
 
 // ── Performance indice
