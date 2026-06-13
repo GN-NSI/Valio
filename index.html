@@ -1646,8 +1646,8 @@ async function renderCompanyDetail(ticker, name) {
     '</div>' +
     // Barre de sous-onglets en HAUT (plus besoin de descendre la page)
     '<div id="cd-tabbar" style="display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:20px;overflow-x:auto">'+
-      ['val|📈 Valorisation','fin|📊 Historique financier','mat|🎯 Matrice','moat|🏰 MOAT & IA'].map(function(t){var p=t.split('|');
-        return '<button id="cdtb-'+p[0]+'" onclick="showCdTab(\''+p[0]+'\')" style="padding:9px 16px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;white-space:nowrap;color:'+(p[0]==='val'?'var(--text)':'var(--muted)')+';border-bottom:2px solid '+(p[0]==='val'?'var(--blue)':'transparent')+';margin-bottom:-1px">'+p[1]+'</button>';
+      ['ensemble|📊 Vue d\u0027ensemble','ratios|📈 Ratios & prix','fin|📋 Historique financier','mat|🎯 Matrice','moat|🏰 MOAT & IA'].map(function(t){var p=t.split('|');
+        return '<button id="cdtb-'+p[0]+'" onclick="showCdTab(\''+p[0]+'\')" style="padding:9px 16px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;white-space:nowrap;color:'+(p[0]==='ensemble'?'var(--text)':'var(--muted)')+';border-bottom:2px solid '+(p[0]==='ensemble'?'var(--blue)':'transparent')+';margin-bottom:-1px">'+p[1]+'</button>';
       }).join('')+'</div>' +
     '<div id="cd-content"><div style="text-align:center;padding:60px"><div class="spinner"></div> Chargement des données…</div></div>';
 
@@ -1785,7 +1785,7 @@ async function renderCompanyDetail(ticker, name) {
 
   // ── Analyse MOAT & Levier IA (Modif 5) ──
   var anaEl=document.getElementById('cd-analysis-section');
-  if(!anaEl){ anaEl=document.createElement('div'); anaEl.id='cd-analysis-section'; anaEl.style.marginTop='20px'; document.getElementById('page').appendChild(anaEl); }
+  if(!anaEl){ anaEl=document.createElement('div'); anaEl.id='cd-analysis-section'; anaEl.style.marginTop='20px'; anaEl.style.display='none'; document.getElementById('page').appendChild(anaEl); }
   renderAnalysisCard(ticker, name);
 
   // Charger données graphique via endpoint dédié (5 ans par défaut)
@@ -1806,6 +1806,7 @@ async function renderCompanyDetail(ticker, name) {
     finEl = document.createElement('div');
     finEl.id = 'cd-fin-section';
     finEl.style.marginTop='20px';
+    finEl.style.display='none'; // masqué : la Vue d'ensemble est l'onglet par défaut
     finEl.innerHTML='<div style="text-align:center;padding:16px"><div class="spinner"></div> <span style="color:var(--muted);font-size:12px">Chargement des analyses…</span></div>';
     document.getElementById('page').appendChild(finEl);
   }
@@ -2285,9 +2286,9 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
   var cH = '190px'; // chart height
 
   el.innerHTML =
-    '<div style="margin-top:4px;padding-top:24px;border-top:1px solid var(--border)">' +
-    '<div id="cdtab-val">' +
-    '<h3 style="font-size:15px;font-weight:700;margin:4px 0 16px">📈 Valorisation historique</h3>' +
+    '<div style="margin-top:4px">' +
+    '<div id="cdtab-ratios" style="display:none">' +
+    '<h3 style="font-size:15px;font-weight:700;margin:4px 0 16px">📈 Ratios & prix — historique</h3>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
       '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">P/E</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-pe"></canvas></div></div>' +
       '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Fwd P/E <span style="text-transform:none;font-weight:400">(EPS exercice suivant)</span></div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-pefwd"></canvas></div></div>' +
@@ -2334,7 +2335,7 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
   // MOAT & IA : déplace la section existante dans son onglet
   setTimeout(function(){
     var ana=document.getElementById('cd-analysis-section'), host=document.getElementById('cdtab-moat');
-    if(ana&&host&&ana.parentElement!==host) host.appendChild(ana);
+    if(ana&&host&&ana.parentElement!==host){ ana.style.display=''; host.appendChild(ana); }
   },80);
 
   function _buildSegmentCard(latest, allManual){
@@ -2967,15 +2968,28 @@ function cdRatioTimeChart(id,label,series,current,buyTs,sellTs){
       y:{position:'right',ticks:{font:{size:10},color:'#6b7280',callback:function(v){return v+'x';}},grid:{color:'rgba(255,255,255,.05)'}}}}});
 }
 
-// Onglets de la fiche entreprise (Valorisation / Financier / Matrice / MOAT)
+// Onglets de la fiche : Vue d'ensemble (cd-content) vs sous-sections (cd-fin-section)
 window.showCdTab=function(t,noScroll){
-  ['val','fin','mat','moat'].forEach(function(k){
-    var c=document.getElementById('cdtab-'+k), b=document.getElementById('cdtb-'+k);
-    if(c) c.style.display=(k===t?'':'none');
+  var keys=['ensemble','ratios','fin','mat','moat'];
+  keys.forEach(function(k){
+    var b=document.getElementById('cdtb-'+k);
     if(b){ b.style.color=(k===t?'var(--text)':'var(--muted)'); b.style.borderBottom='2px solid '+(k===t?'var(--blue)':'transparent'); }
   });
-  // amène la section détaillée sous les yeux (les onglets sont en haut de page)
-  if(!noScroll){ var s=document.getElementById('cd-fin-section'); if(s) s.scrollIntoView({behavior:'smooth',block:'start'}); }
+  var overview=document.getElementById('cd-content');
+  var fin=document.getElementById('cd-fin-section');
+  if(t==='ensemble'){
+    if(overview) overview.style.display='';
+    if(fin) fin.style.display='none';
+  } else {
+    if(overview) overview.style.display='none';
+    if(fin) fin.style.display='';
+    // n'afficher que la sous-section choisie
+    ['ratios','fin','mat','moat'].forEach(function(k){
+      var c=document.getElementById('cdtab-'+k);
+      if(c) c.style.display=(k===t?'':'none');
+    });
+  }
+  window.scrollTo({top:0,behavior:'smooth'});
   setTimeout(function(){ window.dispatchEvent(new Event('resize')); },60);
 };
 
@@ -2990,14 +3004,16 @@ function renderYieldMatrix(ticker, price, f, fin){
   // EPS de départ : éditable ; défaut = TTM via P/E Yahoo, sinon dernier EPS annuel connu
   var eps0=st.eps!=null?st.eps:((f&&f.trailingPE&&price)?(price/f.trailingPE):lastNN(fin&&fin.eps));
   if(!(eps0>0)||!(price>0)){ el.innerHTML='<div style="color:var(--muted);font-size:12px">EPS indisponible — saisis un EPS annuel dans les résultats pour activer la matrice.</div>'; return; }
-  // Centres éditables : croissance et multiple.
-  // Croissance : on privilégie le forward 1 an (fiable) car le champ "5 ans" de Yahoo
-  // est souvent corrompu/vide (renvoyait 6% pour META/GOOGL — absurde). Ordre :
-  // fwd1Y → fwd5Y → croissance EPS historique → 12% par défaut.
-  var _gcand=(f&&f.epsGrowthFwd1Y!=null&&f.epsGrowthFwd1Y>0)?f.epsGrowthFwd1Y
-            :(f&&f.epsGrowthFwd5Y!=null&&f.epsGrowthFwd5Y>0)?f.epsGrowthFwd5Y
-            :(f&&f.epsGrowth1Y!=null&&f.epsGrowth1Y>0?f.epsGrowth1Y:12);
-  var gC=st.gC!=null?st.gC:Math.min(40,Math.max(4,Math.round(_gcand)));
+  // Centres éditables. CROISSANCE : le champ analyste Yahoo (earningsTrend) est
+  // souvent corrompu (6% pour META/GOOGL = absurde). On calcule donc la croissance
+  // HISTORIQUE réelle des EPS depuis les comptes, qu'on mélange avec l'analyste si fiable.
+  var _eps=(fin&&fin.eps)||[];
+  var _iF=-1,_iL=-1; for(var _i=0;_i<_eps.length;_i++){ if(_eps[_i]!=null&&_eps[_i]>0){ if(_iF<0)_iF=_i; _iL=_i; } }
+  var _histCAGR=(_iF>=0&&_iL>_iF)?(Math.pow(_eps[_iL]/_eps[_iF],1/(_iL-_iF))-1)*100:null;
+  var _hG=(_histCAGR!=null&&isFinite(_histCAGR))?Math.min(45,_histCAGR):null;
+  var _aG=(f&&f.epsGrowthFwd1Y!=null&&f.epsGrowthFwd1Y>0)?f.epsGrowthFwd1Y:null;
+  var _gcand=(_hG!=null&&_aG!=null)?(0.5*_hG+0.5*_aG):(_hG!=null?_hG:(_aG!=null?_aG:12));
+  var gC=st.gC!=null?st.gC:Math.min(35,Math.max(4,Math.round(_gcand)));
   var mCur=st.mC!=null?st.mC:Math.min(60,Math.max(8,Math.round((f&&(f.forwardPE||f.trailingPE))||20)));
   if(st.g==null||st.m==null){ st={g:gC,m:mCur,eps:eps0,gC:gC,mC:mCur}; _ymSel[ticker]=st; }
   st.eps=eps0; st.gC=gC; st.mC=mCur;
@@ -3027,7 +3043,7 @@ function renderYieldMatrix(ticker, price, f, fin){
     '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Multiple central</label><br><input id="ym-m" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+mCur+'"></div>'+
     '<button class="btn btn-ghost btn-sm" onclick="window._ymApply(\''+ticker.replace(/'/g,"\\'")+'\')">Appliquer</button>'+
     '<button class="btn btn-ghost btn-sm" onclick="window._ymReset(\''+ticker.replace(/'/g,"\\'")+'\')" title="Revenir au consensus analystes">↺ Consensus</button>'+
-    '<span style="font-size:10px;color:var(--muted2)">Défauts : croissance = consensus analystes EPS 5 ans (Yahoo) · multiple = fwd P/E actuel</span>'+
+    '<span style="font-size:10px;color:var(--muted2)">Défauts : croissance = mix croissance EPS historique + analyste · multiple = fwd P/E actuel</span>'+
   '</div>'+
   '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:11px;white-space:nowrap" class="mono">'+
   '<tr><th style="padding:5px 8px;color:var(--muted);font-size:9px;text-align:left">CROISS. \\ MULT.</th>'+
@@ -4201,6 +4217,13 @@ async function buildPortfolioLine(transactions, range){
   var tickers=[...new Set(txns.map(function(t){return t.ticker;}))];
   var curByTk={};
   txns.forEach(function(t){ if(t.currency&&!curByTk[t.ticker]) curByTk[t.ticker]=t.currency.toUpperCase(); });
+  // Devise AUTORITAIRE depuis l'API (corrige les titres KRW/TWD/SEK dont la devise de
+  // transaction est absente/fausse → sinon un prix en wons est compté comme des dollars,
+  // ce qui gonfle énormément le coût et fait exploser la courbe). On préfetch ce qui manque.
+  await Promise.all(tickers.filter(function(tk){return !(S.prices[tk]&&S.prices[tk].currency);}).map(async function(tk){
+    try{ var r=await fetch(API+'?symbol='+encodeURIComponent(tk),{signal:AbortSignal.timeout(8000)}); var d=await r.json();
+      if(d&&d.currency){ if(!S.prices[tk])S.prices[tk]={}; S.prices[tk].currency=d.currency; if(d.price)S.prices[tk].price=d.price; } }catch(e){}
+  }));
 
   var hists={}; var BATCH=4, DELAY=300;
   for(var i=0;i<tickers.length;i+=BATCH){
@@ -4215,7 +4238,7 @@ async function buildPortfolioLine(transactions, range){
   var step=Math.max(1,Math.floor(timestamps.length/90));
   timestamps=timestamps.filter(function(_,i){return i%step===0||i===timestamps.length-1;});
 
-  function cur(tk){ return curByTk[tk]||(S.prices[tk]&&S.prices[tk].currency)||'USD'; }
+  function cur(tk){ return (S.prices[tk]&&S.prices[tk].currency)||curByTk[tk]||'USD'; }
   function priceAt(tk,t){ var pts=(hists[tk]||[]); var v=null; for(var j=0;j<pts.length;j++){ if(pts[j].t<=t) v=pts[j].c; else break; } return v; }
 
   // État reconstruit à t : quantités détenues, coût des titres détenus (€), P&L réalisé (€)
@@ -4256,12 +4279,13 @@ async function buildPortfolioLine(transactions, range){
   timestamps.forEach(function(t){
     var r=pnlAt(t);
     if(!r.priced && out.length===0) return; // attendre d'avoir des prix
-    out.push({t:t,pct:r.pnl/denom*100});
+    var pct=r.pnl/denom*100;
+    if(isFinite(pct)) out.push({t:t,pct:pct});
   });
   if(out.length<2) return [];
-  // Rebase à 0 en début de fenêtre → lecture de la performance DE LA PÉRIODE affichée
-  var base=out[0].pct;
-  return out.map(function(p){return {t:p.t,pct:p.pct-base};});
+  // Pas de rebasage : la courbe représente la P&L cumulée / capital actuel, donc
+  // elle FINIT exactement sur la performance affichée du portefeuille (latent+réalisé vs investi).
+  return out;
 }
 
 // ── Performance indice
