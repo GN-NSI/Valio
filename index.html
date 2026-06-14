@@ -5264,8 +5264,10 @@ async function deleteObjectif(id) {
   renderObjectifs();
 }
 
+let _projObj = null; // stockage temporaire de l'objectif courant pour la projection
+
 function showProjection(o) {
-  // Épargne mensuelle non stockée en base : l'utilisateur la saisit ici
+  _projObj = o; // on évite de passer le JSON dans un attribut onclick (conflit de guillemets)
   document.getElementById('modal-content').innerHTML = `
     <div class="modal-hd">
       <h2>Projection — ${o.nom}</h2>
@@ -5300,7 +5302,7 @@ function showProjection(o) {
       </div>
     </div>
 
-    <button class="btn btn-primary btn-full" onclick="runProjection(${JSON.stringify(o).replace(/'/g,"&#39;")})">
+    <button class="btn btn-primary btn-full" onclick="runProjection(_projObj)">
       Calculer la trajectoire
     </button>
 
