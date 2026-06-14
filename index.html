@@ -248,6 +248,7 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
       <div id="topbar">
         <span class="topbar-title" id="page-title">Portefeuille</span>
         <span id="eurusd-rate" style="font-size:12px;color:var(--muted)"></span>
+        <button class="btn btn-ghost btn-sm" id="notif-btn" onclick="notifBtnClick()" style="color:var(--muted)" title="Notifications">🔔</button>
         <button class="btn btn-ghost btn-sm" onclick="refreshData()" style="color:var(--muted)">↻ Actualiser</button>
       </div>
       <div id="page-portfolio" style="display:none"></div>
@@ -509,6 +510,7 @@ function getToken(){return _sess?.access_token||null;}
 
 // ═══ REST ═══
 const SU='https://dnmibojfzquicbhtactx.supabase.co',SK='sb_publishable_Wn3itCQXPfm-Onwey7h7Uw_pa2foE-f',API='/api/quote';
+const VAPID_PUBLIC_KEY='BE1p8Tl-S80USIuW-CV6Ici4054iAMsEuRUcPFFoQ9nODj5ucYFz_ae-5GWimJzggNQSPJUEf0YHt7ZfwzmuPm0';
 function hdrs(x={}){const h={'apikey':SK,'Content-Type':'application/json',...x};const t=getToken();if(t)h['Authorization']='Bearer '+t;return h;}
 async function refreshSession(){
   const rt=_sess?.refresh_token;
@@ -628,6 +630,50 @@ async function bootstrap(){
   await loadManualPrices();
 }
 async function refreshData(){showToast('🔄 Actualisation…');S.prices={};S.profiles={};S.fundamentals={};S.enrichedPos=[];S.portfolioRendered=false;document.getElementById('page-portfolio').innerHTML='';await bootstrap();navigate(S.page);}
+
+// ═══ NOTIFICATIONS PUSH (client) ═══════════════════════════════════════════
+function _urlB64ToUint8(base64){
+  var pad='='.repeat((4-base64.length%4)%4);
+  var b64=(base64+pad).replace(/-/g,'+').replace(/_/g,'/');
+  var raw=atob(b64),arr=new Uint8Array(raw.length);
+  for(var i=0;i<raw.length;i++)arr[i]=raw.charCodeAt(i);
+  return arr;
+}
+async function _isSubscribed(){
+  try{ if(!('serviceWorker' in navigator))return false; var reg=await navigator.serviceWorker.ready; var s=await reg.pushManager.getSubscription(); return !!s; }catch(e){return false;}
+}
+function _updateNotifBtn(on){ var b=document.getElementById('notif-btn'); if(b){ b.style.color=on?'var(--cyan)':'var(--muted)'; b.title=on?'Notifications activées · clic = test':'Activer les notifications'; } }
+async function enableNotifications(){
+  if(!('serviceWorker' in navigator)||!('PushManager' in window)){ showToast('Notifications non supportées sur cet appareil'); return false; }
+  var u=getUser(); if(!u){ showToast('Connecte-toi d\u0027abord'); return false; }
+  var perm=await Notification.requestPermission();
+  if(perm!=='granted'){ showToast('Notifications refusées dans le navigateur'); return false; }
+  try{
+    var reg=await navigator.serviceWorker.ready;
+    var sub=await reg.pushManager.getSubscription();
+    if(!sub){ sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:_urlB64ToUint8(VAPID_PUBLIC_KEY)}); }
+    var r=await fetch('/api/save-subscription',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:u.id,subscription:sub})});
+    var d=await r.json();
+    if(d.ok){ showToast('🔔 Notifications activées sur cet appareil'); _updateNotifBtn(true); return true; }
+    showToast('Erreur : '+(d.error||'inconnue')); return false;
+  }catch(e){ showToast('Erreur notifications : '+e.message); return false; }
+}
+async function sendTestNotif(){
+  var u=getUser(); if(!u)return;
+  showToast('Envoi du test…');
+  try{
+    var r=await fetch('/api/send-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:u.id})});
+    var d=await r.json();
+    showToast(d.ok?('✅ Test envoyé ('+d.sent+' appareil'+(d.sent>1?'s':'')+')'):'Erreur : '+(d.error||'—'));
+  }catch(e){ showToast('Erreur : '+e.message); }
+}
+async function notifBtnClick(){
+  var on=await _isSubscribed();
+  if(!on){ await enableNotifications(); }
+  else { sendTestNotif(); } // déjà abonné → envoie une notif test
+}
+// reflète l'état au démarrage
+_isSubscribed().then(_updateNotifBtn);
 
 // ═══ AUTH ═══
 let authMode='login';
@@ -1737,6 +1783,14 @@ async function renderCompanyDetail(ticker, name) {
   var perfYTD = price && price.changeYTD != null ? (price.changeYTD >= 0 ? '+' : '')+price.changeYTD.toFixed(1)+'%' : '—';
   var perf1y = price && price.change1Y != null ? (price.change1Y >= 0 ? '+' : '')+price.change1Y.toFixed(1)+'%' : '—';
 
+  // Prochains résultats
+  var earnStr = null, earnDays = null;
+  if (f && f.nextEarningsTs) {
+    var _ed = new Date(f.nextEarningsTs*1000);
+    earnDays = Math.round((_ed.getTime() - Date.now())/86400000);
+    earnStr = _ed.toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'});
+  }
+
   // Fetch fresh price data for chart if not available
   if (!price || !price.chartData) {
     try {
@@ -1762,8 +1816,8 @@ async function renderCompanyDetail(ticker, name) {
           '<div style="text-align:center"><div style="font-size:11px;color:var(--muted);text-transform:uppercase">1 an</div><div style="font-weight:700;color:var(--blue)">'+perf1y+'</div></div>' +
         '</div>' +
       '</div>' +
+      (earnStr ? '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px;font-size:13px;flex-wrap:wrap"><span style="color:var(--muted)">📅 Prochains résultats</span><span style="font-weight:700;color:var(--cyan)">'+earnStr+'</span>'+(earnDays!=null&&earnDays>=0?'<span style="color:var(--muted2);font-size:12px">· dans '+earnDays+' j</span>':'')+'</div>' : '') +
     '</div>' +
-    // Grille ratios
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px">' +
       // Valorisation
       '<div class="card"><div class="stats-section-title" style="margin-bottom:12px">Valorisation</div>' +
@@ -1942,11 +1996,11 @@ function drawCdChart(pts, price, ticker, pos) {
       // Mode normal : prix absolus
       var values = data.map(function(p){return p.c;});
       var isUp = values[values.length-1] >= values[0];
-      var col = isUp?'#22c55e':'#ef4444';
-      datasets.push({data:values, borderColor:col, backgroundColor:isUp?'rgba(34,197,94,0.07)':'rgba(239,68,68,0.07)',
-        fill:true, tension:0.2, pointRadius:0, pointHoverRadius:5, borderWidth:2, label:'Cours'});
+      var col = '#634BE4';
+      datasets.push({data:values, borderColor:col, backgroundColor:'rgba(99,75,228,0.10)',
+        fill:true, tension:0.2, pointRadius:0, pointHoverRadius:5, borderWidth:2.5, label:'Cours'});
       if(pruVal) datasets.push({data:Array(values.length).fill(Math.round(pruVal*100)/100),
-        borderColor:'rgba(245,158,11,0.9)', borderWidth:1.5, borderDash:[6,3],
+        borderColor:'#26C5DE', borderWidth:1.5, borderDash:[6,3],
         pointRadius:0, fill:false, label:'PRU '+(_isUsd?'$':'€')+pruVal.toFixed(2), tension:0});
       // Marqueurs achats / ventes sur la courbe de prix
       var _tol=Math.max(3*86400,(timestamps[timestamps.length-1]-timestamps[0])/timestamps.length*1.6);
