@@ -5324,9 +5324,19 @@ function runProjection(o) {
 
   // Calcul asynchrone (setTimeout pour laisser le DOM se mettre à jour)
   setTimeout(() => {
-    const { p5, p50, p95 } = simulateProjection(
-      Number(o.montant_actuel), epargne, o.horizon_annees, o.profil_risque, inflation
-    );
+    if (typeof simulateProjection === 'undefined') {
+      resultat.innerHTML = '<div style="color:var(--red);font-size:13px;padding:12px">Erreur : moteur de simulation non chargé. Recharge la page.</div>';
+      return;
+    }
+    let p5, p50, p95;
+    try {
+      ({ p5, p50, p95 } = simulateProjection(
+        Number(o.montant_actuel), epargne, o.horizon_annees, o.profil_risque, inflation
+      ));
+    } catch(e) {
+      resultat.innerHTML = `<div style="color:var(--red);font-size:13px;padding:12px">Erreur de calcul : ${e.message}</div>`;
+      return;
+    }
     const cible = Number(o.montant_cible);
     const atteint = p50 >= cible;
     const label = inflation ? 'euros constants' : 'euros nominaux';
