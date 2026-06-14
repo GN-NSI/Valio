@@ -5124,6 +5124,13 @@ function progressPct(actuel, cible) {
   return Math.min(100, Math.round((actuel / cible) * 100));
 }
 
+// Mappe un score 0-100 vers les 3 niveaux du placeholder profil_risque
+function _scoreToProfilRisque(score) {
+  if (score < 34) return 'prudent';
+  if (score < 67) return 'equilibre';
+  return 'dynamique';
+}
+
 async function renderObjectifs() {
   const pg = document.getElementById('page');
   pg.innerHTML = '<div style="text-align:center;padding:60px 0"><div class="spinner"></div></div>';
@@ -5171,6 +5178,17 @@ async function renderObjectifs() {
           <div style="width:${pct}%;height:100%;background:${barColor};border-radius:6px;transition:width .4s"></div>
         </div>
         <div style="text-align:right;font-size:12px;color:var(--muted);margin-top:5px">${pct}%</div>
+
+        ${o.simulation_sauvegardee ? (() => {
+          const s = o.simulation_sauvegardee;
+          const date = s.sauvegardee_le ? new Date(s.sauvegardee_le).toLocaleDateString('fr-FR') : '';
+          return `<div style="margin-top:12px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:9px;font-size:12px;display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+            <span style="color:var(--muted)">📊 Simulation du ${date} · ${fEur(s.epargne_mensuelle)}/mois</span>
+            <span>P50 : <strong>${fEur(s.p50)}</strong></span>
+            <span style="color:var(--cyan)">Sûr à 80 % : <strong>${fEur(s.p20)}</strong></span>
+            <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick='showProjection(${JSON.stringify(o).replace(/'/g,"&#39;")})'>Revoir →</button>
+          </div>`;
+        })() : ''}
       </div>`;
   }).join('');
 
@@ -5184,8 +5202,27 @@ async function renderObjectifs() {
     </div>`;
 }
 
-function openObjectifModal(o = null) {
+async function openObjectifModal(o = null) {
   const isEdit = o && o.id;
+
+  // Récupère le profil de risque enregistré pour pré-sélectionner le niveau
+  let suggestedProfil = isEdit ? o.profil_risque : 'equilibre';
+  let profilBadge = '';
+  try {
+    const uid = getUser()?.id;
+    if (uid) {
+      const rp = await fetch(`${SU}/rest/v1/profil_risque?user_id=eq.${uid}&select=score_tolerance,score_capacite`, { headers: hdrs() });
+      if (rp.ok) {
+        const rows = await rp.json();
+        if (rows.length && rows[0].score_tolerance != null && rows[0].score_capacite != null) {
+          const budget = Math.min(rows[0].score_tolerance, rows[0].score_capacite);
+          if (!isEdit) suggestedProfil = _scoreToProfilRisque(budget);
+          profilBadge = `<span style="display:inline-block;margin-top:5px;font-size:11px;color:var(--cyan)">ℹ Basé sur votre profil de risque · budget ${budget}/100</span>`;
+        }
+      }
+    }
+  } catch(_) {}
+
   document.getElementById('modal-content').innerHTML = `
     <div class="modal-hd">
       <h2>${isEdit ? 'Modifier l\'objectif' : 'Nouvel objectif'}</h2>
@@ -5213,10 +5250,11 @@ function openObjectifModal(o = null) {
       <div class="form-group">
         <label class="form-label">Profil de risque</label>
         <select id="obj-profil" class="form-input" onchange="updateProfilHint(this.value)">
-          <option value="prudent" ${isEdit && o.profil_risque==='prudent' ? 'selected' : ''}>Prudent</option>
-          <option value="equilibre" ${!isEdit || o.profil_risque==='equilibre' ? 'selected' : ''}>Équilibré</option>
-          <option value="dynamique" ${isEdit && o.profil_risque==='dynamique' ? 'selected' : ''}>Dynamique</option>
+          <option value="prudent" ${suggestedProfil==='prudent' ? 'selected' : ''}>Prudent</option>
+          <option value="equilibre" ${suggestedProfil==='equilibre' ? 'selected' : ''}>Équilibré</option>
+          <option value="dynamique" ${suggestedProfil==='dynamique' ? 'selected' : ''}>Dynamique</option>
         </select>
+        ${profilBadge}
         <div id="profil-hint" style="margin-top:6px;font-size:11px;color:var(--muted);line-height:1.5"></div>
       </div>
     </div>
@@ -5227,8 +5265,7 @@ function openObjectifModal(o = null) {
       </button>
     </div>`;
   document.getElementById('modal-overlay').classList.add('open');
-  // Initialise l'indice de profil au bon état dès l'ouverture
-  updateProfilHint(isEdit ? o.profil_risque : 'equilibre');
+  updateProfilHint(suggestedProfil);
 }
 
 function updateProfilHint(profil) {
