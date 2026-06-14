@@ -101,7 +101,7 @@ module.exports = async (req, res) => {
   if (type === 'fundamentals') {
     try {
       // Cache Supabase → réponse instantanée si données < 24h
-      const CACHE_V = 4; // Incrémenter pour invalider tous les caches
+      const CACHE_V = 5; // Incrémenter pour invalider tous les caches
       const cached = await getCache(symbol);
       const cacheValid = cached
         && cached._v === CACHE_V
@@ -110,13 +110,21 @@ module.exports = async (req, res) => {
       if (cacheValid) return res.json({ ...cached, _fromCache: true });
 
       // Sinon : Yahoo Finance quoteSummary
-      const yf = await yfSummary(symbol, 'defaultKeyStatistics,financialData,summaryDetail,earningsTrend');
+      const yf = await yfSummary(symbol, 'defaultKeyStatistics,financialData,summaryDetail,earningsTrend,calendarEvents');
       if (!yf) return res.status(404).json({ error: `Pas de données pour ${symbol}` });
 
       const sd = yf.summaryDetail        || {};
       const fd = yf.financialData        || {};
       const ks = yf.defaultKeyStatistics || {};
       const et = yf.earningsTrend        || {};
+      const cal = yf.calendarEvents      || {};
+
+      // Date des prochains résultats (prochaine publication à venir)
+      const earnDates = (cal.earnings && cal.earnings.earningsDate) || [];
+      const nowTs = Math.floor(Date.now() / 1000);
+      let nextEarningsTs = null;
+      for (const d of earnDates) { if (d && d.raw && d.raw >= nowTs) { nextEarningsTs = d.raw; break; } }
+      if (nextEarningsTs == null && earnDates.length && earnDates[0] && earnDates[0].raw) nextEarningsTs = earnDates[0].raw;
 
       const raw = v => (v?.raw ?? null);
       const pct = v => (v?.raw != null ? v.raw * 100 : null);
@@ -165,6 +173,7 @@ module.exports = async (req, res) => {
         revenueGrowthFwd1Y,
         freeCashflow: fcf, operatingCashFlow: ocf,
         mktCap, sharesOutstanding, fcfGrowth: null, roic: null,
+        nextEarningsTs,
         timestamp: Date.now(),
       };
 
