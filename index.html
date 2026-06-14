@@ -235,6 +235,8 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
         <div class="nav-item" id="nav-amis" onclick="navigate('amis')"><span class="nav-icon">👥</span><span>Amis</span></div>
         <div class="nav-item" id="nav-benchmark" onclick="navigate('benchmark')"><span class="nav-icon">📊</span><span>Benchmark</span></div>
         <div class="nav-item" id="nav-leaderboard" onclick="navigate('leaderboard')"><span class="nav-icon">🏆</span><span>Classement</span></div>
+      <div class="nav-section">Planification</div>
+      <div class="nav-item" id="nav-objectifs" onclick="navigate('objectifs')"><span class="nav-icon">🎯</span><span>Mes objectifs</span></div>
       <div class="nav-section-label" style="font-size:10px;color:var(--muted);padding:12px 16px 4px;letter-spacing:.08em;font-weight:600">SUIVI</div>
       <div class="nav-item" id="nav-deposits" onclick="navigate('deposits')"><span class="nav-icon">💸</span><span>Dépôts & Solde</span></div>
       <div class="nav-item" id="nav-liquidity" onclick="navigate('liquidity')"><span class="nav-icon">💰</span><span>Liquidités</span></div>
@@ -694,7 +696,7 @@ function navigate(page){
   S.page=page;
   document.querySelectorAll('.nav-item:not(.disabled)').forEach(e=>e.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes',ratios:'Screener',watchlist:'Cibles d\u0027achat',screener:'Screener',amis:'Amis',benchmark:'Benchmark',leaderboard:'Classement',journal:'Journal'}[page]||page;
+  document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes',ratios:'Screener',watchlist:'Cibles d\u0027achat',screener:'Screener',amis:'Amis',benchmark:'Benchmark',leaderboard:'Classement',journal:'Journal',objectifs:'Mes objectifs'}[page]||page;
   const pfDiv=document.getElementById('page-portfolio');
   const pgDiv=document.getElementById('page');
   if(page==='portfolio'){
@@ -714,6 +716,7 @@ function navigate(page){
     else if(page==='journal')renderJournal();
     else if(page==='deposits')renderDeposits();
     else if(page==='liquidity')renderLiquidity();
+    else if(page==='objectifs')renderObjectifs();
   }
 }
 
@@ -5092,6 +5095,293 @@ document.addEventListener('click', function(e){
   if(el) openCompanyDetail(el.dataset.ticker, el.textContent.trim());
 });
 </script>
+
+<!-- ═══ MOTEUR DE PROJECTION OBJECTIFS ═══ -->
+<script src="/objectifs.js"></script>
+
+<script>
+// ─── OBJECTIFS FINANCIERS ────────────────────────────────────────────────────
+
+const PROFIL_LABEL = { prudent:'Prudent', equilibre:'Équilibré', dynamique:'Dynamique' };
+
+async function fetchObjectifs() {
+  const uid = getUser()?.id;
+  if (!uid) return [];
+  const r = await fetch(`${SU}/rest/v1/objectifs?user_id=eq.${uid}&order=priorite.asc,created_at.asc`, { headers: hdrs() });
+  if (!r.ok) return [];
+  return r.json();
+}
+
+function fEur(n) {
+  return Number(n).toLocaleString('fr-FR', { maximumFractionDigits: 0 }) + ' €';
+}
+
+function progressPct(actuel, cible) {
+  if (!cible || cible <= 0) return 0;
+  return Math.min(100, Math.round((actuel / cible) * 100));
+}
+
+async function renderObjectifs() {
+  const pg = document.getElementById('page');
+  pg.innerHTML = '<div style="text-align:center;padding:60px 0"><div class="spinner"></div></div>';
+
+  const objectifs = await fetchObjectifs();
+
+  if (!objectifs.length) {
+    pg.innerHTML = `
+      <div class="empty-state">
+        <div class="icon">🎯</div>
+        <h3>Aucun objectif pour l'instant</h3>
+        <p>Définissez vos premières poches d'épargne (retraite, études, projet…)</p>
+        <button class="btn btn-primary" onclick="openObjectifModal()">+ Ajouter un objectif</button>
+      </div>`;
+    return;
+  }
+
+  const cartes = objectifs.map(o => {
+    const pct = progressPct(o.montant_actuel, o.montant_cible);
+    const barColor = pct >= 100 ? 'var(--green)' : pct >= 60 ? 'var(--cyan)' : 'var(--blue)';
+    return `
+      <div class="card" style="padding:22px;margin-bottom:14px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">
+          <div>
+            <div style="font-size:17px;font-weight:700;margin-bottom:4px">${o.nom}</div>
+            <div style="font-size:12px;color:var(--muted)">
+              ${PROFIL_LABEL[o.profil_risque]} · Horizon ${o.horizon_annees} an${o.horizon_annees > 1 ? 's' : ''}
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;flex-shrink:0">
+            <button class="btn btn-sm" style="background:rgba(38,197,222,.14);color:var(--cyan);border:1px solid rgba(38,197,222,.28)"
+              onclick='showProjection(${JSON.stringify(o).replace(/'/g,"&#39;")})'>
+              📈 Projection
+            </button>
+            <button class="btn btn-ghost btn-sm" onclick='openObjectifModal(${JSON.stringify(o).replace(/'/g,"&#39;")})'>Modifier</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteObjectif('${o.id}')">✕</button>
+          </div>
+        </div>
+
+        <div style="margin:18px 0 6px;display:flex;justify-content:space-between;font-size:13px">
+          <span style="color:var(--muted)">Progression</span>
+          <span style="font-weight:600">${fEur(o.montant_actuel)} <span style="color:var(--muted)">/ ${fEur(o.montant_cible)}</span></span>
+        </div>
+        <div style="height:8px;background:var(--border2);border-radius:6px;overflow:hidden">
+          <div style="width:${pct}%;height:100%;background:${barColor};border-radius:6px;transition:width .4s"></div>
+        </div>
+        <div style="text-align:right;font-size:12px;color:var(--muted);margin-top:5px">${pct}%</div>
+      </div>`;
+  }).join('');
+
+  pg.innerHTML = `
+    <div style="max-width:720px;margin:0 auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <h2 style="font-size:20px;font-weight:700">Mes objectifs</h2>
+        <button class="btn btn-primary btn-sm" onclick="openObjectifModal()">+ Ajouter</button>
+      </div>
+      ${cartes}
+    </div>`;
+}
+
+function openObjectifModal(o = null) {
+  const isEdit = o && o.id;
+  document.getElementById('modal-content').innerHTML = `
+    <div class="modal-hd">
+      <h2>${isEdit ? 'Modifier l\'objectif' : 'Nouvel objectif'}</h2>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Nom de l'objectif</label>
+      <input id="obj-nom" class="form-input" placeholder="ex: Retraite, Études enfant, Résidence principale…" value="${isEdit ? o.nom : ''}">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Montant cible (€)</label>
+        <input id="obj-cible" type="number" min="1" class="form-input" placeholder="100 000" value="${isEdit ? o.montant_cible : ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Montant déjà épargné (€)</label>
+        <input id="obj-actuel" type="number" min="0" class="form-input" placeholder="0" value="${isEdit ? o.montant_actuel : '0'}">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Horizon (années)</label>
+        <input id="obj-horizon" type="number" min="1" max="60" class="form-input" placeholder="10" value="${isEdit ? o.horizon_annees : ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Profil de risque</label>
+        <select id="obj-profil" class="form-input">
+          <option value="prudent" ${isEdit && o.profil_risque==='prudent' ? 'selected' : ''}>Prudent</option>
+          <option value="equilibre" ${!isEdit || o.profil_risque==='equilibre' ? 'selected' : ''}>Équilibré</option>
+          <option value="dynamique" ${isEdit && o.profil_risque==='dynamique' ? 'selected' : ''}>Dynamique</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Priorité (1 = plus important)</label>
+      <input id="obj-priorite" type="number" min="1" max="99" class="form-input" value="${isEdit ? o.priorite : '1'}">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-primary" onclick="saveObjectif('${isEdit ? o.id : ''}')">
+        ${isEdit ? 'Enregistrer' : 'Créer'}
+      </button>
+    </div>`;
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+async function saveObjectif(id) {
+  const nom      = document.getElementById('obj-nom').value.trim();
+  const cible    = parseFloat(document.getElementById('obj-cible').value);
+  const actuel   = parseFloat(document.getElementById('obj-actuel').value) || 0;
+  const horizon  = parseInt(document.getElementById('obj-horizon').value);
+  const profil   = document.getElementById('obj-profil').value;
+  const priorite = parseInt(document.getElementById('obj-priorite').value) || 1;
+
+  if (!nom || !cible || cible <= 0 || !horizon || horizon <= 0) {
+    showToast('Remplis tous les champs obligatoires.'); return;
+  }
+
+  const uid = getUser()?.id;
+  const body = JSON.stringify({ user_id: uid, nom, montant_cible: cible, montant_actuel: actuel, horizon_annees: horizon, profil_risque: profil, priorite });
+
+  let r;
+  if (id) {
+    r = await fetch(`${SU}/rest/v1/objectifs?id=eq.${id}`, { method: 'PATCH', headers: hdrs({ Prefer: 'return=minimal' }), body });
+  } else {
+    r = await fetch(`${SU}/rest/v1/objectifs`, { method: 'POST', headers: hdrs({ Prefer: 'return=minimal' }), body });
+  }
+
+  if (!r.ok) { showToast('Erreur lors de l\'enregistrement.'); return; }
+  closeModal();
+  showToast(id ? 'Objectif mis à jour.' : 'Objectif créé !');
+  renderObjectifs();
+}
+
+async function deleteObjectif(id) {
+  if (!confirm('Supprimer cet objectif ?')) return;
+  await fetch(`${SU}/rest/v1/objectifs?id=eq.${id}`, { method: 'DELETE', headers: hdrs() });
+  showToast('Objectif supprimé.');
+  renderObjectifs();
+}
+
+function showProjection(o) {
+  // Épargne mensuelle non stockée en base : l'utilisateur la saisit ici
+  document.getElementById('modal-content').innerHTML = `
+    <div class="modal-hd">
+      <h2>Projection — ${o.nom}</h2>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:16px;font-size:13px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+        <span style="color:var(--muted)">Capital de départ</span>
+        <strong>${fEur(o.montant_actuel)}</strong>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+        <span style="color:var(--muted)">Objectif cible</span>
+        <strong>${fEur(o.montant_cible)}</strong>
+      </div>
+      <div style="display:flex;justify-content:space-between">
+        <span style="color:var(--muted)">Horizon</span>
+        <strong>${o.horizon_annees} ans · ${PROFIL_LABEL[o.profil_risque]}</strong>
+      </div>
+    </div>
+
+    <div class="form-row" style="margin-bottom:16px">
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">Épargne mensuelle (€)</label>
+        <input id="proj-epargne" type="number" min="0" class="form-input" placeholder="300" value="0">
+      </div>
+      <div class="form-group" style="margin-bottom:0;display:flex;flex-direction:column;justify-content:flex-end">
+        <label class="form-label" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="proj-inflation" checked style="accent-color:var(--blue)">
+          Résultat en euros constants
+        </label>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">Coché = inflation déduite (~2%)</div>
+      </div>
+    </div>
+
+    <button class="btn btn-primary btn-full" onclick="runProjection(${JSON.stringify(o).replace(/'/g,"&#39;")})">
+      Calculer la trajectoire
+    </button>
+
+    <div id="proj-result" style="margin-top:20px"></div>
+
+    <div style="margin-top:20px;padding:12px;background:rgba(99,75,228,.07);border:1px solid rgba(99,75,228,.2);border-radius:8px;font-size:11px;color:var(--muted);line-height:1.6">
+      À but pédagogique uniquement. Ne constitue pas un conseil en investissement.
+      Les résultats sont issus d'une simulation Monte-Carlo (7 000 tirages, loi normale).
+      Les hypothèses de rendement et de volatilité sont des estimations basées sur des données
+      historiques longues — les performances passées ne préjugent pas des performances futures.
+    </div>`;
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function runProjection(o) {
+  const epargne   = parseFloat(document.getElementById('proj-epargne').value) || 0;
+  const inflation = document.getElementById('proj-inflation').checked;
+  const resultat  = document.getElementById('proj-result');
+
+  resultat.innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div><div style="margin-top:10px;font-size:12px;color:var(--muted)">Simulation en cours…</div></div>';
+
+  // Calcul asynchrone (setTimeout pour laisser le DOM se mettre à jour)
+  setTimeout(() => {
+    const { p5, p50, p95 } = simulateProjection(
+      Number(o.montant_actuel), epargne, o.horizon_annees, o.profil_risque, inflation
+    );
+    const cible = Number(o.montant_cible);
+    const atteint = p50 >= cible;
+    const label = inflation ? 'euros constants' : 'euros nominaux';
+
+    function bar(val, max) {
+      const pct = Math.min(100, Math.round((val / max) * 100));
+      const col = val >= cible ? 'var(--green)' : 'var(--blue)';
+      return `<div style="height:6px;background:var(--border2);border-radius:4px;margin-top:6px;overflow:hidden">
+        <div style="width:${pct}%;height:100%;background:${col};border-radius:4px"></div></div>`;
+    }
+
+    const max = Math.max(p95, cible) * 1.05;
+
+    resultat.innerHTML = `
+      <div style="text-align:center;margin-bottom:16px;font-size:12px;color:var(--muted)">
+        Résultats en <strong style="color:var(--text)">${label}</strong> après <strong style="color:var(--text)">${o.horizon_annees} ans</strong>
+        (+ ${fEur(epargne)}/mois d'épargne)
+      </div>
+
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+          <span style="font-size:12px;color:var(--muted)">Scénario défavorable (5% des cas)</span>
+          <span style="font-weight:700;font-size:16px;color:var(--red)">${fEur(p5)}</span>
+        </div>
+        ${bar(p5, max)}
+      </div>
+
+      <div style="background:linear-gradient(135deg,rgba(99,75,228,.12),rgba(38,197,222,.08));border:1px solid rgba(99,75,228,.3);border-radius:12px;padding:18px;margin-bottom:12px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--blue);margin-bottom:6px">Médiane (trajectoire centrale)</div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+          <span style="font-size:12px;color:var(--muted)">50% des simulations</span>
+          <span style="font-weight:700;font-size:22px;color:var(--text)">${fEur(p50)}</span>
+        </div>
+        ${bar(p50, max)}
+        <div style="margin-top:10px;font-size:13px;font-weight:600;color:${atteint ? 'var(--green)' : 'var(--yellow)'}">
+          ${atteint ? '✓ Objectif atteint dans le scénario médian' : '⚠ Objectif non atteint dans le scénario médian'}
+        </div>
+      </div>
+
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+          <span style="font-size:12px;color:var(--muted)">Scénario favorable (5% des cas)</span>
+          <span style="font-weight:700;font-size:16px;color:var(--green)">${fEur(p95)}</span>
+        </div>
+        ${bar(p95, max)}
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--card2);border-radius:10px;font-size:13px">
+        <span style="color:var(--muted)">Cible à atteindre</span>
+        <span style="font-weight:700">${fEur(cible)}</span>
+      </div>`;
+  }, 20);
+}
+</script>
+
 <script>
 // Enregistrement du service worker (PWA installable). Sans effet en local file://.
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
