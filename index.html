@@ -236,6 +236,7 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
         <div class="nav-item" id="nav-benchmark" onclick="navigate('benchmark')"><span class="nav-icon">📊</span><span>Benchmark</span></div>
         <div class="nav-item" id="nav-leaderboard" onclick="navigate('leaderboard')"><span class="nav-icon">🏆</span><span>Classement</span></div>
       <div class="nav-section">Planification</div>
+      <div class="nav-item" id="nav-profil" onclick="navigate('profil')"><span class="nav-icon">🧭</span><span>Mon profil</span></div>
       <div class="nav-item" id="nav-objectifs" onclick="navigate('objectifs')"><span class="nav-icon">🎯</span><span>Mes objectifs</span></div>
       <div class="nav-section-label" style="font-size:10px;color:var(--muted);padding:12px 16px 4px;letter-spacing:.08em;font-weight:600">SUIVI</div>
       <div class="nav-item" id="nav-deposits" onclick="navigate('deposits')"><span class="nav-icon">💸</span><span>Dépôts & Solde</span></div>
@@ -696,7 +697,7 @@ function navigate(page){
   S.page=page;
   document.querySelectorAll('.nav-item:not(.disabled)').forEach(e=>e.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes',ratios:'Screener',watchlist:'Cibles d\u0027achat',screener:'Screener',amis:'Amis',benchmark:'Benchmark',leaderboard:'Classement',journal:'Journal',objectifs:'Mes objectifs'}[page]||page;
+  document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes',ratios:'Screener',watchlist:'Cibles d\u0027achat',screener:'Screener',amis:'Amis',benchmark:'Benchmark',leaderboard:'Classement',journal:'Journal',objectifs:'Mes objectifs',profil:'Mon profil'}[page]||page;
   const pfDiv=document.getElementById('page-portfolio');
   const pgDiv=document.getElementById('page');
   if(page==='portfolio'){
@@ -717,6 +718,7 @@ function navigate(page){
     else if(page==='deposits')renderDeposits();
     else if(page==='liquidity')renderLiquidity();
     else if(page==='objectifs')renderObjectifs();
+    else if(page==='profil')renderProfil();
   }
 }
 
@@ -5097,6 +5099,7 @@ document.addEventListener('click', function(e){
 </script>
 
 <!-- ═══ MOTEUR DE PROJECTION OBJECTIFS ═══ -->
+<script src="/profil.js"></script>
 <script src="/objectifs.js"></script>
 
 <script>
@@ -5576,6 +5579,385 @@ async function saveSimulation(epargne, inflation) {
   } else {
     showToast('Erreur lors de l\'enregistrement.');
   }
+}
+</script>
+
+<script>
+// ─── PAGE MON PROFIL ─────────────────────────────────────────────────────────
+
+// État global du questionnaire (non persisté — recalculé à chaque fois)
+let _profilReponses = {}; // { q1: pts, q2: pts, ... }
+let _profilQIdx    = 0;   // index question en cours (0-9)
+let _profilCapacite = null; // { revenus, charges, epargne }
+
+async function renderProfil() {
+  const pg = document.getElementById('page');
+  pg.innerHTML = '<div style="text-align:center;padding:60px 0"><div class="spinner"></div></div>';
+
+  const uid = getUser()?.id;
+  const [profil, patrimoine] = await Promise.all([
+    fetch(`${SU}/rest/v1/profil_risque?user_id=eq.${uid}`, { headers: hdrs() })
+      .then(r => r.ok ? r.json() : []).then(a => a[0] || null),
+    fetch(`${SU}/rest/v1/patrimoine?user_id=eq.${uid}&order=created_at.asc`, { headers: hdrs() })
+      .then(r => r.ok ? r.json() : []),
+  ]);
+
+  if (!profil || profil.score_tolerance === null) {
+    _showProfilWelcome(pg, patrimoine);
+  } else {
+    _showProfilDashboard(pg, profil, patrimoine);
+  }
+}
+
+function _showProfilWelcome(pg, patrimoine) {
+  pg.innerHTML = `
+    <div style="max-width:640px;margin:0 auto">
+      <div class="empty-state">
+        <div class="icon">🧭</div>
+        <h3>Définissons votre profil de risque</h3>
+        <p>Un questionnaire en 3 étapes (≈ 5 min) :<br>
+           10 questions de tolérance · situation financière · déclaration du patrimoine</p>
+        <button class="btn btn-primary" onclick="_startQuestionnaire()">Commencer</button>
+      </div>
+      ${patrimoine.length ? _htmlPatrimoine(patrimoine) : ''}
+    </div>`;
+}
+
+// ── Étape 1 : questionnaire tolérance ────────────────────────────────────────
+
+function _startQuestionnaire() {
+  _profilReponses = {};
+  _profilQIdx = 0;
+  _renderQuestion();
+}
+
+function _renderQuestion() {
+  const pg = document.getElementById('page');
+  if (typeof QUESTIONS_TOLERANCE === 'undefined') {
+    pg.innerHTML = '<div style="color:var(--red);padding:20px">Erreur : profil.js non chargé. Recharge la page.</div>';
+    return;
+  }
+  const q = QUESTIONS_TOLERANCE[_profilQIdx];
+  const total = QUESTIONS_TOLERANCE.length;
+  const pct = Math.round((_profilQIdx / total) * 100);
+
+  pg.innerHTML = `
+    <div style="max-width:600px;margin:0 auto">
+      <div style="margin-bottom:20px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:6px">
+          <span>Tolérance au risque</span>
+          <span>Question ${_profilQIdx + 1} / ${total}</span>
+        </div>
+        <div style="height:6px;background:var(--border2);border-radius:4px;overflow:hidden">
+          <div style="width:${pct}%;height:100%;background:var(--grad);border-radius:4px;transition:width .3s"></div>
+        </div>
+      </div>
+
+      <div class="card" style="padding:28px">
+        <div style="font-size:16px;font-weight:600;line-height:1.5;margin-bottom:24px">${q.texte}</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          ${q.options.map((opt, i) => `
+            <button onclick="_selectOption(${i}, ${opt.pts})"
+              style="text-align:left;padding:13px 16px;border-radius:11px;border:1px solid var(--border);
+                background:var(--card2);color:var(--text);cursor:pointer;font-size:13px;
+                transition:all .15s;line-height:1.4"
+              onmouseover="this.style.borderColor='var(--blue)';this.style.background='rgba(99,75,228,.1)'"
+              onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--card2)'">
+              <span style="color:var(--muted);margin-right:8px;font-weight:600">${String.fromCharCode(65+i)}.</span>${opt.texte}
+            </button>`).join('')}
+        </div>
+      </div>
+
+      ${_profilQIdx > 0 ? `<button class="btn btn-ghost btn-sm" style="margin-top:14px" onclick="_profilQIdx--;_renderQuestion()">← Précédent</button>` : ''}
+    </div>`;
+}
+
+function _selectOption(optionIdx, pts) {
+  const q = QUESTIONS_TOLERANCE[_profilQIdx];
+  _profilReponses[q.id] = pts;
+
+  // Feedback visuel bref puis avance
+  const btns = document.querySelectorAll('#page button[onclick^="_selectOption"]');
+  btns.forEach((b, i) => {
+    b.style.opacity = '0.4';
+    b.style.pointerEvents = 'none';
+    if (i === optionIdx) {
+      b.style.opacity = '1';
+      b.style.borderColor = 'var(--blue)';
+      b.style.background = 'rgba(99,75,228,.18)';
+    }
+  });
+
+  setTimeout(() => {
+    _profilQIdx++;
+    if (_profilQIdx < QUESTIONS_TOLERANCE.length) {
+      _renderQuestion();
+    } else {
+      _renderCapaciteForm();
+    }
+  }, 280);
+}
+
+// ── Étape 2 : capacité financière ────────────────────────────────────────────
+
+function _renderCapaciteForm() {
+  const pg = document.getElementById('page');
+  const prev = _profilCapacite || {};
+  pg.innerHTML = `
+    <div style="max-width:600px;margin:0 auto">
+      <div style="margin-bottom:20px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:6px">
+          <span>Situation financière</span><span>Étape 2 / 3</span>
+        </div>
+        <div style="height:6px;background:var(--border2);border-radius:4px;overflow:hidden">
+          <div style="width:66%;height:100%;background:var(--grad);border-radius:4px"></div>
+        </div>
+      </div>
+
+      <div class="card" style="padding:28px">
+        <div style="font-size:16px;font-weight:600;margin-bottom:6px">Ta situation financière</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:24px">
+          Ces données restent privées et servent uniquement à calculer ta capacité à prendre du risque.
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Revenus mensuels nets (€)</label>
+          <input id="cap-revenus" type="number" min="0" class="form-input" placeholder="ex : 3 000" value="${prev.revenus || ''}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Charges fixes mensuelles (€) <span style="color:var(--muted);font-weight:400">(loyer, crédits, abonnements…)</span></label>
+          <input id="cap-charges" type="number" min="0" class="form-input" placeholder="ex : 1 500" value="${prev.charges || ''}">
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">Épargne de précaution disponible (€) <span style="color:var(--muted);font-weight:400">(livret A, compte courant…)</span></label>
+          <input id="cap-epargne" type="number" min="0" class="form-input" placeholder="ex : 8 000" value="${prev.epargne || ''}">
+          <div style="font-size:11px;color:var(--muted);margin-top:5px">Somme accessible immédiatement en cas de besoin.</div>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;margin-top:16px">
+        <button class="btn btn-ghost" onclick="_profilQIdx=QUESTIONS_TOLERANCE.length-1;_renderQuestion()">← Précédent</button>
+        <button class="btn btn-primary" onclick="_validerCapacite()">Continuer →</button>
+      </div>
+    </div>`;
+}
+
+function _validerCapacite() {
+  const revenus = parseFloat(document.getElementById('cap-revenus').value) || 0;
+  const charges = parseFloat(document.getElementById('cap-charges').value) || 0;
+  const epargne = parseFloat(document.getElementById('cap-epargne').value) || 0;
+  if (revenus === 0 && charges === 0) { showToast('Remplis au moins les revenus et charges.'); return; }
+  _profilCapacite = { revenus, charges, epargne };
+  _renderPatrimoineForm();
+}
+
+// ── Étape 3 : déclaration patrimoine ─────────────────────────────────────────
+
+const ENVELOPPES = ['PEA','CTO','Assurance_vie','Fonds_euro','Livret','Compte_courant','Autre'];
+let _patrimoineLines = []; // lignes en cours d'édition
+
+async function _renderPatrimoineForm() {
+  const pg = document.getElementById('page');
+  // Charger les lignes existantes si premier passage
+  if (_patrimoineLines.length === 0) {
+    const uid = getUser()?.id;
+    const data = await fetch(`${SU}/rest/v1/patrimoine?user_id=eq.${uid}&order=created_at.asc`, { headers: hdrs() })
+      .then(r => r.ok ? r.json() : []);
+    _patrimoineLines = data.map(d => ({ id: d.id, type: d.type_enveloppe, libelle: d.libelle, montant: d.montant }));
+  }
+  _renderPatrimoineUI();
+}
+
+function _renderPatrimoineUI() {
+  const pg = document.getElementById('page');
+  const lignesHtml = _patrimoineLines.map((l, i) => `
+    <div style="display:grid;grid-template-columns:140px 1fr 130px 36px;gap:8px;align-items:center;margin-bottom:8px">
+      <select onchange="_patrimoineLines[${i}].type=this.value" class="form-input" style="padding:8px 10px;font-size:13px">
+        ${ENVELOPPES.map(e => `<option value="${e}" ${l.type===e?'selected':''}>${e.replace('_',' ')}</option>`).join('')}
+      </select>
+      <input class="form-input" style="padding:8px 10px;font-size:13px" placeholder="Libellé (ex: PEA Boursorama)"
+        value="${l.libelle}" oninput="_patrimoineLines[${i}].libelle=this.value">
+      <input type="number" min="0" class="form-input" style="padding:8px 10px;font-size:13px" placeholder="Montant €"
+        value="${l.montant}" oninput="_patrimoineLines[${i}].montant=parseFloat(this.value)||0">
+      <button onclick="_supprimerLigne(${i})" class="btn btn-danger btn-sm" style="padding:8px">✕</button>
+    </div>`).join('');
+
+  const total = _patrimoineLines.reduce((s, l) => s + (l.montant || 0), 0);
+
+  pg.innerHTML = `
+    <div style="max-width:660px;margin:0 auto">
+      <div style="margin-bottom:20px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:6px">
+          <span>Déclaration du patrimoine</span><span>Étape 3 / 3</span>
+        </div>
+        <div style="height:6px;background:var(--border2);border-radius:4px;overflow:hidden">
+          <div style="width:99%;height:100%;background:var(--grad);border-radius:4px"></div>
+        </div>
+      </div>
+
+      <div class="card" style="padding:24px">
+        <div style="font-size:16px;font-weight:600;margin-bottom:4px">Déclare ton patrimoine</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:20px">
+          Liste tes comptes et enveloppes d'investissement. Tu pourras les modifier à tout moment.
+        </div>
+
+        ${lignesHtml}
+        ${_patrimoineLines.length === 0 ? '<div style="color:var(--muted);font-size:13px;padding:12px 0">Aucune enveloppe ajoutée.</div>' : ''}
+
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="_ajouterLigne()">+ Ajouter une enveloppe</button>
+
+        ${total > 0 ? `<div style="margin-top:16px;padding:10px 14px;background:var(--bg2);border-radius:8px;font-size:13px;display:flex;justify-content:space-between">
+          <span style="color:var(--muted)">Total patrimoine déclaré</span>
+          <strong>${fEur(total)}</strong>
+        </div>` : ''}
+      </div>
+
+      <div style="display:flex;justify-content:space-between;margin-top:16px">
+        <button class="btn btn-ghost" onclick="_renderCapaciteForm()">← Précédent</button>
+        <button class="btn btn-primary" onclick="_sauvegarderProfil()">Enregistrer mon profil ✓</button>
+      </div>
+    </div>`;
+}
+
+function _ajouterLigne() {
+  _patrimoineLines.push({ id: null, type: 'Livret', libelle: '', montant: 0 });
+  _renderPatrimoineUI();
+}
+
+function _supprimerLigne(i) {
+  _patrimoineLines.splice(i, 1);
+  _renderPatrimoineUI();
+}
+
+async function _sauvegarderProfil() {
+  const uid = getUser()?.id;
+  if (!uid) return;
+
+  // Calcul des scores
+  let scoreTolerance, scoreCapacite, msgCapacite;
+  try {
+    scoreTolerance = calcToleranceScore(_profilReponses);
+    const res = calcCapaciteScore(_profilCapacite.revenus, _profilCapacite.charges, _profilCapacite.epargne);
+    scoreCapacite = res.score;
+    msgCapacite   = res.message;
+  } catch(e) {
+    showToast('Erreur de calcul : ' + e.message); return;
+  }
+
+  const reponses = {
+    tolerance: _profilReponses,
+    capacite:  _profilCapacite,
+  };
+
+  // Upsert profil_risque (POST + resolution=merge-duplicates → INSERT ou UPDATE sur conflict user_id)
+  await fetch(`${SU}/rest/v1/profil_risque`, {
+    method: 'POST',
+    headers: hdrs({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+    body: JSON.stringify({ user_id: uid, score_tolerance: scoreTolerance, score_capacite: scoreCapacite, reponses }),
+  });
+
+  // Upsert patrimoine : supprimer les anciennes lignes et réinsérer
+  const lignesValides = _patrimoineLines.filter(l => l.libelle.trim() && l.montant >= 0);
+  await fetch(`${SU}/rest/v1/patrimoine?user_id=eq.${uid}`, { method: 'DELETE', headers: hdrs() });
+  if (lignesValides.length > 0) {
+    await fetch(`${SU}/rest/v1/patrimoine`, {
+      method: 'POST',
+      headers: hdrs({ Prefer: 'return=minimal' }),
+      body: JSON.stringify(lignesValides.map(l => ({
+        user_id: uid, type_enveloppe: l.type, libelle: l.libelle.trim(), montant: l.montant,
+      }))),
+    });
+  }
+
+  showToast('Profil enregistré !');
+  if (msgCapacite) setTimeout(() => showToast(msgCapacite, 7000), 3500);
+
+  _patrimoineLines = [];
+  renderProfil();
+}
+
+// ── Dashboard profil ──────────────────────────────────────────────────────────
+
+function _showProfilDashboard(pg, profil, patrimoine) {
+  const tol = (typeof niveauTolerance !== 'undefined') ? niveauTolerance(profil.score_tolerance) : { label:'—', desc:'' };
+  const cap = (typeof niveauCapacite  !== 'undefined') ? niveauCapacite(profil.score_capacite)   : { label:'—', desc:'' };
+  const budget = Math.min(profil.score_tolerance, profil.score_capacite);
+
+  function gauge(score, color) {
+    return `<div style="position:relative;width:110px;height:110px;margin:0 auto 10px">
+      <svg viewBox="0 0 36 36" style="transform:rotate(-90deg);width:110px;height:110px">
+        <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--border2)" stroke-width="3.5"/>
+        <circle cx="18" cy="18" r="15.9" fill="none" stroke="${color}" stroke-width="3.5"
+          stroke-dasharray="${score} ${100 - score}" stroke-linecap="round"/>
+      </svg>
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800">${score}</div>
+    </div>`;
+  }
+
+  const totalPatrimoine = patrimoine.reduce((s, l) => s + Number(l.montant), 0);
+
+  pg.innerHTML = `
+    <div style="max-width:720px;margin:0 auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+        <h2 style="font-size:20px;font-weight:700">Mon profil de risque</h2>
+        <button class="btn btn-ghost btn-sm" onclick="_startQuestionnaire()">↺ Refaire le questionnaire</button>
+      </div>
+
+      <!-- Scores -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:20px">
+        <div class="card" style="padding:22px;text-align:center">
+          ${gauge(profil.score_tolerance, '#634BE4')}
+          <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:4px">Tolérance</div>
+          <div style="font-size:15px;font-weight:700;color:var(--blue)">${tol.label}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.4">${tol.desc}</div>
+        </div>
+        <div class="card" style="padding:22px;text-align:center">
+          ${gauge(profil.score_capacite, '#26C5DE')}
+          <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:4px">Capacité</div>
+          <div style="font-size:15px;font-weight:700;color:var(--cyan)">${cap.label}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.4">${cap.desc}</div>
+        </div>
+        <div class="card" style="padding:22px;text-align:center;border:1px solid rgba(99,75,228,.3)">
+          ${gauge(budget, budget < 34 ? '#ef4444' : budget < 67 ? '#f59e0b' : '#00E676')}
+          <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:4px">Budget de risque</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.4">
+            min(tolérance, capacité)<br>Le facteur limitant détermine le budget utilisable.
+          </div>
+        </div>
+      </div>
+
+      <div style="padding:12px 16px;background:rgba(99,75,228,.07);border:1px solid rgba(99,75,228,.2);border-radius:10px;font-size:12px;color:var(--muted);margin-bottom:20px;line-height:1.6">
+        Ces scores sont des <strong style="color:var(--text)">constats</strong> sur ta situation déclarée — pas des prescriptions.
+        Ils n'impliquent aucune recommandation d'achat ou de vente.
+        À but pédagogique uniquement.
+      </div>
+
+      <!-- Patrimoine -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <h3 style="font-size:16px;font-weight:700">Mon patrimoine déclaré</h3>
+        <div style="display:flex;gap:8px">
+          ${totalPatrimoine > 0 ? `<span style="font-size:13px;color:var(--muted);align-self:center">Total : <strong style="color:var(--text)">${fEur(totalPatrimoine)}</strong></span>` : ''}
+          <button class="btn btn-ghost btn-sm" onclick="_patrimoineLines=[];_renderPatrimoineForm()">Modifier</button>
+        </div>
+      </div>
+      ${_htmlPatrimoine(patrimoine)}
+    </div>`;
+}
+
+function _htmlPatrimoine(patrimoine) {
+  if (!patrimoine.length) return `<div style="color:var(--muted);font-size:13px;padding:16px 0">Aucun patrimoine déclaré.</div>`;
+  const COULEURS = { PEA:'#634BE4', CTO:'#26C5DE', Assurance_vie:'#00E676', Fonds_euro:'#f59e0b', Livret:'#10b981', Compte_courant:'#6b7280', Autre:'#8b5cf6' };
+  return `<div class="card" style="overflow:hidden">
+    ${patrimoine.map(l => `
+      <div style="display:flex;align-items:center;gap:12px;padding:13px 18px;border-bottom:1px solid var(--border)">
+        <div style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:${COULEURS[l.type_enveloppe]||'var(--blue)'}"></div>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:600">${l.libelle}</div>
+          <div style="font-size:11px;color:var(--muted)">${l.type_enveloppe.replace('_',' ')}</div>
+        </div>
+        <div style="font-weight:700;font-size:14px">${fEur(l.montant)}</div>
+      </div>`).join('')}
+  </div>`;
 }
 </script>
 
