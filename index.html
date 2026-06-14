@@ -5271,202 +5271,311 @@ async function deleteObjectif(id) {
   renderObjectifs();
 }
 
-let _projObj = null; // stockage temporaire de l'objectif courant pour la projection
+let _projObj  = null; // objectif courant (évite les guillemets dans les attributs onclick)
+let _projChart = null; // référence Chart.js en cours
+let _projMode  = 'projection'; // 'projection' | 'epargne' | 'duree'
 
 function showProjection(o) {
-  _projObj = o; // on évite de passer le JSON dans un attribut onclick (conflit de guillemets)
-  document.getElementById('modal-content').innerHTML = `
-    <div class="modal-hd">
-      <h2>Projection — ${o.nom}</h2>
-      <button class="modal-close" onclick="closeModal()">✕</button>
-    </div>
-    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:16px;font-size:13px">
-      <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-        <span style="color:var(--muted)">Capital de départ</span>
-        <strong>${fEur(o.montant_actuel)}</strong>
-      </div>
-      <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-        <span style="color:var(--muted)">Objectif cible</span>
-        <strong>${fEur(o.montant_cible)}</strong>
-      </div>
-      <div style="display:flex;justify-content:space-between">
-        <span style="color:var(--muted)">Horizon</span>
-        <strong>${o.horizon_annees} ans · ${PROFIL_LABEL[o.profil_risque]}</strong>
-      </div>
-    </div>
-
-    <div class="form-row" style="margin-bottom:16px">
-      <div class="form-group" style="margin-bottom:0">
-        <label class="form-label">Épargne mensuelle (€)</label>
-        <input id="proj-epargne" type="number" min="0" class="form-input" placeholder="300" value="0">
-      </div>
-      <div class="form-group" style="margin-bottom:0;display:flex;flex-direction:column;justify-content:flex-end">
-        <label class="form-label" style="display:flex;align-items:center;gap:8px;cursor:pointer">
-          <input type="checkbox" id="proj-inflation" checked style="accent-color:var(--blue)">
-          Résultat en euros constants
-        </label>
-        <div style="font-size:11px;color:var(--muted);margin-top:4px">Coché = inflation déduite (~2%)</div>
-      </div>
-    </div>
-
-    <button class="btn btn-primary btn-full" onclick="runProjection(_projObj)">
-      Calculer la trajectoire
-    </button>
-
-    <div id="proj-result" style="margin-top:20px"></div>
-
-    <div style="margin-top:20px;padding:12px;background:rgba(99,75,228,.07);border:1px solid rgba(99,75,228,.2);border-radius:8px;font-size:11px;color:var(--muted);line-height:1.6">
-      À but pédagogique uniquement. Ne constitue pas un conseil en investissement.
-      Les résultats sont issus d'une simulation Monte-Carlo (7 000 tirages, loi normale).
-      Les hypothèses de rendement et de volatilité sont des estimations basées sur des données
-      historiques longues — les performances passées ne préjugent pas des performances futures.
-    </div>`;
+  _projObj  = o;
+  _projMode = 'projection';
+  _renderProjModal();
   document.getElementById('modal-overlay').classList.add('open');
 }
 
-let _projChart = null; // référence au chart Chart.js en cours
+function _renderProjModal() {
+  const o = _projObj;
+  const profil = (typeof PROFILS !== 'undefined') ? PROFILS[o.profil_risque] : null;
+  const tabs = [
+    { id:'projection', icon:'📈', label:'Projection' },
+    { id:'epargne',    icon:'💰', label:'Épargne à prévoir' },
+    { id:'duree',      icon:'⏱', label:'Durée estimée' },
+  ];
+  const tabsHtml = tabs.map(t => `
+    <button onclick="setProjMode('${t.id}')" id="ptab-${t.id}"
+      style="flex:1;padding:9px 6px;border:none;border-radius:9px;cursor:pointer;font-size:12px;font-weight:600;transition:all .15s;
+        background:${_projMode===t.id ? 'rgba(99,75,228,.22)' : 'transparent'};
+        color:${_projMode===t.id ? 'var(--blue)' : 'var(--muted)'}">
+      ${t.icon} ${t.label}
+    </button>`).join('');
 
-function runProjection(o) {
-  const epargne   = parseFloat(document.getElementById('proj-epargne').value) || 0;
-  const inflation = document.getElementById('proj-inflation').checked;
-  const resultat  = document.getElementById('proj-result');
+  let inputsHtml = '';
+  if (_projMode === 'projection') {
+    inputsHtml = `
+      <div class="form-row" style="margin-bottom:14px">
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">Épargne mensuelle (€)</label>
+          <input id="proj-epargne" type="number" min="0" class="form-input" placeholder="300" value="0">
+        </div>
+        <div class="form-group" style="margin-bottom:0;display:flex;flex-direction:column;justify-content:flex-end">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--muted)">
+            <input type="checkbox" id="proj-inflation" style="accent-color:var(--blue)">
+            Déduire l'inflation (~2 %)
+          </label>
+          <div style="font-size:11px;color:var(--muted2);margin-top:4px">Coché = résultat en euros constants</div>
+        </div>
+      </div>
+      <button class="btn btn-primary btn-full" onclick="runProjection()">Calculer la trajectoire</button>`;
+  } else if (_projMode === 'epargne') {
+    inputsHtml = `
+      <div style="font-size:13px;color:var(--muted);margin-bottom:14px;padding:10px 14px;background:var(--bg2);border-radius:8px">
+        Combien faut-il épargner chaque mois pour atteindre <strong style="color:var(--text)">${fEur(o.montant_cible)}</strong>
+        en <strong style="color:var(--text)">${o.horizon_annees} ans</strong> (en médiane) ?
+      </div>
+      <div class="form-group" style="margin-bottom:14px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--muted)">
+          <input type="checkbox" id="proj-inflation" style="accent-color:var(--blue)">
+          Déduire l'inflation (~2 %) du rendement hypothétique
+        </label>
+      </div>
+      <button class="btn btn-primary btn-full" onclick="runInverseEpargne()">Calculer l'épargne nécessaire</button>`;
+  } else {
+    inputsHtml = `
+      <div style="font-size:13px;color:var(--muted);margin-bottom:14px;padding:10px 14px;background:var(--bg2);border-radius:8px">
+        En combien d'années atteindrez-vous <strong style="color:var(--text)">${fEur(o.montant_cible)}</strong>
+        (en médiane) ?
+      </div>
+      <div class="form-group" style="margin-bottom:14px">
+        <label class="form-label">Épargne mensuelle (€)</label>
+        <input id="proj-epargne" type="number" min="0" class="form-input" placeholder="300" value="0">
+      </div>
+      <div class="form-group" style="margin-bottom:14px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--muted)">
+          <input type="checkbox" id="proj-inflation" style="accent-color:var(--blue)">
+          Déduire l'inflation (~2 %) du rendement hypothétique
+        </label>
+      </div>
+      <button class="btn btn-primary btn-full" onclick="runInverseDuree()">Calculer la durée estimée</button>`;
+  }
+
+  document.getElementById('modal-content').innerHTML = `
+    <div class="modal-hd">
+      <h2>Simulation — ${o.nom}</h2>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px">
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <span><span style="color:var(--muted)">Capital :</span> <strong>${fEur(o.montant_actuel)}</strong></span>
+        <span><span style="color:var(--muted)">Cible :</span> <strong>${fEur(o.montant_cible)}</strong></span>
+        <span><span style="color:var(--muted)">Horizon :</span> <strong>${o.horizon_annees} ans</strong></span>
+        <span><span style="color:var(--muted)">Profil :</span> <strong>${PROFIL_LABEL[o.profil_risque]}</strong></span>
+      </div>
+      ${profil ? `<div style="margin-top:8px;font-size:11px;color:var(--muted);border-top:1px solid var(--border);padding-top:8px">
+        <span style="color:var(--cyan)">ℹ</span> <strong>Hypothèse ${profil.label} :</strong> ${profil.desc}<br>
+        <span style="color:var(--muted2)">${profil.source}</span>
+      </div>` : ''}
+    </div>
+
+    <div style="display:flex;gap:4px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:4px;margin-bottom:16px">
+      ${tabsHtml}
+    </div>
+
+    ${inputsHtml}
+
+    <div id="proj-result" style="margin-top:16px"></div>
+
+    <div style="margin-top:16px;padding:10px 14px;background:rgba(99,75,228,.07);border:1px solid rgba(99,75,228,.2);border-radius:8px;font-size:11px;color:var(--muted);line-height:1.6">
+      À but pédagogique uniquement. Ne constitue pas un conseil en investissement.
+      Simulation Monte-Carlo (7 000 tirages, loi normale). Les performances passées ne préjugent pas des performances futures.
+    </div>`;
+}
+
+function setProjMode(mode) {
+  _projMode = mode;
+  _renderProjModal();
+}
+
+function _projInflation() {
+  const el = document.getElementById('proj-inflation');
+  return el ? el.checked : false;
+}
+
+function _projEpargne() {
+  const el = document.getElementById('proj-epargne');
+  return el ? (parseFloat(el.value) || 0) : 0;
+}
+
+function _checkEngine(resultat) {
+  if (typeof simulateTrajectory === 'undefined') {
+    resultat.innerHTML = '<div style="color:var(--red);font-size:13px;padding:12px">Erreur : moteur non chargé. Recharge la page.</div>';
+    return false;
+  }
+  return true;
+}
+
+function _fmtY(v) {
+  return v >= 1000000 ? (v/1000000).toFixed(1)+'M €' : v >= 1000 ? (v/1000).toFixed(0)+'k €' : v+'€';
+}
+
+function runProjection() {
+  const o        = _projObj;
+  const epargne  = _projEpargne();
+  const inflation= _projInflation();
+  const resultat = document.getElementById('proj-result');
 
   resultat.innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div><div style="margin-top:10px;font-size:12px;color:var(--muted)">Simulation en cours…</div></div>';
 
   setTimeout(() => {
-    if (typeof simulateTrajectory === 'undefined') {
-      resultat.innerHTML = '<div style="color:var(--red);font-size:13px;padding:12px">Erreur : moteur de simulation non chargé. Recharge la page.</div>';
-      return;
-    }
+    if (!_checkEngine(resultat)) return;
     let traj;
-    try {
-      traj = simulateTrajectory(Number(o.montant_actuel), epargne, o.horizon_annees, o.profil_risque, inflation);
-    } catch(e) {
-      resultat.innerHTML = `<div style="color:var(--red);font-size:13px;padding:12px">Erreur de calcul : ${e.message}</div>`;
-      return;
-    }
+    try { traj = simulateTrajectory(Number(o.montant_actuel), epargne, o.horizon_annees, o.profil_risque, inflation); }
+    catch(e) { resultat.innerHTML = `<div style="color:var(--red);font-size:13px;padding:12px">Erreur : ${e.message}</div>`; return; }
 
     const last  = traj[traj.length - 1];
     const cible = Number(o.montant_cible);
     const atteint = last.p50 >= cible;
-    const label = inflation ? 'euros constants' : 'euros nominaux';
-    const annees = traj.map(t => `Année ${t.annee}`);
+    const label = inflation ? 'euros constants' : 'euros courants';
+    const annees = traj.map(t => t.annee === 0 ? "Auj." : `An ${t.annee}`);
 
     resultat.innerHTML = `
-      <div style="font-size:12px;color:var(--muted);margin-bottom:14px;text-align:center">
-        Résultats en <strong style="color:var(--text)">${label}</strong> · ${fEur(epargne)}/mois d'épargne
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;text-align:center">
+        Résultats en <strong style="color:var(--text)">${label}</strong> · épargne <strong style="color:var(--text)">${fEur(epargne)}/mois</strong>
       </div>
-
-      <div style="position:relative;height:220px;margin-bottom:18px">
-        <canvas id="proj-chart"></canvas>
+      <div style="position:relative;height:200px;margin-bottom:14px"><canvas id="proj-chart"></canvas></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:10px;text-align:center">
+          <div style="font-size:9px;color:var(--muted);margin-bottom:3px">Bas (P5)</div>
+          <div style="font-weight:700;font-size:13px;color:var(--red)">${fEur(last.p5)}</div>
+        </div>
+        <div style="background:var(--bg2);border:1px solid rgba(99,75,228,.4);border-radius:9px;padding:10px;text-align:center">
+          <div style="font-size:9px;color:var(--muted);margin-bottom:3px">Sûr à 80% (P20)</div>
+          <div style="font-weight:700;font-size:13px;color:var(--cyan)">${fEur(last.p20)}</div>
+        </div>
+        <div style="background:linear-gradient(135deg,rgba(99,75,228,.12),rgba(38,197,222,.08));border:1px solid rgba(99,75,228,.3);border-radius:9px;padding:10px;text-align:center">
+          <div style="font-size:9px;color:var(--blue);font-weight:600;margin-bottom:3px">Médiane (P50)</div>
+          <div style="font-weight:700;font-size:13px">${fEur(last.p50)}</div>
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:10px;text-align:center">
+          <div style="font-size:9px;color:var(--muted);margin-bottom:3px">Haut (P95)</div>
+          <div style="font-weight:700;font-size:13px;color:var(--green)">${fEur(last.p95)}</div>
+        </div>
       </div>
-
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">
-        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center">
-          <div style="font-size:10px;color:var(--muted);margin-bottom:4px">Scénario bas (P5)</div>
-          <div style="font-weight:700;font-size:15px;color:var(--red)">${fEur(last.p5)}</div>
-        </div>
-        <div style="background:linear-gradient(135deg,rgba(99,75,228,.12),rgba(38,197,222,.08));border:1px solid rgba(99,75,228,.3);border-radius:10px;padding:12px;text-align:center">
-          <div style="font-size:10px;color:var(--blue);font-weight:600;margin-bottom:4px">Médiane (P50)</div>
-          <div style="font-weight:700;font-size:15px">${fEur(last.p50)}</div>
-        </div>
-        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center">
-          <div style="font-size:10px;color:var(--muted);margin-bottom:4px">Scénario haut (P95)</div>
-          <div style="font-weight:700;font-size:15px;color:var(--green)">${fEur(last.p95)}</div>
-        </div>
+      <div style="padding:9px 14px;border-radius:8px;font-size:12px;font-weight:600;text-align:center;margin-bottom:12px;
+        background:${atteint?'rgba(0,230,118,.1)':'rgba(245,158,11,.1)'};
+        color:${atteint?'var(--green)':'var(--yellow)'};
+        border:1px solid ${atteint?'rgba(0,230,118,.25)':'rgba(245,158,11,.25)'}">
+        ${atteint?'✓ Objectif atteint en médiane':'⚠ Objectif non atteint en médiane'} — cible : ${fEur(cible)}
       </div>
+      <button class="btn btn-ghost btn-sm btn-full" onclick="saveSimulation(${epargne},${inflation})">💾 Enregistrer cette simulation</button>`;
 
-      <div style="padding:10px 14px;border-radius:8px;font-size:13px;font-weight:600;text-align:center;
-        background:${atteint ? 'rgba(0,230,118,.1)' : 'rgba(245,158,11,.1)'};
-        color:${atteint ? 'var(--green)' : 'var(--yellow)'};
-        border:1px solid ${atteint ? 'rgba(0,230,118,.25)' : 'rgba(245,158,11,.25)'}">
-        ${atteint ? '✓ Objectif atteint dans le scénario médian' : '⚠ Objectif non atteint dans le scénario médian'}
-        — cible : ${fEur(cible)}
-      </div>`;
-
-    // Détruire l'ancien chart s'il existe
-    if (_projChart) { try { _projChart.destroy(); } catch(e) {} _projChart = null; }
-
+    if (_projChart) { try { _projChart.destroy(); } catch(e){} _projChart = null; }
     const ctx = document.getElementById('proj-chart').getContext('2d');
     _projChart = new Chart(ctx, {
       type: 'line',
       data: {
         labels: annees,
         datasets: [
-          {
-            label: 'Scénario haut (P95)',
-            data: traj.map(t => Math.round(t.p95)),
-            borderColor: 'rgba(0,230,118,0.4)',
-            backgroundColor: 'rgba(0,230,118,0.08)',
-            borderWidth: 1,
-            pointRadius: 0,
-            fill: '+1', // remplissage vers la courbe suivante (médiane)
-            tension: 0.4,
-          },
-          {
-            label: 'Médiane (P50)',
-            data: traj.map(t => Math.round(t.p50)),
-            borderColor: '#634BE4',
-            backgroundColor: 'rgba(99,75,228,0.15)',
-            borderWidth: 2.5,
-            pointRadius: 0,
-            fill: '+1',
-            tension: 0.4,
-          },
-          {
-            label: 'Scénario bas (P5)',
-            data: traj.map(t => Math.round(t.p5)),
-            borderColor: 'rgba(239,68,68,0.4)',
-            backgroundColor: 'transparent',
-            borderWidth: 1,
-            pointRadius: 0,
-            fill: false,
-            tension: 0.4,
-          },
-          {
-            label: 'Objectif',
-            data: traj.map(() => cible),
-            borderColor: 'rgba(245,158,11,0.7)',
-            borderWidth: 1.5,
-            borderDash: [6, 4],
-            pointRadius: 0,
-            fill: false,
-          },
+          { label:'Haut (P95)',   data: traj.map(t=>Math.round(t.p95)), borderColor:'rgba(0,230,118,0.35)', backgroundColor:'rgba(0,230,118,0.07)', borderWidth:1, pointRadius:0, fill:'+1', tension:0.4 },
+          { label:'Médiane',      data: traj.map(t=>Math.round(t.p50)), borderColor:'#634BE4', backgroundColor:'rgba(99,75,228,0.12)', borderWidth:2.5, pointRadius:0, fill:'+1', tension:0.4 },
+          { label:'Sûr à 80%',   data: traj.map(t=>Math.round(t.p20)), borderColor:'rgba(38,197,222,0.5)', backgroundColor:'rgba(38,197,222,0.05)', borderWidth:1.5, pointRadius:0, fill:'+1', tension:0.4, borderDash:[3,3] },
+          { label:'Bas (P5)',     data: traj.map(t=>Math.round(t.p5)),  borderColor:'rgba(239,68,68,0.35)', backgroundColor:'transparent', borderWidth:1, pointRadius:0, fill:false, tension:0.4 },
+          { label:'Objectif',     data: traj.map(()=>cible), borderColor:'rgba(245,158,11,0.7)', borderWidth:1.5, borderDash:[6,4], pointRadius:0, fill:false },
         ],
       },
       options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: ctx => `${ctx.dataset.label} : ${Number(ctx.raw).toLocaleString('fr-FR')} €`,
-            },
-          },
+        responsive:true, maintainAspectRatio:false,
+        interaction:{ mode:'index', intersect:false },
+        plugins:{
+          legend:{ display:false },
+          tooltip:{ callbacks:{ label: c=>`${c.dataset.label} : ${Number(c.raw).toLocaleString('fr-FR')} €` } },
         },
-        scales: {
-          x: {
-            ticks: {
-              color: '#6b6b8a',
-              font: { size: 10 },
-              maxTicksLimit: Math.min(o.horizon_annees + 1, 10),
-            },
-            grid: { color: 'rgba(255,255,255,0.04)' },
-          },
-          y: {
-            ticks: {
-              color: '#6b6b8a',
-              font: { size: 10 },
-              callback: v => v >= 1000000 ? (v/1000000).toFixed(1)+'M €' : v >= 1000 ? (v/1000).toFixed(0)+'k €' : v+'€',
-            },
-            grid: { color: 'rgba(255,255,255,0.04)' },
-          },
+        scales:{
+          x:{ ticks:{ color:'#6b6b8a', font:{size:10}, maxTicksLimit:Math.min(o.horizon_annees+1,10) }, grid:{color:'rgba(255,255,255,0.04)'} },
+          y:{ ticks:{ color:'#6b6b8a', font:{size:10}, callback: v=>_fmtY(v) }, grid:{color:'rgba(255,255,255,0.04)'} },
         },
       },
     });
   }, 20);
+}
+
+function runInverseEpargne() {
+  const o        = _projObj;
+  const inflation= _projInflation();
+  const resultat = document.getElementById('proj-result');
+  resultat.innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div><div style="margin-top:10px;font-size:12px;color:var(--muted)">Calcul en cours…</div></div>';
+  setTimeout(() => {
+    if (!_checkEngine(resultat)) return;
+    let mensuel;
+    try { mensuel = findEpargneMensuelle(Number(o.montant_actuel), Number(o.montant_cible), o.horizon_annees, o.profil_risque, inflation); }
+    catch(e) { resultat.innerHTML = `<div style="color:var(--red);font-size:13px;padding:12px">Erreur : ${e.message}</div>`; return; }
+
+    const label = inflation ? 'euros constants' : 'euros courants';
+    if (mensuel === Infinity) {
+      resultat.innerHTML = `<div style="padding:16px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);border-radius:10px;font-size:13px;color:var(--red)">
+        Objectif non atteignable en ${o.horizon_annees} ans même avec une épargne très élevée (profil ${PROFIL_LABEL[o.profil_risque]}).
+        Envisage d'augmenter l'horizon ou de revoir la cible.
+      </div>`;
+      return;
+    }
+    resultat.innerHTML = `
+      <div style="padding:20px;background:linear-gradient(135deg,rgba(99,75,228,.12),rgba(38,197,222,.08));border:1px solid rgba(99,75,228,.3);border-radius:12px;text-align:center">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Pour atteindre ${fEur(o.montant_cible)} en ${o.horizon_annees} ans (médiane, ${label})</div>
+        <div style="font-size:32px;font-weight:800;color:var(--text)">${fEur(mensuel)}<span style="font-size:16px;font-weight:500;color:var(--muted)">/mois</span></div>
+        ${mensuel === 0 ? '<div style="margin-top:8px;font-size:12px;color:var(--green)">✓ Votre capital seul suffit déjà.</div>' : ''}
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--muted);text-align:center">
+        Résultat en ${label} · profil ${PROFIL_LABEL[o.profil_risque]} (μ=${(PROFILS[o.profil_risque].mu*100).toFixed(0)}%, σ=${(PROFILS[o.profil_risque].sigma*100).toFixed(0)}%)
+      </div>`;
+  }, 20);
+}
+
+function runInverseDuree() {
+  const o        = _projObj;
+  const epargne  = _projEpargne();
+  const inflation= _projInflation();
+  const resultat = document.getElementById('proj-result');
+  resultat.innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div><div style="margin-top:10px;font-size:12px;color:var(--muted)">Calcul en cours…</div></div>';
+  setTimeout(() => {
+    if (!_checkEngine(resultat)) return;
+    let horizon;
+    try { horizon = findHorizon(Number(o.montant_actuel), epargne, Number(o.montant_cible), o.profil_risque, inflation); }
+    catch(e) { resultat.innerHTML = `<div style="color:var(--red);font-size:13px;padding:12px">Erreur : ${e.message}</div>`; return; }
+
+    const label = inflation ? 'euros constants' : 'euros courants';
+    if (horizon === null || horizon === 0) {
+      resultat.innerHTML = `<div style="padding:16px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);border-radius:10px;font-size:13px;color:var(--red)">
+        Objectif non atteint en 50 ans avec ${fEur(epargne)}/mois (profil ${PROFIL_LABEL[o.profil_risque]}).
+        Augmente l'épargne ou revois la cible.
+      </div>`;
+      return;
+    }
+    resultat.innerHTML = `
+      <div style="padding:20px;background:linear-gradient(135deg,rgba(99,75,228,.12),rgba(38,197,222,.08));border:1px solid rgba(99,75,228,.3);border-radius:12px;text-align:center">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Pour atteindre ${fEur(o.montant_cible)} avec ${fEur(epargne)}/mois (médiane, ${label})</div>
+        <div style="font-size:32px;font-weight:800;color:var(--text)">${horizon} an${horizon>1?'s':''}</div>
+        <div style="margin-top:6px;font-size:12px;color:var(--muted)">soit jusqu'en ${new Date().getFullYear() + horizon}</div>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--muted);text-align:center">
+        Résultat en ${label} · profil ${PROFIL_LABEL[o.profil_risque]} (μ=${(PROFILS[o.profil_risque].mu*100).toFixed(0)}%, σ=${(PROFILS[o.profil_risque].sigma*100).toFixed(0)}%)
+      </div>`;
+  }, 20);
+}
+
+async function saveSimulation(epargne, inflation) {
+  const o = _projObj;
+  const data = {
+    epargne_mensuelle: epargne,
+    inflation,
+    profil_risque: o.profil_risque,
+    sauvegardee_le: new Date().toISOString(),
+  };
+  try {
+    const last = simulateProjection(Number(o.montant_actuel), epargne, o.horizon_annees, o.profil_risque, inflation);
+    data.p5 = Math.round(last.p5); data.p20 = Math.round(last.p20);
+    data.p50 = Math.round(last.p50); data.p95 = Math.round(last.p95);
+  } catch(e) {}
+
+  const r = await fetch(`${SU}/rest/v1/objectifs?id=eq.${o.id}`, {
+    method: 'PATCH',
+    headers: hdrs({ Prefer: 'return=minimal' }),
+    body: JSON.stringify({ simulation_sauvegardee: data }),
+  });
+  if (r.ok) {
+    _projObj.simulation_sauvegardee = data;
+    showToast('Simulation enregistrée.');
+  } else {
+    showToast('Erreur lors de l\'enregistrement.');
+  }
 }
 </script>
 
