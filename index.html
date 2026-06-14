@@ -509,7 +509,7 @@ function getUser(){return _sess?.user||null;}
 function getToken(){return _sess?.access_token||null;}
 
 // ═══ REST ═══
-const SU='https://dnmibojfzquicbhtactx.supabase.co',SK='sb_publishable_Wn3itCQXPfm-Onwey7h7Uw_pa2foE-f',API='/api/quote';
+const SU='https://eomdgqmcecqpbvwbgumb.supabase.co',SK='sb_publishable__ip8lJWg_bRoNE2KjaxySA_mMBg2zM4',API='/api/quote';
 const VAPID_PUBLIC_KEY='BE1p8Tl-S80USIuW-CV6Ici4054iAMsEuRUcPFFoQ9nODj5ucYFz_ae-5GWimJzggNQSPJUEf0YHt7ZfwzmuPm0';
 function hdrs(x={}){const h={'apikey':SK,'Content-Type':'application/json',...x};const t=getToken();if(t)h['Authorization']='Bearer '+t;return h;}
 async function refreshSession(){
