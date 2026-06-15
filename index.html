@@ -4958,106 +4958,191 @@ async function openEtfDetail(ticker, name, indiceId) {
   pg.style.display = '';
   pg.innerHTML = '<div style="text-align:center;padding:60px 0"><div class="spinner"></div></div>';
 
-  const etfRows = await dbGet('etfs', 'ticker=eq.'+encodeURIComponent(ticker)+'&select=*,indices(*)');
+  // Deux requêtes séparées (plus fiable que le join Supabase)
+  const etfRows = await dbGet('etfs', 'ticker=eq.'+encodeURIComponent(ticker));
   const etf = etfRows && etfRows[0];
-  const indice = etf && etf.indices;
-
   if (!etf) { pg.innerHTML = '<div style="padding:40px;color:var(--red)">ETF introuvable.</div>'; return; }
 
-  const encours = etf.encours_millions != null ? (etf.encours_millions>=1000?(etf.encours_millions/1000).toFixed(1)+'Md€':etf.encours_millions+'M€') : '—';
-  const maj = indice && indice.derniere_maj ? new Date(indice.derniere_maj).toLocaleDateString('fr-FR',{month:'long',year:'numeric'}) : null;
+  const indiceRows = etf.indice_id ? await dbGet('indices', 'id=eq.'+etf.indice_id) : null;
+  const indice = indiceRows && indiceRows[0];
 
-  const hasGeo  = indice && indice.repartition_geo  && Object.keys(indice.repartition_geo).length;
-  const hasSect = indice && indice.repartition_secteurs && Object.keys(indice.repartition_secteurs).length;
-  const hasTop10= indice && indice.top_10_lignes && indice.top_10_lignes.length;
-  const hasAny  = hasGeo || hasSect || hasTop10;
+  // Prix + historique (même API que les actions)
+  var price = S.prices[ticker] || null;
+  var chartPts = [];
+  try {
+    var rp = await fetch(API+'?symbol='+encodeURIComponent(ticker));
+    var dp = await rp.json();
+    if (dp && dp.price) { S.prices[ticker] = dp; price = dp; }
+  } catch(e) {}
+  try {
+    var rc = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=chart&range=5y');
+    var dc = await rc.json();
+    chartPts = dc.chartData || [];
+  } catch(e) {}
 
-  const opts = [];
-  if (hasSect)  opts.push({k:'secteurs', label:'Secteurs',         data: Object.entries(indice.repartition_secteurs).sort((a,b)=>b[1]-a[1])});
-  if (hasGeo)   opts.push({k:'geo',      label:'Géographie',        data: Object.entries(indice.repartition_geo).sort((a,b)=>b[1]-a[1])});
-  if (hasTop10) opts.push({k:'top10',    label:'Top 10 entreprises',data: indice.top_10_lignes.map(l=>[l.nom,l.poids_pct])});
+  var pos = (S.enrichedPos.length ? S.enrichedPos : computePositions()).find(p => p.ticker === ticker);
+  window._cdLastPos = pos;
+  window._cdChartPts = chartPts;
+  window._cdCompareActive = {};
 
-  const selectHtml = opts.length>1
+  // Données d'affichage prix
+  var isEur = price && price.currency === 'EUR';
+  var sym = isEur ? '€' : '$';
+  var priceStr = price && price.price ? sym+fN(price.price) : '—';
+  var chgColor = price && price.changePct >= 0 ? 'var(--green)' : 'var(--red)';
+  var chgStr = price && price.changePct != null ? (price.changePct>=0?'+':'')+price.changePct.toFixed(2)+'%' : '';
+  var perf1m  = price && price.change1M  != null ? (price.change1M>=0?'+':'')+price.change1M.toFixed(1)+'%' : '—';
+  var perfYTD = price && price.changeYTD != null ? (price.changeYTD>=0?'+':'')+price.changeYTD.toFixed(1)+'%' : '—';
+  var perf1y  = price && price.change1Y  != null ? (price.change1Y>=0?'+':'')+price.change1Y.toFixed(1)+'%' : '—';
+
+  var encours = etf.encours_millions != null ? (etf.encours_millions>=1000?(etf.encours_millions/1000).toFixed(1)+'Md€':etf.encours_millions+'M€') : '—';
+
+  // PRU / position
+  var pruHtml = '';
+  if (pos) {
+    var pruVal = pos.pruDisplay != null ? fN(pos.pruDisplay)+' '+cS(pos.pruCurrency) : '—';
+    var pnlHtml = pos.pnlEur != null
+      ? '<span style="color:'+(pos.pnlEur>=0?'var(--green)':'var(--red)')+';">'+(pos.pnlEur>=0?'+':'')+fE(pos.pnlEur)+'</span>'
+      : '';
+    pruHtml = '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);display:flex;gap:20px;flex-wrap:wrap;font-size:13px">'+
+      '<div><div style="font-size:11px;color:var(--muted);margin-bottom:2px">PRU</div><strong>'+pruVal+'</strong></div>'+
+      '<div><div style="font-size:11px;color:var(--muted);margin-bottom:2px">Quantité</div><strong>'+fQ(pos.quantity)+'</strong></div>'+
+      (pnlHtml?'<div><div style="font-size:11px;color:var(--muted);margin-bottom:2px">P&L</div><strong>'+pnlHtml+'</strong></div>':'')+
+      '</div>';
+  }
+
+  // Section composition de l'indice
+  var hasGeo  = indice && indice.repartition_geo   && Object.keys(indice.repartition_geo).length;
+  var hasSect = indice && indice.repartition_secteurs && Object.keys(indice.repartition_secteurs).length;
+  var hasTop10= indice && indice.top_10_lignes && indice.top_10_lignes.length;
+  var hasAny  = hasGeo || hasSect || hasTop10;
+
+  var opts = [];
+  if (hasSect)  opts.push({k:'secteurs', label:'Secteurs',          data: Object.entries(indice.repartition_secteurs).sort((a,b)=>b[1]-a[1])});
+  if (hasGeo)   opts.push({k:'geo',      label:'Géographie',         data: Object.entries(indice.repartition_geo).sort((a,b)=>b[1]-a[1])});
+  if (hasTop10) opts.push({k:'top10',    label:'Top 10 entreprises', data: indice.top_10_lignes.map(l=>[l.nom,l.poids_pct])});
+
+  var selectHtml = opts.length>1
     ? '<select id="etf-chart-mode" class="chart-select" onchange="switchEtfChart()">'+opts.map((o,i)=>'<option value="'+i+'">'+o.label+'</option>').join('')+'</select>'
-    : '';
+    : (opts.length===1 ? '<span style="font-size:11px;color:var(--muted2)">'+opts[0].label+'</span>' : '');
 
-  const chartSection = hasAny
-    ? '<div class="card" style="padding:22px;margin-bottom:18px">'+
+  var maj = indice && indice.derniere_maj ? new Date(indice.derniere_maj).toLocaleDateString('fr-FR',{month:'long',year:'numeric'}) : null;
+
+  var compositionSection = hasAny
+    ? '<div class="card" style="padding:22px;margin-top:18px">'+
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">'+
-      '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted2)">Composition — '+(indice?indice.nom:'')+'</div>'+selectHtml+'</div>'+
+      '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted2)">Composition — '+(indice?indice.nom:'indice')+'</div>'+
+      selectHtml+'</div>'+
       '<div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start">'+
-      '<div style="position:relative;width:220px;height:220px;flex-shrink:0"><canvas id="etf-donut"></canvas></div>'+
-      '<div id="etf-legend" style="flex:1;min-width:160px;display:flex;flex-direction:column;gap:4px;justify-content:center"></div></div>'+
+      '<div style="position:relative;width:200px;height:200px;flex-shrink:0"><canvas id="etf-donut"></canvas></div>'+
+      '<div id="etf-legend" style="flex:1;min-width:160px;display:flex;flex-direction:column;gap:5px;justify-content:center"></div></div>'+
       (maj?'<div style="margin-top:12px;font-size:11px;color:var(--muted);font-style:italic">⚠️ Valeurs indicatives — données au '+maj+'. Ne constitue pas un conseil en investissement.</div>':'')+
       '</div>'
-    : (indice
-        ? '<div class="card" style="padding:20px;margin-bottom:18px;color:var(--muted);font-size:13px">Composition de l\'indice '+indice.nom+' — données à venir.</div>'
-        : '');
+    : (indice ? '<div class="card" style="padding:18px;margin-top:18px;color:var(--muted);font-size:13px">Composition de l\'indice '+indice.nom+' — données à venir.</div>' : '');
 
-  const infoItems = [
-    ['TER (frais annuels)', etf.ter!=null?etf.ter.toFixed(2)+'%':'—'],
-    ['Réplication',         etf.replication==='synthetique'?'Synthétique':'Physique'],
-    ['Politique',           etf.cap_ou_distribuant==='capitalisant'?'Capitalisant':'Distribuant'],
-    ['Éligible PEA',        etf.pea_eligible?'✅ Oui':'❌ Non'],
-    ['Émetteur',            etf.emetteur||'—'],
-    ['Domicile',            etf.domicile||'—'],
-    ['Encours',             encours],
-    ['Indice répliqué',     indice?indice.nom:'—'],
-    ['Nombre de titres',    indice&&indice.nombre_lignes?String(indice.nombre_lignes):''],
+  var infoRows = [
+    ['TER (frais)', etf.ter!=null?etf.ter.toFixed(2)+'%':'—'],
+    ['Réplication', etf.replication==='synthetique'?'Synthétique':'Physique'],
+    ['Politique',   etf.cap_ou_distribuant==='capitalisant'?'Capitalisant':'Distribuant'],
+    ['PEA',         etf.pea_eligible?'✅ Oui':'❌ Non'],
+    ['Émetteur',    etf.emetteur||'—'],
+    ['Domicile',    etf.domicile||'—'],
+    ['Encours',     encours],
+    ['ISIN',        etf.isin],
+    ['Indice',      indice?indice.nom+(indice.nombre_lignes?' ('+indice.nombre_lignes+' titres)':''):'—'],
   ].filter(r=>r[1]);
+
+  var infoCard = '<div class="card" style="margin-bottom:16px">'+
+    '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted2);margin-bottom:12px">Caractéristiques</div>'+
+    infoRows.map(([l,v])=>
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">'+
+      '<span style="color:var(--muted)">'+l+'</span><span style="font-weight:600">'+v+'</span></div>'
+    ).join('')+
+    (etf.note?'<div style="margin-top:12px;padding:10px 12px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:8px;font-size:12px;color:var(--yellow)">⚠️ '+etf.note+'</div>':'')+
+    '</div>';
+
+  // Boutons de comparaison pertinents pour les ETFs
+  var cmpBtns = [
+    ['S&P 500',      '^GSPC',       '#22c55e'],
+    ['Nasdaq 100',   '^NDX',        '#f97316'],
+    ['Euro Stoxx 50','^STOXX50E',   '#60a5fa'],
+    ['Mon portefeuille','__ptf__',  '#a855f7'],
+  ];
 
   pg.innerHTML =
     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">'+
     '<button class="btn btn-ghost btn-sm" onclick="navigate(\''+_prevPage+'\')">← Retour</button>'+
     '<div><h2 style="font-size:20px;font-weight:700">'+etf.nom+'</h2>'+
-    '<span style="font-size:13px;color:var(--muted);font-family:monospace">'+etf.ticker+' · '+etf.isin+'</span></div></div>'+
+    '<span style="font-size:13px;color:var(--muted);font-family:monospace">'+etf.ticker+'</span></div></div>'+
 
-    '<div class="card" style="padding:22px;margin-bottom:18px">'+
-    '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted2);margin-bottom:14px">Caractéristiques</div>'+
-    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px">'+
-    infoItems.map(([l,v])=>
-      '<div style="background:var(--bg2);border-radius:10px;padding:12px">'+
-      '<div style="font-size:11px;color:var(--muted);margin-bottom:4px">'+l+'</div>'+
-      '<div style="font-size:15px;font-weight:600">'+v+'</div></div>'
-    ).join('')+'</div>'+
-    (etf.note?'<div style="margin-top:14px;padding:10px 14px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:8px;font-size:12px;color:var(--yellow)">⚠️ '+etf.note+'</div>':'')+
+    '<div style="display:grid;grid-template-columns:minmax(280px,1fr) 2fr;gap:20px;align-items:start">'+
+
+    // Colonne gauche
+    '<div>'+
+    // Prix
+    '<div class="card" style="margin-bottom:16px">'+
+    '<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px">'+
+    '<span style="font-size:32px;font-weight:800">'+priceStr+'</span>'+
+    (chgStr?'<span style="font-size:16px;font-weight:600;color:'+chgColor+'">'+chgStr+' auj.</span>':'')+
+    '</div>'+
+    '<div style="display:flex;gap:16px;margin-top:8px">'+
+    '<div style="text-align:center"><div style="font-size:11px;color:var(--muted)">1 mois</div><div style="font-weight:700;color:var(--blue)">'+perf1m+'</div></div>'+
+    '<div style="text-align:center"><div style="font-size:11px;color:var(--muted)">YTD</div><div style="font-weight:700;color:var(--blue)">'+perfYTD+'</div></div>'+
+    '<div style="text-align:center"><div style="font-size:11px;color:var(--muted)">1 an</div><div style="font-weight:700;color:var(--blue)">'+perf1y+'</div></div>'+
+    '</div>'+pruHtml+
+    '</div>'+
+    infoCard+
     '</div>'+
 
-    chartSection;
+    // Colonne droite — graphique
+    '<div>'+
+    '<div class="card" style="margin-bottom:16px">'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">'+
+    '<div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em" id="cd-chart-label">Cours — 5 ans</div>'+
+    '<div style="display:flex;gap:4px">'+
+    ['1M','6M','1A','3A','5A'].map(function(p){return '<button class="btn btn-ghost btn-sm cd-period-btn" style="padding:3px 9px;font-size:11px'+(p==='5A'?';background:var(--card2)':'')+';" data-period="'+p+'" onclick="changeCdPeriod(this,\''+ticker+'\')">'+p+'</button>';}).join('')+
+    '</div></div>'+
+    '<div style="position:relative;width:100%;height:340px"><canvas id="company-price-chart"></canvas></div>'+
+    '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap" id="cd-compare-row">'+
+    '<span style="font-size:11px;color:var(--muted);align-self:center">Comparer :</span>'+
+    cmpBtns.map(function(s){
+      return '<button class="cd-cmp-btn" data-cid="'+s[1]+'" data-col="'+s[2]+'" onclick="toggleCdCompare(this,\''+ticker+'\')"+'+
+        ' style="padding:3px 10px;font-size:11px;border:1px solid var(--border2);border-radius:20px;background:transparent;color:var(--muted);cursor:pointer">'+s[0]+'</button>';
+    }).join('')+
+    '</div></div>'+
+    compositionSection+
+    '</div>'+
 
-  if (hasAny) { window._etfChartOpts = opts; switchEtfChart(); }
+    '</div>'; // fin grid
+
+  // Dessiner graphique cours (avec PRU + entrées, comme les actions)
+  setTimeout(function() { drawCdChart(chartPts, price, ticker, pos); }, 80);
+
+  // Dessiner camembert composition
+  if (hasAny) { window._etfChartOpts = opts; setTimeout(switchEtfChart, 150); }
 }
 
 function switchEtfChart() {
-  const sel = document.getElementById('etf-chart-mode');
-  const idx = sel ? parseInt(sel.value) : 0;
-  const opts = window._etfChartOpts || [];
-  const opt = opts[idx];
+  var sel = document.getElementById('etf-chart-mode');
+  var idx = sel ? parseInt(sel.value) : 0;
+  var opts = window._etfChartOpts || [];
+  var opt = opts[idx];
   if (!opt) return;
-
-  const canvas = document.getElementById('etf-donut');
-  const legend = document.getElementById('etf-legend');
+  var canvas = document.getElementById('etf-donut');
+  var legend = document.getElementById('etf-legend');
   if (!canvas || !legend) return;
-
-  if (_etfDetailChart) { _etfDetailChart.destroy(); _etfDetailChart = null; }
-
-  const PALETTE = ['#634BE4','#26C5DE','#00E676','#f59e0b','#ef4444','#a78bfa','#34d399','#fb923c','#60a5fa','#f472b6','#4ade80','#facc15'];
-  const labels = opt.data.map(d => String(d[0]));
-  const values = opt.data.map(d => parseFloat(d[1]));
-  const colors = labels.map((_,i) => PALETTE[i % PALETTE.length]);
-
+  if (_etfDetailChart) { try{_etfDetailChart.destroy();}catch(e){} _etfDetailChart = null; }
+  var PALETTE = ['#634BE4','#26C5DE','#00E676','#f59e0b','#ef4444','#a78bfa','#34d399','#fb923c','#60a5fa','#f472b6','#4ade80','#facc15'];
+  var labels = opt.data.map(d => String(d[0]));
+  var values = opt.data.map(d => parseFloat(d[1]));
+  var colors = labels.map((_,i) => PALETTE[i % PALETTE.length]);
   _etfDetailChart = new Chart(canvas.getContext('2d'), {
     type: 'doughnut',
     data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 1.5, borderColor: 'rgba(8,8,17,.6)', hoverOffset: 6 }] },
-    options: {
-      cutout: '62%', animation: { duration: 350 },
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: ctx => ' '+ctx.label+' · '+ctx.parsed.toFixed(1)+'%' } }
-      }
+    options: { cutout: '62%', animation: { duration: 350 }, responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ' '+ctx.label+' · '+ctx.parsed.toFixed(1)+'%' } } }
     }
   });
-
   legend.innerHTML = labels.map((l,i) =>
     '<div style="display:flex;align-items:center;gap:7px;font-size:12px">'+
     '<span style="width:9px;height:9px;border-radius:50%;flex-shrink:0;background:'+colors[i]+'"></span>'+
@@ -5065,6 +5150,7 @@ function switchEtfChart() {
     '<span style="font-family:monospace;color:var(--muted)">'+values[i].toFixed(1)+'%</span></div>'
   ).join('');
 }
+
 // ═══ JOURNAL DE DÉCISIONS ═════════════════════════════════════════════════
 // Thèse + ratio payé + condition d'invalidation, à chaque décision.
 async function renderJournal(){
