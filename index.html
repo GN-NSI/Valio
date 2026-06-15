@@ -5101,6 +5101,7 @@ document.addEventListener('click', function(e){
 <!-- ═══ MOTEUR DE PROJECTION OBJECTIFS ═══ -->
 <script src="/profil.js"></script>
 <script src="/objectifs.js"></script>
+<script src="/coherence.js"></script>
 
 <script>
 // ─── OBJECTIFS FINANCIERS ────────────────────────────────────────────────────
@@ -5313,7 +5314,7 @@ async function renderObjectifs() {
   const pg = document.getElementById('page');
   pg.innerHTML = '<div style="text-align:center;padding:60px 0"><div class="spinner"></div></div>';
 
-  const objectifs = await fetchObjectifs();
+  const [objectifs, profil] = await Promise.all([fetchObjectifs(), _fetchProfilCoherence()]);
 
   if (!objectifs.length) {
     pg.innerHTML = `
@@ -5394,6 +5395,8 @@ async function renderObjectifs() {
           Hypothèse : μ≈${(mu*100).toFixed(1)} %/an · σ≈${(sigma*100).toFixed(1)} %/an (nominal) ·
           Monte-Carlo 7 000 tirages · À titre informatif uniquement.
         </div>
+
+        <div id="coherence-${o.id}" style="margin-top:14px"></div>
       </div>`;
   }).join('');
 
@@ -5409,7 +5412,122 @@ async function renderObjectifs() {
   for (const o of objectifs) {
     _renderPaliersUi(o.id);
     _drawObjChart(o.id);
+    _renderCoherence(o.id, o, profil);
   }
+}
+
+async function _fetchProfilCoherence() {
+  const uid = getUser()?.id;
+  if (!uid) return null;
+  const r = await fetch(
+    `${SU}/rest/v1/profil_risque?user_id=eq.${uid}&select=score_tolerance,score_capacite,age_actuel,age_limite_horizon,reponses`,
+    { headers: hdrs() }
+  );
+  if (!r.ok) return null;
+  const rows = await r.json();
+  if (!rows.length) return null;
+  const p = rows[0];
+  const cap = p.reponses?.capacite || {};
+  return {
+    score_tolerance:    Number(p.score_tolerance)    || 50,
+    score_capacite:     Number(p.score_capacite)     || 50,
+    age_actuel:         Number(p.age_actuel)         || 35,
+    age_limite_horizon: Number(p.age_limite_horizon) || 65,
+    disponible_mensuel: (Number(cap.revenus) || 0) - (Number(cap.charges) || 0),
+  };
+}
+
+function _renderCoherence(id, o, profil) {
+  const el = document.getElementById(`coherence-${id}`);
+  if (!el) return;
+  if (typeof analyser_coherence === 'undefined') return;
+  if (!profil) { el.innerHTML = ''; return; }
+
+  const ana = analyser_coherence({
+    montant_actuel:  Number(o.montant_actuel),
+    montant_cible:   Number(o.montant_cible),
+    horizon_annees:  Number(o.horizon_annees),
+    note_risque:     Number(o.note_risque) || 50,
+    paliers_epargne: o.paliers_epargne,
+  }, profil);
+
+  const { verdict, mediane, p5, p95, alerte_horizon,
+          levier_risque, levier_epargne, levier_horizon, ordre_priorite } = ana;
+
+  const verdictColor = verdict ? 'var(--green)' : 'var(--yellow)';
+  const verdictTxt   = verdict
+    ? `La trajectoire médiane atteint <strong>${fEur(Math.round(mediane))}</strong> — objectif couvert.`
+    : `La trajectoire médiane atteint <strong>${fEur(Math.round(mediane))}</strong> — en-deçà de l'objectif de <strong>${fEur(o.montant_cible)}</strong>.`;
+
+  // Alerte risque/horizon
+  const alerteHtml = alerte_horizon ? `
+    <div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--yellow);margin-bottom:10px">
+      ⚠ La note de risque actuelle (${alerte_horizon.note_actuelle}/100) dépasse le maximum
+      associé à un horizon de ${o.horizon_annees} an${o.horizon_annees > 1 ? 's' : ''}
+      (${alerte_horizon.max_pour_horizon}/100).
+    </div>` : '';
+
+  // Rendu d'un levier
+  function _levierHtml(levier, nom, premier) {
+    const { ajustement_requis: req, marge_disponible: marge,
+            ajustement_possible: poss, effort_relatif: effort, median_au_plafond: mxmed } = levier;
+
+    const labels = { risque: 'Note de risque', epargne: 'Épargne mensuelle', horizon: 'Horizon' };
+    const units  = { risque: 'pts', epargne: '€/mois', horizon: 'an(s)' };
+
+    let corps;
+    if (req <= 0) {
+      const surplus = { risque: `La note actuelle (${o.note_risque}/100) est supérieure au niveau requis par le rendement attendu.`,
+                        epargne: `L'épargne actuelle couvre l'objectif au taux attendu.`,
+                        horizon: `L'objectif est sur la trajectoire dans l'horizon actuel.` };
+      corps = `<span style="color:var(--muted)">${surplus[nom]}</span>`;
+    } else if (effort <= 1) {
+      const fmt = nom === 'epargne' ? v => fEur(Math.round(v)) + '/mois' : v => `${Math.round(v)} ${units[nom]}`;
+      corps = `Ajustement calculé : <strong>+${fmt(req)}</strong> — dans la marge disponible (${fmt(marge)}).`;
+    } else {
+      const fmt = nom === 'epargne' ? v => fEur(Math.round(v)) + '/mois' : v => `${Math.round(v)} ${units[nom]}`;
+      corps = `Ajustement calculé : <strong>+${fmt(req)}</strong> — dépasse la marge disponible (${fmt(Math.max(0, marge))}).`;
+      if (mxmed !== null && marge > 0) {
+        corps += ` Au maximum accessible, la médiane projetée serait <strong>${fEur(Math.round(mxmed))}</strong>.`;
+      }
+    }
+
+    const bg      = premier ? 'rgba(99,75,228,.1)' : 'transparent';
+    const border  = premier ? '1px solid rgba(99,75,228,.35)' : '1px solid var(--border)';
+    const badge   = premier ? `<span style="font-size:10px;background:var(--blue);color:#fff;border-radius:4px;padding:1px 6px;margin-left:6px">levier le plus accessible</span>` : '';
+    return `<div style="background:${bg};border:${border};border-radius:8px;padding:10px 12px;margin-bottom:7px;font-size:12px">
+      <div style="font-weight:600;margin-bottom:4px">${labels[nom]}${badge}</div>
+      <div style="color:var(--text);line-height:1.5">${corps}</div>
+    </div>`;
+  }
+
+  const leviersMap = { risque: levier_risque, epargne: levier_epargne, horizon: levier_horizon };
+  const leviersHtml = ordre_priorite
+    .map((nom, i) => _levierHtml(leviersMap[nom], nom, i === 0))
+    .join('');
+
+  el.innerHTML = `
+    <div style="border-top:1px solid var(--border);padding-top:14px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--muted)">Analyse de cohérence</div>
+
+      <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;font-size:12px">
+        <span style="color:${verdictColor};font-size:16px;line-height:1.2">●</span>
+        <span>${verdictTxt}</span>
+      </div>
+
+      <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-bottom:12px">
+        <span>95 % de chances d'obtenir plus de <strong style="color:var(--text)">${fEur(Math.round(p5))}</strong></span>
+        <span>95 % de chances d'obtenir moins de <strong style="color:var(--text)">${fEur(Math.round(p95))}</strong></span>
+      </div>
+
+      ${alerteHtml}
+      ${leviersHtml}
+
+      <div style="font-size:10px;color:var(--muted2);margin-top:6px;font-style:italic">
+        Projections à titre informatif, basées sur des hypothèses de rendement conservatrices.
+        Ne constitue pas un conseil en investissement.
+      </div>
+    </div>`;
 }
 
 async function openObjectifModal(o = null) {
@@ -5684,10 +5802,24 @@ function _renderCapaciteForm() {
           <label class="form-label">Charges fixes mensuelles (€) <span style="color:var(--muted);font-weight:400">(loyer, crédits, abonnements…)</span></label>
           <input id="cap-charges" type="number" min="0" class="form-input" placeholder="ex : 1 500" value="${prev.charges || ''}">
         </div>
-        <div class="form-group" style="margin-bottom:0">
+        <div class="form-group">
           <label class="form-label">Épargne de précaution disponible (€) <span style="color:var(--muted);font-weight:400">(livret A, compte courant…)</span></label>
           <input id="cap-epargne" type="number" min="0" class="form-input" placeholder="ex : 8 000" value="${prev.epargne || ''}">
           <div style="font-size:11px;color:var(--muted);margin-top:5px">Somme accessible immédiatement en cas de besoin.</div>
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:20px;margin-top:4px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:14px">Horizon de vie</div>
+          <div class="form-row">
+            <div class="form-group" style="margin-bottom:0">
+              <label class="form-label">Ton âge actuel</label>
+              <input id="cap-age" type="number" min="18" max="80" class="form-input" placeholder="ex : 35" value="${prev.age_actuel || ''}">
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label class="form-label">Âge limite des objectifs</label>
+              <input id="cap-age-limite" type="number" min="18" max="99" class="form-input" placeholder="ex : 65" value="${prev.age_limite_horizon || 65}">
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:5px">Utilisés pour calculer la marge d'allongement d'horizon de chaque objectif.</div>
         </div>
       </div>
 
@@ -5699,11 +5831,13 @@ function _renderCapaciteForm() {
 }
 
 function _validerCapacite() {
-  const revenus = parseFloat(document.getElementById('cap-revenus').value) || 0;
-  const charges = parseFloat(document.getElementById('cap-charges').value) || 0;
-  const epargne = parseFloat(document.getElementById('cap-epargne').value) || 0;
+  const revenus          = parseFloat(document.getElementById('cap-revenus').value)    || 0;
+  const charges          = parseFloat(document.getElementById('cap-charges').value)    || 0;
+  const epargne          = parseFloat(document.getElementById('cap-epargne').value)    || 0;
+  const age_actuel       = parseInt(document.getElementById('cap-age').value)          || null;
+  const age_limite_horizon = parseInt(document.getElementById('cap-age-limite').value) || 65;
   if (revenus === 0 && charges === 0) { showToast('Remplis au moins les revenus et charges.'); return; }
-  _profilCapacite = { revenus, charges, epargne };
+  _profilCapacite = { revenus, charges, epargne, age_actuel, age_limite_horizon };
   _renderPatrimoineForm();
 }
 
@@ -5809,7 +5943,7 @@ async function _sauvegarderProfil() {
   await fetch(`${SU}/rest/v1/profil_risque`, {
     method: 'POST',
     headers: hdrs({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
-    body: JSON.stringify({ user_id: uid, score_tolerance: scoreTolerance, score_capacite: scoreCapacite, reponses }),
+    body: JSON.stringify({ user_id: uid, score_tolerance: scoreTolerance, score_capacite: scoreCapacite, reponses, age_actuel: _profilCapacite.age_actuel ?? null, age_limite_horizon: _profilCapacite.age_limite_horizon ?? 65 }),
   });
 
   // Upsert patrimoine : supprimer les anciennes lignes et réinsérer
