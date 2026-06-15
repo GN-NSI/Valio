@@ -148,6 +148,6 @@ if (typeof module !== 'undefined') {
     getMuSigma, scoreToSri, epargneForAnnee,
     simulateProjection, simulateTrajectory,
     findEpargneMensuelle, findHorizon,
-    ANCHOR_MIN, ANCHOR_MAX,
+    ANCHOR_MIN, ANCHOR_MAX, INFLATION_HYPOTHESE,
   };
 }
