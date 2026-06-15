@@ -4890,6 +4890,7 @@ async function _riskCompute(pos, containerId){
 // Indices à compléter dans de futures sessions : Nasdaq-100, MSCI World,
 // Euro Stoxx 50, CAC 40, Nikkei 225
 let etfListPeaOnly = false;
+let etfListShowAll = false;
 let _etfDetailChart = null;
 
 // ── PAGE LISTE (nav "ETF") ────────────────────────────────────────────────────
@@ -4906,6 +4907,10 @@ async function renderEtfList() {
   const pfTickers = new Set((S.enrichedPos.length ? S.enrichedPos : computePositions()).map(p => p.ticker));
   const etfsByIndice = {};
   etfs.forEach(e => { const k = e.indice_id || '__none__'; if (!etfsByIndice[k]) etfsByIndice[k] = []; etfsByIndice[k].push(e); });
+
+  // Par défaut : n'afficher que les indices dont au moins un ETF est en portefeuille
+  const indicesPortfolio = indices.filter(idx => (etfsByIndice[idx.id] || []).some(e => pfTickers.has(e.ticker)));
+  const visibleIndices = etfListShowAll ? indices : (indicesPortfolio.length ? indicesPortfolio : indices);
 
   function etfRowHtml(e) {
     const inPf = pfTickers.has(e.ticker);
@@ -4926,7 +4931,7 @@ async function renderEtfList() {
       '</div><div style="margin-top:5px;display:flex;gap:5px">'+pea+pf+'</div></div>';
   }
 
-  const blocks = indices.map(idx => {
+  const blocks = visibleIndices.map(idx => {
     let list = (etfsByIndice[idx.id] || []);
     if (etfListPeaOnly) list = list.filter(e => e.pea_eligible);
     const hasData = idx.top_10_lignes || idx.repartition_secteurs || idx.repartition_geo;
@@ -4943,8 +4948,15 @@ async function renderEtfList() {
     '<div style="margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">'+
     '<div><h2 style="font-size:18px;font-weight:700">ETF</h2>'+
     '<p style="color:var(--muted);font-size:13px;margin-top:3px">Clique sur un ETF pour voir sa fiche — trié par TER croissant</p></div>'+
+    '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">'+
     '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:500">'+
-    '<input type="checkbox" onchange="etfListPeaOnly=this.checked;renderEtfList()" '+(etfListPeaOnly?'checked':'')+' style="accent-color:var(--blue);width:15px;height:15px"> PEA uniquement</label></div>'+
+    '<input type="checkbox" onchange="etfListPeaOnly=this.checked;renderEtfList()" '+(etfListPeaOnly?'checked':'')+' style="accent-color:var(--blue);width:15px;height:15px"> PEA uniquement</label>'+
+    (!etfListShowAll && indicesPortfolio.length < indices.length ?
+      '<button onclick="etfListShowAll=true;renderEtfList()" style="background:var(--card2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:600;padding:6px 12px;border-radius:8px;cursor:pointer">Voir les indices majeurs ↓</button>' :
+      (etfListShowAll && indicesPortfolio.length < indices.length ?
+        '<button onclick="etfListShowAll=false;renderEtfList()" style="background:var(--card2);border:1px solid var(--border);color:var(--muted);font-size:12px;font-weight:600;padding:6px 12px;border-radius:8px;cursor:pointer">Réduire ↑</button>' : '')
+    )+
+    '</div></div>'+
     blocks;
 }
 
