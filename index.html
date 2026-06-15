@@ -5105,8 +5105,6 @@ document.addEventListener('click', function(e){
 <script>
 // ─── OBJECTIFS FINANCIERS ────────────────────────────────────────────────────
 
-const PROFIL_LABEL = { prudent:'Prudent', equilibre:'Équilibré', dynamique:'Dynamique' };
-
 async function fetchObjectifs() {
   const uid = getUser()?.id;
   if (!uid) return [];
@@ -5124,11 +5122,191 @@ function progressPct(actuel, cible) {
   return Math.min(100, Math.round((actuel / cible) * 100));
 }
 
-// Mappe un score 0-100 vers les 3 niveaux du placeholder profil_risque
-function _scoreToProfilRisque(score) {
-  if (score < 34) return 'prudent';
-  if (score < 67) return 'equilibre';
-  return 'dynamique';
+const _chartInstances = new Map();
+const _debounceTimers = new Map();
+
+function _destroyChart(id) {
+  if (_chartInstances.has(id)) {
+    try { _chartInstances.get(id).destroy(); } catch(_) {}
+    _chartInstances.delete(id);
+  }
+}
+
+function _fmtY(v) {
+  return v >= 1000000 ? (v/1000000).toFixed(1)+'M €' : v >= 1000 ? (v/1000).toFixed(0)+'k €' : Math.round(v)+'€';
+}
+
+function _normPaliers(p) {
+  return (Array.isArray(p) && p.length) ? p : [{ annee_debut: 0, montant_mensuel: 0 }];
+}
+
+function _readHiddenData(id) {
+  const el = document.getElementById(`obj-data-${id}`);
+  if (!el) return null;
+  return {
+    paliers:       JSON.parse(el.dataset.paliers),
+    montantActuel: Number(el.dataset.actuel),
+    montantCible:  Number(el.dataset.cible),
+    horizonAnnees: Number(el.dataset.horizon),
+    noteRisque:    Number(el.dataset.note),
+  };
+}
+
+function _drawObjChart(id) {
+  if (typeof simulateTrajectory === 'undefined') return;
+  const d = _readHiddenData(id);
+  if (!d) return;
+  const canvas = document.getElementById(`chart-${id}`);
+  if (!canvas) return;
+
+  _destroyChart(id);
+
+  const traj  = simulateTrajectory(d.montantActuel, d.paliers, d.horizonAnnees, d.noteRisque, false);
+  const cible = d.montantCible;
+  const last  = traj[traj.length - 1];
+  const annees = traj.map(t => t.annee === 0 ? 'Auj.' : `An ${t.annee}`);
+
+  const summary = document.getElementById(`chart-summary-${id}`);
+  if (summary) {
+    const atteint = last.p50 >= cible;
+    summary.innerHTML = `
+      <span>Médiane : <strong>${fEur(Math.round(last.p50))}</strong></span>
+      <span style="color:var(--cyan)">Sûr à 80 % : <strong>${fEur(Math.round(last.p20))}</strong></span>
+      <span style="color:${atteint ? 'var(--green)' : 'var(--yellow)'}">${atteint ? '✓ Atteint' : '⚠ Non atteint'} en médiane</span>`;
+  }
+
+  _chartInstances.set(id, new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: annees,
+      datasets: [
+        { label:'P95',      data: traj.map(t=>Math.round(t.p95)), borderColor:'rgba(0,230,118,.3)',  backgroundColor:'rgba(0,230,118,.06)', borderWidth:1,   pointRadius:0, fill:'+1', tension:.4 },
+        { label:'Médiane',  data: traj.map(t=>Math.round(t.p50)), borderColor:'#634BE4',             backgroundColor:'rgba(99,75,228,.1)',  borderWidth:2,   pointRadius:0, fill:'+1', tension:.4 },
+        { label:'P5',       data: traj.map(t=>Math.round(t.p5)),  borderColor:'rgba(239,68,68,.3)',  backgroundColor:'transparent',         borderWidth:1,   pointRadius:0, fill:false, tension:.4 },
+        { label:'Objectif', data: traj.map(()=>cible),             borderColor:'rgba(245,158,11,.7)', borderWidth:1.5, borderDash:[5,4],    pointRadius:0, fill:false },
+      ],
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      interaction:{ mode:'index', intersect:false },
+      plugins:{
+        legend:{ display:false },
+        tooltip:{ callbacks:{ label: c=>`${c.dataset.label} : ${Number(c.raw).toLocaleString('fr-FR')} €` } },
+      },
+      scales:{
+        x:{ ticks:{ color:'#6b6b8a', font:{size:9}, maxTicksLimit:Math.min(d.horizonAnnees+1,10) }, grid:{color:'rgba(255,255,255,.04)'} },
+        y:{ ticks:{ color:'#6b6b8a', font:{size:9}, callback: v=>_fmtY(v) },                        grid:{color:'rgba(255,255,255,.04)'} },
+      },
+    },
+  }));
+}
+
+function _onSliderChange(id, val) {
+  const lbl = document.getElementById(`slider-lbl-${id}`);
+  if (lbl) lbl.textContent = `${Number(val).toLocaleString('fr-FR')} €/mois`;
+
+  if (_debounceTimers.has(id)) clearTimeout(_debounceTimers.get(id));
+  _debounceTimers.set(id, setTimeout(() => {
+    _debounceTimers.delete(id);
+    const paliers = _readPaliers(id);
+    paliers[0] = { ...paliers[0], montant_mensuel: Number(val) };
+    _writePaliers(id, paliers);
+    _renderPaliersUi(id);
+    _drawObjChart(id);
+    _patchPaliers(id, paliers);
+  }, 200));
+}
+
+async function _patchPaliers(id, paliers) {
+  await fetch(`${SU}/rest/v1/objectifs?id=eq.${id}`, {
+    method: 'PATCH',
+    headers: hdrs({ Prefer: 'return=minimal' }),
+    body: JSON.stringify({ paliers_epargne: paliers }),
+  });
+}
+
+function _readPaliers(id) {
+  const el = document.getElementById(`obj-data-${id}`);
+  return el ? JSON.parse(el.dataset.paliers) : [{ annee_debut: 0, montant_mensuel: 0 }];
+}
+
+function _writePaliers(id, paliers) {
+  const el = document.getElementById(`obj-data-${id}`);
+  if (el) el.dataset.paliers = JSON.stringify(paliers);
+}
+
+function _renderPaliersUi(id) {
+  const el = document.getElementById(`paliers-list-${id}`);
+  if (!el) return;
+  const paliers = _readPaliers(id);
+  el.innerHTML = paliers.slice(1).map((p, i) => {
+    const idx = i + 1;
+    return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+      <span style="font-size:11px;color:var(--muted);white-space:nowrap">À partir de l'an</span>
+      <input type="number" min="1" max="60" value="${p.annee_debut}"
+        style="width:45px;background:var(--bg2);border:1px solid var(--border);border-radius:5px;padding:4px 6px;color:var(--text);font-size:12px"
+        onchange="_setPalierAnnee('${id}',${idx},this.value)">
+      <span style="font-size:11px;color:var(--muted)">→</span>
+      <input type="number" min="0" step="50" value="${p.montant_mensuel}"
+        style="width:80px;background:var(--bg2);border:1px solid var(--border);border-radius:5px;padding:4px 6px;color:var(--text);font-size:12px"
+        onchange="_setPalierMontant('${id}',${idx},this.value)">
+      <span style="font-size:11px;color:var(--muted)">€/mois</span>
+      <button onclick="_removePalier('${id}',${idx})"
+        style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;line-height:1;padding:2px 4px">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function _setPalierAnnee(id, idx, val) {
+  const paliers = _readPaliers(id);
+  paliers[idx] = { ...paliers[idx], annee_debut: Math.max(1, parseInt(val) || 1) };
+  paliers.sort((a, b) => a.annee_debut - b.annee_debut);
+  _writePaliers(id, paliers);
+  _renderPaliersUi(id);
+  _drawObjChart(id);
+  _patchPaliers(id, paliers);
+}
+
+function _setPalierMontant(id, idx, val) {
+  const paliers = _readPaliers(id);
+  paliers[idx] = { ...paliers[idx], montant_mensuel: Math.max(0, Number(val) || 0) };
+  _writePaliers(id, paliers);
+  _drawObjChart(id);
+  _patchPaliers(id, paliers);
+}
+
+function _addPalier(id) {
+  const paliers = _readPaliers(id);
+  const d = _readHiddenData(id);
+  const lastAn = paliers[paliers.length - 1].annee_debut;
+  const newAn  = Math.min(lastAn + 5, (d?.horizonAnnees || 20) - 1);
+  paliers.push({ annee_debut: Math.max(lastAn + 1, newAn), montant_mensuel: paliers[paliers.length - 1].montant_mensuel });
+  _writePaliers(id, paliers);
+  _renderPaliersUi(id);
+  _drawObjChart(id);
+  _patchPaliers(id, paliers);
+}
+
+function _removePalier(id, idx) {
+  const paliers = _readPaliers(id);
+  if (idx === 0 || idx >= paliers.length) return;
+  paliers.splice(idx, 1);
+  _writePaliers(id, paliers);
+  _renderPaliersUi(id);
+  _drawObjChart(id);
+  _patchPaliers(id, paliers);
+}
+
+function _updateNoteDisplay(val) {
+  const vEl = document.getElementById('note-val');
+  if (vEl) vEl.textContent = `${Math.round(val)}/100`;
+  const hEl = document.getElementById('note-hint');
+  if (hEl && typeof getMuSigma !== 'undefined') {
+    const { mu, sigma } = getMuSigma(Number(val), false);
+    const sri = scoreToSri(Number(val));
+    hEl.innerHTML = `SRI ${sri} · μ≈${(mu*100).toFixed(1)} %/an · σ≈${(sigma*100).toFixed(1)} %/an (nominal)<br>
+      <span style="color:var(--muted2)">Hypothèses conservatrices à but pédagogique. Les performances passées ne garantissent pas les résultats futurs.</span>`;
+  }
 }
 
 async function renderObjectifs() {
@@ -5149,46 +5327,73 @@ async function renderObjectifs() {
   }
 
   const cartes = objectifs.map(o => {
-    const pct = progressPct(o.montant_actuel, o.montant_cible);
+    const pct      = progressPct(o.montant_actuel, o.montant_cible);
     const barColor = pct >= 100 ? 'var(--green)' : pct >= 60 ? 'var(--cyan)' : 'var(--blue)';
+    const paliers  = _normPaliers(o.paliers_epargne);
+    const palier0  = paliers[0].montant_mensuel;
+    const note     = Number(o.note_risque) || 50;
+    const { mu, sigma } = getMuSigma(note, false);
+    const sri      = scoreToSri(note);
+
     return `
-      <div class="card" style="padding:22px;margin-bottom:14px">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div class="card" style="padding:22px;margin-bottom:16px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px">
           <div>
-            <div style="font-size:17px;font-weight:700;margin-bottom:4px">${o.nom}</div>
+            <div style="font-size:17px;font-weight:700;margin-bottom:3px">${o.nom}</div>
             <div style="font-size:12px;color:var(--muted)">
-              ${PROFIL_LABEL[o.profil_risque]} · Horizon ${o.horizon_annees} an${o.horizon_annees > 1 ? 's' : ''}
+              Horizon ${o.horizon_annees} an${o.horizon_annees > 1 ? 's' : ''} · Note risque ${note}/100 · SRI ${sri}
             </div>
           </div>
           <div style="display:flex;gap:8px;flex-shrink:0">
-            <button class="btn btn-sm" style="background:rgba(38,197,222,.14);color:var(--cyan);border:1px solid rgba(38,197,222,.28)"
-              onclick='showProjection(${JSON.stringify(o).replace(/'/g,"&#39;")})'>
-              📈 Projection
-            </button>
             <button class="btn btn-ghost btn-sm" onclick='openObjectifModal(${JSON.stringify(o).replace(/'/g,"&#39;")})'>Modifier</button>
             <button class="btn btn-danger btn-sm" onclick="deleteObjectif('${o.id}')">✕</button>
           </div>
         </div>
 
-        <div style="margin:18px 0 6px;display:flex;justify-content:space-between;font-size:13px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px">
           <span style="color:var(--muted)">Progression</span>
-          <span style="font-weight:600">${fEur(o.montant_actuel)} <span style="color:var(--muted)">/ ${fEur(o.montant_cible)}</span></span>
+          <span>${fEur(o.montant_actuel)} <span style="color:var(--muted)">/ ${fEur(o.montant_cible)}</span></span>
         </div>
-        <div style="height:8px;background:var(--border2);border-radius:6px;overflow:hidden">
+        <div style="height:6px;background:var(--border2);border-radius:6px;overflow:hidden;margin-bottom:14px">
           <div style="width:${pct}%;height:100%;background:${barColor};border-radius:6px;transition:width .4s"></div>
         </div>
-        <div style="text-align:right;font-size:12px;color:var(--muted);margin-top:5px">${pct}%</div>
 
-        ${o.simulation_sauvegardee ? (() => {
-          const s = o.simulation_sauvegardee;
-          const date = s.sauvegardee_le ? new Date(s.sauvegardee_le).toLocaleDateString('fr-FR') : '';
-          return `<div style="margin-top:12px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:9px;font-size:12px;display:flex;flex-wrap:wrap;gap:12px;align-items:center">
-            <span style="color:var(--muted)">📊 Simulation du ${date} · ${fEur(s.epargne_mensuelle)}/mois</span>
-            <span>P50 : <strong>${fEur(s.p50)}</strong></span>
-            <span style="color:var(--cyan)">Sûr à 80 % : <strong>${fEur(s.p20)}</strong></span>
-            <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick='showProjection(${JSON.stringify(o).replace(/'/g,"&#39;")})'>Revoir →</button>
-          </div>`;
-        })() : ''}
+        <input type="hidden" id="obj-data-${o.id}"
+          data-paliers="${JSON.stringify(paliers).replace(/"/g,'&quot;')}"
+          data-actuel="${o.montant_actuel}" data-cible="${o.montant_cible}"
+          data-horizon="${o.horizon_annees}" data-note="${note}">
+
+        <div style="position:relative;height:180px;margin-bottom:8px">
+          <canvas id="chart-${o.id}"></canvas>
+        </div>
+        <div id="chart-summary-${o.id}"
+          style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;margin-bottom:14px;color:var(--muted)">
+        </div>
+
+        <div style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:12px">
+            <span style="color:var(--muted)">Épargne mensuelle</span>
+            <strong id="slider-lbl-${o.id}">${Number(palier0).toLocaleString('fr-FR')} €/mois</strong>
+          </div>
+          <input id="slider-${o.id}" type="range" min="0" max="5000" step="50" value="${palier0}"
+            style="width:100%;accent-color:var(--blue)"
+            oninput="_onSliderChange('${o.id}', this.value)">
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted2);margin-top:2px">
+            <span>0 €</span><span>5 000 €/mois</span>
+          </div>
+        </div>
+
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;font-weight:600">Paliers d'épargne dans le temps</div>
+        <div id="paliers-list-${o.id}"></div>
+        <button onclick="_addPalier('${o.id}')"
+          style="font-size:11px;color:var(--cyan);background:none;border:none;cursor:pointer;padding:2px 0;margin-bottom:12px">
+          + Ajouter un palier
+        </button>
+
+        <div style="font-size:10px;color:var(--muted2);border-top:1px solid var(--border);padding-top:8px;margin-top:2px">
+          Hypothèse : μ≈${(mu*100).toFixed(1)} %/an · σ≈${(sigma*100).toFixed(1)} %/an (nominal) ·
+          Monte-Carlo 7 000 tirages · À titre informatif uniquement.
+        </div>
       </div>`;
   }).join('');
 
@@ -5200,14 +5405,18 @@ async function renderObjectifs() {
       </div>
       ${cartes}
     </div>`;
+
+  for (const o of objectifs) {
+    _renderPaliersUi(o.id);
+    _drawObjChart(o.id);
+  }
 }
 
 async function openObjectifModal(o = null) {
   const isEdit = o && o.id;
+  let suggestedNote = isEdit ? (Number(o.note_risque) || 50) : 50;
+  let noteBadge = '';
 
-  // Récupère le profil de risque enregistré pour pré-sélectionner le niveau
-  let suggestedProfil = isEdit ? o.profil_risque : 'equilibre';
-  let profilBadge = '';
   try {
     const uid = getUser()?.id;
     if (uid) {
@@ -5215,13 +5424,19 @@ async function openObjectifModal(o = null) {
       if (rp.ok) {
         const rows = await rp.json();
         if (rows.length && rows[0].score_tolerance != null && rows[0].score_capacite != null) {
-          const budget = Math.min(rows[0].score_tolerance, rows[0].score_capacite);
-          if (!isEdit) suggestedProfil = _scoreToProfilRisque(budget);
-          profilBadge = `<span style="display:inline-block;margin-top:5px;font-size:11px;color:var(--cyan)">ℹ Basé sur votre profil de risque · budget ${budget}/100</span>`;
+          const budget = Math.min(Number(rows[0].score_tolerance), Number(rows[0].score_capacite));
+          if (!isEdit) suggestedNote = budget;
+          noteBadge = `<span style="display:block;margin-top:4px;font-size:11px;color:var(--cyan)">ℹ Pré-rempli depuis votre profil · budget ${Math.round(budget)}/100</span>`;
         }
       }
     }
   } catch(_) {}
+
+  const paliers  = _normPaliers(isEdit ? o.paliers_epargne : null);
+  const palier0  = paliers[0].montant_mensuel;
+  const note     = Math.round(suggestedNote);
+  const { mu, sigma } = getMuSigma(note, false);
+  const sri      = scoreToSri(note);
 
   document.getElementById('modal-content').innerHTML = `
     <div class="modal-hd">
@@ -5248,15 +5463,23 @@ async function openObjectifModal(o = null) {
         <input id="obj-horizon" type="number" min="1" max="60" class="form-input" placeholder="10" value="${isEdit ? o.horizon_annees : ''}">
       </div>
       <div class="form-group">
-        <label class="form-label">Profil de risque</label>
-        <select id="obj-profil" class="form-input" onchange="updateProfilHint(this.value)">
-          <option value="prudent" ${suggestedProfil==='prudent' ? 'selected' : ''}>Prudent</option>
-          <option value="equilibre" ${suggestedProfil==='equilibre' ? 'selected' : ''}>Équilibré</option>
-          <option value="dynamique" ${suggestedProfil==='dynamique' ? 'selected' : ''}>Dynamique</option>
-        </select>
-        ${profilBadge}
-        <div id="profil-hint" style="margin-top:6px;font-size:11px;color:var(--muted);line-height:1.5"></div>
+        <label class="form-label">Épargne initiale (€/mois)</label>
+        <input id="obj-epargne0" type="number" min="0" step="50" class="form-input" placeholder="300" value="${palier0}">
       </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label" style="display:flex;justify-content:space-between">
+        <span>Note de risque</span>
+        <strong id="note-val" style="color:var(--blue)">${note}/100</strong>
+      </label>
+      <input id="obj-note" type="range" min="0" max="100" step="1" value="${note}"
+        style="width:100%;accent-color:var(--blue)"
+        oninput="_updateNoteDisplay(this.value)">
+      <div id="note-hint" style="margin-top:5px;font-size:11px;color:var(--muted);line-height:1.6">
+        SRI ${sri} · μ≈${(mu*100).toFixed(1)} %/an · σ≈${(sigma*100).toFixed(1)} %/an (nominal)<br>
+        <span style="color:var(--muted2)">Hypothèses conservatrices à but pédagogique. Les performances passées ne garantissent pas les résultats futurs.</span>
+      </div>
+      ${noteBadge}
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal()">Annuler</button>
@@ -5265,16 +5488,6 @@ async function openObjectifModal(o = null) {
       </button>
     </div>`;
   document.getElementById('modal-overlay').classList.add('open');
-  updateProfilHint(suggestedProfil);
-}
-
-function updateProfilHint(profil) {
-  const el = document.getElementById('profil-hint');
-  if (!el || typeof PROFILS === 'undefined') return;
-  const p = PROFILS[profil];
-  if (!p) return;
-  el.innerHTML = `<span style="color:var(--cyan)">ℹ</span> ${p.desc}<br>
-    <span style="color:var(--muted2)">Ces hypothèses sont indicatives (données historiques longues, en termes réels). Les performances passées ne garantissent pas les résultats futurs.</span>`;
 }
 
 async function saveObjectif(id) {
@@ -5282,14 +5495,23 @@ async function saveObjectif(id) {
   const cible    = parseFloat(document.getElementById('obj-cible').value);
   const actuel   = parseFloat(document.getElementById('obj-actuel').value) || 0;
   const horizon  = parseInt(document.getElementById('obj-horizon').value);
-  const profil   = document.getElementById('obj-profil').value;
+  const note     = parseInt(document.getElementById('obj-note').value);
+  const epargne0 = parseFloat(document.getElementById('obj-epargne0').value) || 0;
 
   if (!nom || !cible || cible <= 0 || !horizon || horizon <= 0) {
     showToast('Remplis tous les champs obligatoires.'); return;
   }
 
   const uid = getUser()?.id;
-  const body = JSON.stringify({ user_id: uid, nom, montant_cible: cible, montant_actuel: actuel, horizon_annees: horizon, profil_risque: profil });
+  let paliersEpargne = [{ annee_debut: 0, montant_mensuel: epargne0 }];
+  if (id) {
+    const existing = _readPaliers(id);
+    if (existing.length > 1) {
+      paliersEpargne = [{ annee_debut: 0, montant_mensuel: epargne0 }, ...existing.slice(1)];
+    }
+  }
+
+  const body = JSON.stringify({ user_id: uid, nom, montant_cible: cible, montant_actuel: actuel, horizon_annees: horizon, note_risque: note, paliers_epargne: paliersEpargne });
 
   let r;
   if (id) {
@@ -5306,317 +5528,14 @@ async function saveObjectif(id) {
 
 async function deleteObjectif(id) {
   if (!confirm('Supprimer cet objectif ?')) return;
+  _destroyChart(id);
   await fetch(`${SU}/rest/v1/objectifs?id=eq.${id}`, { method: 'DELETE', headers: hdrs() });
   showToast('Objectif supprimé.');
   renderObjectifs();
 }
 
-let _projObj  = null; // objectif courant (évite les guillemets dans les attributs onclick)
-let _projChart = null; // référence Chart.js en cours
-let _projMode  = 'projection'; // 'projection' | 'epargne' | 'duree'
 
-function showProjection(o) {
-  _projObj  = o;
-  _projMode = 'projection';
-  _renderProjModal();
-  document.getElementById('modal-overlay').classList.add('open');
-}
 
-function _renderProjModal() {
-  const o = _projObj;
-  const profil = (typeof PROFILS !== 'undefined') ? PROFILS[o.profil_risque] : null;
-  const tabs = [
-    { id:'projection', icon:'📈', label:'Projection' },
-    { id:'epargne',    icon:'💰', label:'Épargne à prévoir' },
-    { id:'duree',      icon:'⏱', label:'Durée estimée' },
-  ];
-  const tabsHtml = tabs.map(t => `
-    <button onclick="setProjMode('${t.id}')" id="ptab-${t.id}"
-      style="flex:1;padding:9px 6px;border:none;border-radius:9px;cursor:pointer;font-size:12px;font-weight:600;transition:all .15s;
-        background:${_projMode===t.id ? 'rgba(99,75,228,.22)' : 'transparent'};
-        color:${_projMode===t.id ? 'var(--blue)' : 'var(--muted)'}">
-      ${t.icon} ${t.label}
-    </button>`).join('');
-
-  let inputsHtml = '';
-  if (_projMode === 'projection') {
-    inputsHtml = `
-      <div class="form-row" style="margin-bottom:14px">
-        <div class="form-group" style="margin-bottom:0">
-          <label class="form-label">Épargne mensuelle (€)</label>
-          <input id="proj-epargne" type="number" min="0" class="form-input" placeholder="300" value="0">
-        </div>
-        <div class="form-group" style="margin-bottom:0;display:flex;flex-direction:column;justify-content:flex-end">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--muted)">
-            <input type="checkbox" id="proj-inflation" style="accent-color:var(--blue)">
-            Déduire l'inflation (~2 %)
-          </label>
-          <div style="font-size:11px;color:var(--muted2);margin-top:4px">Coché = résultat en euros constants</div>
-        </div>
-      </div>
-      <button class="btn btn-primary btn-full" onclick="runProjection()">Calculer la trajectoire</button>`;
-  } else if (_projMode === 'epargne') {
-    inputsHtml = `
-      <div style="font-size:13px;color:var(--muted);margin-bottom:14px;padding:10px 14px;background:var(--bg2);border-radius:8px">
-        Combien faut-il épargner chaque mois pour atteindre <strong style="color:var(--text)">${fEur(o.montant_cible)}</strong>
-        en <strong style="color:var(--text)">${o.horizon_annees} ans</strong> (en médiane) ?
-      </div>
-      <div class="form-group" style="margin-bottom:14px">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--muted)">
-          <input type="checkbox" id="proj-inflation" style="accent-color:var(--blue)">
-          Déduire l'inflation (~2 %) du rendement hypothétique
-        </label>
-      </div>
-      <button class="btn btn-primary btn-full" onclick="runInverseEpargne()">Calculer l'épargne nécessaire</button>`;
-  } else {
-    inputsHtml = `
-      <div style="font-size:13px;color:var(--muted);margin-bottom:14px;padding:10px 14px;background:var(--bg2);border-radius:8px">
-        En combien d'années atteindrez-vous <strong style="color:var(--text)">${fEur(o.montant_cible)}</strong>
-        (en médiane) ?
-      </div>
-      <div class="form-group" style="margin-bottom:14px">
-        <label class="form-label">Épargne mensuelle (€)</label>
-        <input id="proj-epargne" type="number" min="0" class="form-input" placeholder="300" value="0">
-      </div>
-      <div class="form-group" style="margin-bottom:14px">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--muted)">
-          <input type="checkbox" id="proj-inflation" style="accent-color:var(--blue)">
-          Déduire l'inflation (~2 %) du rendement hypothétique
-        </label>
-      </div>
-      <button class="btn btn-primary btn-full" onclick="runInverseDuree()">Calculer la durée estimée</button>`;
-  }
-
-  document.getElementById('modal-content').innerHTML = `
-    <div class="modal-hd">
-      <h2>Simulation — ${o.nom}</h2>
-      <button class="modal-close" onclick="closeModal()">✕</button>
-    </div>
-
-    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px">
-      <div style="display:flex;gap:16px;flex-wrap:wrap">
-        <span><span style="color:var(--muted)">Capital :</span> <strong>${fEur(o.montant_actuel)}</strong></span>
-        <span><span style="color:var(--muted)">Cible :</span> <strong>${fEur(o.montant_cible)}</strong></span>
-        <span><span style="color:var(--muted)">Horizon :</span> <strong>${o.horizon_annees} ans</strong></span>
-        <span><span style="color:var(--muted)">Profil :</span> <strong>${PROFIL_LABEL[o.profil_risque]}</strong></span>
-      </div>
-      ${profil ? `<div style="margin-top:8px;font-size:11px;color:var(--muted);border-top:1px solid var(--border);padding-top:8px">
-        <span style="color:var(--cyan)">ℹ</span> <strong>Hypothèse ${profil.label} :</strong> ${profil.desc}<br>
-        <span style="color:var(--muted2)">${profil.source}</span>
-      </div>` : ''}
-    </div>
-
-    <div style="display:flex;gap:4px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:4px;margin-bottom:16px">
-      ${tabsHtml}
-    </div>
-
-    ${inputsHtml}
-
-    <div id="proj-result" style="margin-top:16px"></div>
-
-    <div style="margin-top:16px;padding:10px 14px;background:rgba(99,75,228,.07);border:1px solid rgba(99,75,228,.2);border-radius:8px;font-size:11px;color:var(--muted);line-height:1.6">
-      À but pédagogique uniquement. Ne constitue pas un conseil en investissement.
-      Simulation Monte-Carlo (7 000 tirages, loi normale). Les performances passées ne préjugent pas des performances futures.
-    </div>`;
-}
-
-function setProjMode(mode) {
-  _projMode = mode;
-  _renderProjModal();
-}
-
-function _projInflation() {
-  const el = document.getElementById('proj-inflation');
-  return el ? el.checked : false;
-}
-
-function _projEpargne() {
-  const el = document.getElementById('proj-epargne');
-  return el ? (parseFloat(el.value) || 0) : 0;
-}
-
-function _checkEngine(resultat) {
-  if (typeof simulateTrajectory === 'undefined') {
-    resultat.innerHTML = '<div style="color:var(--red);font-size:13px;padding:12px">Erreur : moteur non chargé. Recharge la page.</div>';
-    return false;
-  }
-  return true;
-}
-
-function _fmtY(v) {
-  return v >= 1000000 ? (v/1000000).toFixed(1)+'M €' : v >= 1000 ? (v/1000).toFixed(0)+'k €' : v+'€';
-}
-
-function runProjection() {
-  const o        = _projObj;
-  const epargne  = _projEpargne();
-  const inflation= _projInflation();
-  const resultat = document.getElementById('proj-result');
-
-  resultat.innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div><div style="margin-top:10px;font-size:12px;color:var(--muted)">Simulation en cours…</div></div>';
-
-  setTimeout(() => {
-    if (!_checkEngine(resultat)) return;
-    let traj;
-    try { traj = simulateTrajectory(Number(o.montant_actuel), epargne, o.horizon_annees, o.profil_risque, inflation); }
-    catch(e) { resultat.innerHTML = `<div style="color:var(--red);font-size:13px;padding:12px">Erreur : ${e.message}</div>`; return; }
-
-    const last  = traj[traj.length - 1];
-    const cible = Number(o.montant_cible);
-    const atteint = last.p50 >= cible;
-    const label = inflation ? 'euros constants' : 'euros courants';
-    const annees = traj.map(t => t.annee === 0 ? "Auj." : `An ${t.annee}`);
-
-    resultat.innerHTML = `
-      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;text-align:center">
-        Résultats en <strong style="color:var(--text)">${label}</strong> · épargne <strong style="color:var(--text)">${fEur(epargne)}/mois</strong>
-      </div>
-      <div style="position:relative;height:200px;margin-bottom:14px"><canvas id="proj-chart"></canvas></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:12px">
-        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:10px;text-align:center">
-          <div style="font-size:9px;color:var(--muted);margin-bottom:3px">Bas (P5)</div>
-          <div style="font-weight:700;font-size:13px;color:var(--red)">${fEur(last.p5)}</div>
-        </div>
-        <div style="background:var(--bg2);border:1px solid rgba(99,75,228,.4);border-radius:9px;padding:10px;text-align:center">
-          <div style="font-size:9px;color:var(--muted);margin-bottom:3px">Sûr à 80% (P20)</div>
-          <div style="font-weight:700;font-size:13px;color:var(--cyan)">${fEur(last.p20)}</div>
-        </div>
-        <div style="background:linear-gradient(135deg,rgba(99,75,228,.12),rgba(38,197,222,.08));border:1px solid rgba(99,75,228,.3);border-radius:9px;padding:10px;text-align:center">
-          <div style="font-size:9px;color:var(--blue);font-weight:600;margin-bottom:3px">Médiane (P50)</div>
-          <div style="font-weight:700;font-size:13px">${fEur(last.p50)}</div>
-        </div>
-        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:10px;text-align:center">
-          <div style="font-size:9px;color:var(--muted);margin-bottom:3px">Haut (P95)</div>
-          <div style="font-weight:700;font-size:13px;color:var(--green)">${fEur(last.p95)}</div>
-        </div>
-      </div>
-      <div style="padding:9px 14px;border-radius:8px;font-size:12px;font-weight:600;text-align:center;margin-bottom:12px;
-        background:${atteint?'rgba(0,230,118,.1)':'rgba(245,158,11,.1)'};
-        color:${atteint?'var(--green)':'var(--yellow)'};
-        border:1px solid ${atteint?'rgba(0,230,118,.25)':'rgba(245,158,11,.25)'}">
-        ${atteint?'✓ Objectif atteint en médiane':'⚠ Objectif non atteint en médiane'} — cible : ${fEur(cible)}
-      </div>
-      <button class="btn btn-ghost btn-sm btn-full" onclick="saveSimulation(${epargne},${inflation})">💾 Enregistrer cette simulation</button>`;
-
-    if (_projChart) { try { _projChart.destroy(); } catch(e){} _projChart = null; }
-    const ctx = document.getElementById('proj-chart').getContext('2d');
-    _projChart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: annees,
-        datasets: [
-          { label:'Haut (P95)',   data: traj.map(t=>Math.round(t.p95)), borderColor:'rgba(0,230,118,0.35)', backgroundColor:'rgba(0,230,118,0.07)', borderWidth:1, pointRadius:0, fill:'+1', tension:0.4 },
-          { label:'Médiane',      data: traj.map(t=>Math.round(t.p50)), borderColor:'#634BE4', backgroundColor:'rgba(99,75,228,0.12)', borderWidth:2.5, pointRadius:0, fill:'+1', tension:0.4 },
-          { label:'Sûr à 80%',   data: traj.map(t=>Math.round(t.p20)), borderColor:'rgba(38,197,222,0.5)', backgroundColor:'rgba(38,197,222,0.05)', borderWidth:1.5, pointRadius:0, fill:'+1', tension:0.4, borderDash:[3,3] },
-          { label:'Bas (P5)',     data: traj.map(t=>Math.round(t.p5)),  borderColor:'rgba(239,68,68,0.35)', backgroundColor:'transparent', borderWidth:1, pointRadius:0, fill:false, tension:0.4 },
-          { label:'Objectif',     data: traj.map(()=>cible), borderColor:'rgba(245,158,11,0.7)', borderWidth:1.5, borderDash:[6,4], pointRadius:0, fill:false },
-        ],
-      },
-      options: {
-        responsive:true, maintainAspectRatio:false,
-        interaction:{ mode:'index', intersect:false },
-        plugins:{
-          legend:{ display:false },
-          tooltip:{ callbacks:{ label: c=>`${c.dataset.label} : ${Number(c.raw).toLocaleString('fr-FR')} €` } },
-        },
-        scales:{
-          x:{ ticks:{ color:'#6b6b8a', font:{size:10}, maxTicksLimit:Math.min(o.horizon_annees+1,10) }, grid:{color:'rgba(255,255,255,0.04)'} },
-          y:{ ticks:{ color:'#6b6b8a', font:{size:10}, callback: v=>_fmtY(v) }, grid:{color:'rgba(255,255,255,0.04)'} },
-        },
-      },
-    });
-  }, 20);
-}
-
-function runInverseEpargne() {
-  const o        = _projObj;
-  const inflation= _projInflation();
-  const resultat = document.getElementById('proj-result');
-  resultat.innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div><div style="margin-top:10px;font-size:12px;color:var(--muted)">Calcul en cours…</div></div>';
-  setTimeout(() => {
-    if (!_checkEngine(resultat)) return;
-    let mensuel;
-    try { mensuel = findEpargneMensuelle(Number(o.montant_actuel), Number(o.montant_cible), o.horizon_annees, o.profil_risque, inflation); }
-    catch(e) { resultat.innerHTML = `<div style="color:var(--red);font-size:13px;padding:12px">Erreur : ${e.message}</div>`; return; }
-
-    const label = inflation ? 'euros constants' : 'euros courants';
-    if (mensuel === Infinity) {
-      resultat.innerHTML = `<div style="padding:16px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);border-radius:10px;font-size:13px;color:var(--red)">
-        Objectif non atteignable en ${o.horizon_annees} ans même avec une épargne très élevée (profil ${PROFIL_LABEL[o.profil_risque]}).
-        Envisage d'augmenter l'horizon ou de revoir la cible.
-      </div>`;
-      return;
-    }
-    resultat.innerHTML = `
-      <div style="padding:20px;background:linear-gradient(135deg,rgba(99,75,228,.12),rgba(38,197,222,.08));border:1px solid rgba(99,75,228,.3);border-radius:12px;text-align:center">
-        <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Pour atteindre ${fEur(o.montant_cible)} en ${o.horizon_annees} ans (médiane, ${label})</div>
-        <div style="font-size:32px;font-weight:800;color:var(--text)">${fEur(mensuel)}<span style="font-size:16px;font-weight:500;color:var(--muted)">/mois</span></div>
-        ${mensuel === 0 ? '<div style="margin-top:8px;font-size:12px;color:var(--green)">✓ Votre capital seul suffit déjà.</div>' : ''}
-      </div>
-      <div style="margin-top:10px;font-size:11px;color:var(--muted);text-align:center">
-        Résultat en ${label} · profil ${PROFIL_LABEL[o.profil_risque]} (μ=${(PROFILS[o.profil_risque].mu*100).toFixed(0)}%, σ=${(PROFILS[o.profil_risque].sigma*100).toFixed(0)}%)
-      </div>`;
-  }, 20);
-}
-
-function runInverseDuree() {
-  const o        = _projObj;
-  const epargne  = _projEpargne();
-  const inflation= _projInflation();
-  const resultat = document.getElementById('proj-result');
-  resultat.innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div><div style="margin-top:10px;font-size:12px;color:var(--muted)">Calcul en cours…</div></div>';
-  setTimeout(() => {
-    if (!_checkEngine(resultat)) return;
-    let horizon;
-    try { horizon = findHorizon(Number(o.montant_actuel), epargne, Number(o.montant_cible), o.profil_risque, inflation); }
-    catch(e) { resultat.innerHTML = `<div style="color:var(--red);font-size:13px;padding:12px">Erreur : ${e.message}</div>`; return; }
-
-    const label = inflation ? 'euros constants' : 'euros courants';
-    if (horizon === null || horizon === 0) {
-      resultat.innerHTML = `<div style="padding:16px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);border-radius:10px;font-size:13px;color:var(--red)">
-        Objectif non atteint en 50 ans avec ${fEur(epargne)}/mois (profil ${PROFIL_LABEL[o.profil_risque]}).
-        Augmente l'épargne ou revois la cible.
-      </div>`;
-      return;
-    }
-    resultat.innerHTML = `
-      <div style="padding:20px;background:linear-gradient(135deg,rgba(99,75,228,.12),rgba(38,197,222,.08));border:1px solid rgba(99,75,228,.3);border-radius:12px;text-align:center">
-        <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Pour atteindre ${fEur(o.montant_cible)} avec ${fEur(epargne)}/mois (médiane, ${label})</div>
-        <div style="font-size:32px;font-weight:800;color:var(--text)">${horizon} an${horizon>1?'s':''}</div>
-        <div style="margin-top:6px;font-size:12px;color:var(--muted)">soit jusqu'en ${new Date().getFullYear() + horizon}</div>
-      </div>
-      <div style="margin-top:10px;font-size:11px;color:var(--muted);text-align:center">
-        Résultat en ${label} · profil ${PROFIL_LABEL[o.profil_risque]} (μ=${(PROFILS[o.profil_risque].mu*100).toFixed(0)}%, σ=${(PROFILS[o.profil_risque].sigma*100).toFixed(0)}%)
-      </div>`;
-  }, 20);
-}
-
-async function saveSimulation(epargne, inflation) {
-  const o = _projObj;
-  const data = {
-    epargne_mensuelle: epargne,
-    inflation,
-    profil_risque: o.profil_risque,
-    sauvegardee_le: new Date().toISOString(),
-  };
-  try {
-    const last = simulateProjection(Number(o.montant_actuel), epargne, o.horizon_annees, o.profil_risque, inflation);
-    data.p5 = Math.round(last.p5); data.p20 = Math.round(last.p20);
-    data.p50 = Math.round(last.p50); data.p95 = Math.round(last.p95);
-  } catch(e) {}
-
-  const r = await fetch(`${SU}/rest/v1/objectifs?id=eq.${o.id}`, {
-    method: 'PATCH',
-    headers: hdrs({ Prefer: 'return=minimal' }),
-    body: JSON.stringify({ simulation_sauvegardee: data }),
-  });
-  if (r.ok) {
-    _projObj.simulation_sauvegardee = data;
-    showToast('Simulation enregistrée.');
-  } else {
-    showToast('Erreur lors de l\'enregistrement.');
-  }
-}
 </script>
 
 <script>
