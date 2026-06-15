@@ -422,11 +422,13 @@ Rules:
 
   // ── PRIX (Yahoo Finance chart v8) ─────────────────────────────────────
   const BASE = 'https://query1.finance.yahoo.com/v8/finance/chart/';
-  const H    = { headers: { 'User-Agent': UA } };
   try {
+    const { crumb, cookies } = await getYFCreds();
+    const crumbParam = crumb ? `&crumb=${encodeURIComponent(crumb)}` : '';
+    const H = { headers: { 'User-Agent': UA, 'Cookie': cookies || '', 'Accept': 'application/json' } };
     const [r5d, rh] = await Promise.all([
-      fetch(`${BASE}${sym}?range=5d&interval=1d&includePrePost=false`, H),
-      fetch(`${BASE}${sym}?range=1y&interval=1mo&includePrePost=false`, H),
+      fetch(`${BASE}${sym}?range=5d&interval=1d&includePrePost=false${crumbParam}`, H),
+      fetch(`${BASE}${sym}?range=1y&interval=1mo&includePrePost=false${crumbParam}`, H),
     ]);
     const d5 = r5d.ok ? await r5d.json() : null;
     const dh = rh.ok  ? await rh.json()  : null;
