@@ -75,6 +75,7 @@ nav{flex:1;padding:10px 8px;overflow-y:auto}
 .kpi-card{background:var(--card);border:1px solid rgba(255,255,255,.055);border-radius:16px;padding:22px;position:relative;overflow:hidden;box-shadow:0 2px 20px rgba(0,0,0,.18);transition:transform .18s ease,box-shadow .18s ease}
 .kpi-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--grad);opacity:.55}
 .kpi-card:hover{transform:translateY(-2px);box-shadow:0 10px 30px rgba(99,75,228,.18)}
+.kpi-clickable:hover{box-shadow:0 10px 30px rgba(38,197,222,.22);border-color:rgba(38,197,222,.3)!important}
 .kpi-label{font-size:12px;font-weight:500;color:var(--muted);margin-bottom:10px}
 .kpi-value{font-size:26px;font-weight:700;line-height:1.1;margin-bottom:8px}.kpi-sub{font-size:12px;color:var(--muted)}
 .badge{display:inline-flex;align-items:center;gap:3px;padding:4px 9px;border-radius:20px;font-size:12px;font-weight:600}
@@ -958,13 +959,105 @@ function updateKPIs(pos){
     {l:'PV latentes',v:`<span class="${pnlLatent>=0?'c-green':'c-red'}">${sg(pnlLatent)}${fE(pnlLatent)}</span>`,
      s:`<span class="badge ${pnlLatent>=0?'badge-green':'badge-red'}">${sg(pct)}${pct.toFixed(2)}%</span>`},
     {l:'PV réalisées',v:`<span class="${pnlRealized>=0?'c-green':'c-red'}">${sg(pnlRealized)}${fE(Math.abs(pnlRealized))}</span>`,
-     s:`Gains/pertes actés sur ventes`},
+     s:`Gains/pertes actés sur ventes <span style="color:var(--cyan);font-size:11px">· voir détail →</span>`,
+     onclick:`showRealizedDetail()`},
     {l:'Performance',v:`<span class="${pctTotal>=0?'c-green':'c-red'}" style="font-size:28px">${sg(pctTotal)}${pctTotal.toFixed(2)}%</span>`,
      s:ld.length<pos.length?`<span style="color:var(--yellow)">⏳ ${pos.length-ld.length} prix en cours…</span>`:'latent + réalisé vs investi actuel'}
-  ].map(k=>`<div class="kpi-card"><div class="kpi-label">${k.l}</div><div class="kpi-value">${k.v}</div><div class="kpi-sub">${k.s}</div></div>`).join('');
+  ].map(k=>`<div class="kpi-card${k.onclick?' kpi-clickable':''}" ${k.onclick?`onclick="${k.onclick}" style="cursor:pointer"`:''}><div class="kpi-label">${k.l}</div><div class="kpi-value">${k.v}</div><div class="kpi-sub">${k.s}</div></div>`).join('');
 }
 
-// ═══ CHART ENGINE ═══
+// ═══ DÉTAIL PV RÉALISÉES ═══════════════════════════════════════════════════
+function showRealizedDetail(){
+  // Rejoue les transactions dans l'ordre chronologique pour calculer le PRU CMP
+  // au moment exact de chaque vente — même logique que computePositions().
+  var txs=[...S.transactions].sort(function(a,b){return new Date(a.transaction_date)-new Date(b.transaction_date);});
+  var map={};   // état courant par ticker : quantity, totalCostEur
+  var sales=[];  // liste des ventes avec détail
+
+  txs.forEach(function(tx){
+    var k=tx.ticker;
+    if(!map[k]) map[k]={quantity:0,totalCostEur:0,name:tx.name||tx.ticker};
+    var cur=tx.currency||'EUR';
+    function toE(v){ return toEur(v,cur); }
+
+    if((tx.transaction_type||'').toLowerCase()==='buy'){
+      map[k].totalCostEur += tx.quantity*toE(tx.price) + toE(tx.fees||0);
+      map[k].quantity += tx.quantity;
+    } else if((tx.transaction_type||'').toLowerCase()==='sell' && map[k].quantity>0){
+      var pru      = map[k].totalCostEur / map[k].quantity;   // PRU CMP en € au moment de la vente
+      var sellEur  = toE(tx.price);                            // prix de vente en €
+      var feesEur  = toE(tx.fees||0);
+      var pv       = (sellEur - pru)*tx.quantity - feesEur;   // PV nette de frais
+      var pct      = pru>0 ? (sellEur/pru-1)*100 : null;
+
+      sales.push({
+        ticker : tx.ticker,
+        name   : tx.name || tx.ticker,
+        date   : tx.transaction_date,
+        qty    : tx.quantity,
+        pru    : pru,           // € toujours
+        sell   : sellEur,       // € toujours
+        fees   : feesEur,
+        pv     : pv,
+        pct    : pct,
+        cur    : cur,
+        sellRaw: tx.price       // devise d'origine pour affichage
+      });
+
+      // Met à jour l'état
+      map[k].totalCostEur -= tx.quantity*pru;
+      map[k].quantity     -= tx.quantity;
+    }
+  });
+
+  // Trie du plus récent au plus ancien
+  sales.sort(function(a,b){return new Date(b.date)-new Date(a.date);});
+
+  var total = sales.reduce(function(s,x){return s+x.pv;},0);
+  var sg    = function(v){return v>=0?'+':'';};
+
+  var rows = sales.length ? sales.map(function(s){
+    var pvCol = s.pv>=0 ? 'var(--green)' : 'var(--red)';
+    var dateStr = new Date(s.date).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'});
+    var sellStr = s.cur!=='EUR' ? s.sellRaw.toFixed(2)+' '+s.cur+' ('+fE(s.sell)+')' : fE(s.sell);
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:10px 8px">
+        <div style="font-weight:600;font-size:13px">${s.name}</div>
+        <div style="color:var(--muted);font-size:11px">${s.ticker} · ${dateStr}</div>
+      </td>
+      <td style="padding:10px 8px;text-align:right;white-space:nowrap">${Number(s.qty).toLocaleString('fr-FR',{maximumFractionDigits:4})}</td>
+      <td style="padding:10px 8px;text-align:right;white-space:nowrap;color:var(--muted)">${fE(s.pru)}</td>
+      <td style="padding:10px 8px;text-align:right;white-space:nowrap">${sellStr}</td>
+      <td style="padding:10px 8px;text-align:right;white-space:nowrap;color:${pvCol};font-weight:600">${sg(s.pv)}${fE(Math.abs(s.pv))}</td>
+      <td style="padding:10px 8px;text-align:right;white-space:nowrap;color:${pvCol}">${s.pct!=null?sg(s.pct)+s.pct.toFixed(1)+'%':'—'}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="6" style="padding:32px;text-align:center;color:var(--muted)">Aucune vente enregistrée</td></tr>';
+
+  var html = `<div class="modal-hd">
+    <h2>💰 Détail des PV réalisées</h2>
+    <button class="modal-close" onclick="closeModal()">✕</button>
+  </div>
+  <div style="margin-bottom:16px;padding:14px 16px;background:var(--card2);border-radius:12px;display:flex;align-items:center;justify-content:space-between">
+    <span style="color:var(--muted);font-size:13px">Total net réalisé</span>
+    <span style="font-size:20px;font-weight:700;color:${total>=0?'var(--green)':'var(--red)'}">${sg(total)}${fE(Math.abs(total))}</span>
+  </div>
+  <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+    <table style="width:100%;border-collapse:collapse;min-width:520px">
+      <thead><tr style="border-bottom:2px solid var(--border)">
+        <th style="padding:8px;text-align:left;font-size:11px;color:var(--muted);font-weight:600">TITRE</th>
+        <th style="padding:8px;text-align:right;font-size:11px;color:var(--muted);font-weight:600">QTÉ</th>
+        <th style="padding:8px;text-align:right;font-size:11px;color:var(--muted);font-weight:600">PRU (€)</th>
+        <th style="padding:8px;text-align:right;font-size:11px;color:var(--muted);font-weight:600">PRIX VENTE</th>
+        <th style="padding:8px;text-align:right;font-size:11px;color:var(--muted);font-weight:600">PV / MV</th>
+        <th style="padding:8px;text-align:right;font-size:11px;color:var(--muted);font-weight:600">%</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>
+  <p style="margin-top:12px;font-size:11px;color:var(--muted2)">PRU calculé par méthode CMP au moment de chaque vente. PV nette des frais.</p>`;
+
+  showModal(html);
+}
 function groupByKey(pos,keyFn,colorFn){
   const m={};pos.forEach(p=>{const k=keyFn(p)||'Autre';m[k]=(m[k]||0)+(p.valueEur||0);});
   const entries=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
