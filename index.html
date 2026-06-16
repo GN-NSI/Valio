@@ -52,7 +52,7 @@ select.form-input{cursor:pointer}.form-row{display:grid;grid-template-columns:1f
 .btn-danger{background:rgba(239,68,68,.12);color:var(--red);border:1px solid rgba(239,68,68,.25)}.btn-danger:hover{background:rgba(239,68,68,.22)}
 .btn-edit{background:rgba(99,75,228,.14);color:var(--blue);border:1px solid rgba(99,75,228,.28)}.btn-edit:hover{background:rgba(99,75,228,.24)}
 .btn-full{width:100%}.btn-sm{padding:5px 10px;font-size:12px;border-radius:9px}
-#app-screen{display:none;height:100vh;overflow:hidden}
+#app-screen{display:none;height:100vh;overflow:hidden;width:100vw}
 .app-layout{display:flex;height:100vh}
 #sidebar{width:224px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;height:100vh;transition:width .2s ease;overflow:hidden;position:relative}#sidebar.collapsed{width:52px}.sb-toggle{position:absolute;right:-12px;top:22px;width:24px;height:24px;background:var(--bg2);border:1px solid var(--border);border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:11px;z-index:20;color:var(--muted);transition:transform .2s ease}#sidebar.collapsed .sb-toggle{transform:rotate(180deg)}#sidebar.collapsed .name,#sidebar.collapsed nav .nav-item span:not(.nav-icon),#sidebar.collapsed .nav-section,#sidebar.collapsed .sidebar-user,#sidebar.collapsed .nav-soon{display:none}#sidebar.collapsed .nav-item{justify-content:center;padding:9px 6px}#sidebar.collapsed .sidebar-logo{padding:14px 8px;justify-content:center}#sidebar.collapsed .sidebar-footer{padding:10px 8px;justify-content:center}
 .sidebar-logo{padding:20px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:11px}
@@ -66,7 +66,7 @@ nav{flex:1;padding:10px 8px;overflow-y:auto}
 .sidebar-footer{padding:16px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;cursor:pointer;transition:background .12s}.sidebar-footer:hover{background:var(--card)}
 .avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0;background:rgba(99,75,228,.18);color:var(--blue)}
 .sidebar-user .uname{font-size:13px;font-weight:600}.sidebar-user .logout{font-size:11px;color:var(--muted);margin-top:1px}
-#main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;width:0}
 #topbar{height:56px;flex-shrink:0;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 28px;gap:12px}
 .topbar-title{font-size:16px;font-weight:700;flex:1}
 #page,#page-portfolio{flex:1;overflow-y:auto;padding:28px}
@@ -764,7 +764,21 @@ function computeByAccount(){
 // ═══ SORT ═══
 const SORT_COLS={value:p=>p.valueEur||0,pnl:p=>p.pnlEur||0,pnlpct:p=>p.pnlPct||0,qty:p=>p.quantity,pru:p=>p.pruEur};
 function sortPos(pos){const fn=SORT_COLS[posSort.col]||(p=>p.valueEur||0);return[...pos].sort((a,b)=>posSort.dir==='desc'?fn(b)-fn(a):fn(a)-fn(b));}
-function clickSort(col){if(posSort.col===col)posSort.dir=posSort.dir==='desc'?'asc':'desc';else{posSort.col=col;posSort.dir='desc';}if(S.enrichedPos.length)renderPosBody(sortPos(S.enrichedPos));}
+function renderPosHead(){
+  var h=`<tr>
+    <th style="text-align:left;padding-left:20px;min-width:180px">Titre</th>
+    <th ${thCls('qty')} style="text-align:right">Qté ${sortIcon('qty')}</th>
+    <th ${thCls('pru')} style="text-align:right">PRU ${sortIcon('pru')}</th>
+    <th style="text-align:right">Cours</th>
+    <th ${thCls('value')} style="text-align:right">Valeur (€) ${sortIcon('value')}</th>
+    <th ${thCls('pnl')} style="text-align:right">P&amp;L (€) ${sortIcon('pnl')}</th>
+    <th ${thCls('pnlpct')} style="text-align:right">P&amp;L % ${sortIcon('pnlpct')}</th>
+    <th style="text-align:right">Comptes</th>
+  </tr>`;
+  var el=document.querySelector('#pos-body')?.closest('table')?.querySelector('thead');
+  if(el) el.innerHTML=h;
+}
+function clickSort(col){if(posSort.col===col)posSort.dir=posSort.dir==='desc'?'asc':'desc';else{posSort.col=col;posSort.dir='desc';}if(S.enrichedPos.length){renderPosHead();renderPosBody(sortPos(S.enrichedPos));}}
 function sortIcon(col){if(posSort.col!==col)return`<span style="opacity:.3;font-size:9px">↕</span>`;return posSort.dir==='desc'?'↓':'↑';}
 function thCls(col){return`class="${posSort.col===col?'sort-active':''}" onclick="clickSort('${col}')" style="cursor:pointer"`;}
 
@@ -867,9 +881,9 @@ function posTblRows(pos){
     const pctHTML=p.pnlPct!=null?`<span class="mono ${p.pnlPct>=0?'c-green':'c-red'}">${p.pnlPct>=0?'+':''}${p.pnlPct.toFixed(2)}%</span>`:'—';
 
     return`<tr>
-      <td style="text-align:left;padding-left:20px"><div class="ticker-cell">
+      <td style="text-align:left;padding-left:20px"><div class="ticker-cell" onclick="openCompanyFromPos('${p.ticker}','${(p.name||p.ticker).replace(/'/g,"\\'")}')" style="cursor:pointer" title="Voir la fiche ${p.name||p.ticker}">
         <div class="ticker-logo"><img src="https://assets.parqet.com/logos/symbol/${p.ticker}?format=png" onload="this.style.display='block'" onerror="this.parentNode.innerHTML='<span>${p.ticker.slice(0,3)}</span>'" style="display:none"></div>
-        <div><div class="ticker-name">${p.name}</div><div class="ticker-sym">${p.ticker}</div></div></div></td>
+        <div><div class="ticker-name" style="text-decoration-color:var(--blue)">${p.name}</div><div class="ticker-sym" style="color:var(--cyan)">${p.ticker}</div></div></div></td>
       <td class="mono">${fQ(p.quantity)}</td>
       <td class="mono">${fN(p.pruDisplay)} ${cS(p.pruCurrency)}</td>
       <td id="px-${p.ticker}">${priceHTML}</td>
@@ -881,6 +895,10 @@ function posTblRows(pos){
   }).join('');
 }
 
+function openCompanyFromPos(ticker, name){
+  _prevPage = S.page || 'portfolio';
+  navigate('company', ticker, name);
+}
 function renderPosBody(sorted){const el=document.getElementById('pos-body');if(el)el.innerHTML=posTblRows(sorted);}
 
 // ═══ PRICE FETCHING (par lots — évite le rate-limit Yahoo) ═══
@@ -4374,14 +4392,15 @@ async function buildPortfolioLine(transactions, range){
   var out=[];
   timestamps.forEach(function(t){
     var r=pnlAt(t);
-    if(!r.priced && out.length===0) return; // attendre d'avoir des prix
+    if(!r.priced && out.length===0) return;
     var pct=r.pnl/denom*100;
     if(isFinite(pct)) out.push({t:t,pct:pct});
   });
   if(out.length<2) return [];
-  // Pas de rebasage : la courbe représente la P&L cumulée / capital actuel, donc
-  // elle FINIT exactement sur la performance affichée du portefeuille (latent+réalisé vs investi).
-  return out;
+  // Rebasage à 0 en début de fenêtre : la courbe montre la perf DE LA PÉRIODE
+  // sélectionnée (1M, 6M, 1A…), pas la perf all-time. Le delta final reste cohérent.
+  var base=out[0].pct;
+  return out.map(function(p){return {t:p.t,pct:p.pct-base};});
 }
 
 // ── Performance indice
@@ -4417,10 +4436,10 @@ async function renderBenchmark(){
     '<div class="card"><div id="bm-chart-wrap" style="position:relative;height:380px">'+
     '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted)">Sélectionne des éléments à comparer</div></div></div>';
 
-  // Default period = 1A
+  // Default period = 1A (violet)
   window._bmRange='1y'; window._bmItems=[];
   var defBtn=document.querySelector('.bm-period-btn[data-range="1y"]');
-  if(defBtn){defBtn.style.background='var(--card2)';}
+  if(defBtn){defBtn.style.background='var(--blue)';defBtn.style.color='#fff';defBtn.style.borderColor='var(--blue)';defBtn.style.fontWeight='700';}
 
   // Build selector
   var friends=await loadFriends();
@@ -4475,8 +4494,10 @@ function toggleBmItem(btn){
 }
 
 function selectBmPeriod(btn){
-  document.querySelectorAll('.bm-period-btn').forEach(function(b){b.style.background='';});
-  btn.style.background='var(--card2)';
+  document.querySelectorAll('.bm-period-btn').forEach(function(b){
+    b.style.background=''; b.style.color=''; b.style.borderColor=''; b.style.fontWeight='';
+  });
+  btn.style.background='var(--blue)'; btn.style.color='#fff'; btn.style.borderColor='var(--blue)'; btn.style.fontWeight='700';
   window._bmRange=btn.dataset.range;
   refreshBmChart();
 }
