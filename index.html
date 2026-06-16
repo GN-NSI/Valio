@@ -896,8 +896,7 @@ function posTblRows(pos){
 }
 
 function openCompanyFromPos(ticker, name){
-  _prevPage = S.page || 'portfolio';
-  navigate('company', ticker, name);
+  openCompanyDetail(ticker, name);
 }
 function renderPosBody(sorted){const el=document.getElementById('pos-body');if(el)el.innerHTML=posTblRows(sorted);}
 
