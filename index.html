@@ -4365,7 +4365,15 @@ window.switchFriendTab=function(tab){
 };
 
 // Risque du portefeuille d'un ami (même moteur que le sien)
-window.loadFriendRisk=function(){ _riskCompute(window._friendPos||[], 'friend-risk-content'); };
+window.loadFriendRisk=function(){
+  var pos=(window._friendPos||[]).filter(function(p){ return p.ticker && p.quantity>1e-7; });
+  if(!pos.length){
+    var el=document.getElementById('friend-risk-content');
+    if(el) el.innerHTML='<div style="color:var(--muted);font-size:12px">Aucune position disponible.</div>';
+    return;
+  }
+  _riskCompute(pos, 'friend-risk-content');
+};
 
 // Cibles d'achat d'un ami (watchlist + niveaux) — nécessite la policy RLS élargie
 window.loadFriendTargets=async function(){
