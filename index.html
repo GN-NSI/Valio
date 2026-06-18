@@ -1853,6 +1853,7 @@ async function renderCompanyDetail(ticker, name) {
       if (d && !d.error) { S.fundamentals[ticker] = d; f = d; }
     } catch(e) {}
   }
+  window._cdLastF = f; // Stocker immédiatement pour les onglets lazy
 
   // Toujours re-fetcher le prix pour avoir les données graphique fraîches
   try {
@@ -2050,7 +2051,7 @@ async function toggleCdCompare(btn, ticker){
 function drawCdChart(pts, price, ticker, pos) {
   var currSym = (price && price.currency === 'EUR') ? '€' : '$';
   var _ticker = ticker || (price && price.symbol) || '';
-  window._cdLastPrice = price; window._cdLastTicker = _ticker;
+  window._cdLastPrice = price; window._cdLastTicker = _ticker || (window._cdLastTicker);
   if(pos !== undefined) window._cdLastPos = pos;
   var compareIds = Object.keys(window._cdCompareActive||{});
   var isCompareMode = compareIds.length > 0;
@@ -3189,13 +3190,14 @@ window.loadCdAnalysts = async function(ticker, price, f){
   if(el.dataset.loaded === ticker) return;
   el.innerHTML = '<div style="text-align:center;padding:40px"><div class="spinner"></div></div>';
 
-  // S'assurer que les fundamentals sont chargés (ils contiennent les données analystes)
-  if(!f || !f.targetMeanPrice) {
+  // S'assurer que les fundamentals V6+ sont chargés (contiennent les données analystes)
+  // On recharge si absent, ou si version cache < 6 (ne contient pas encore targetMeanPrice)
+  if(!f || f._v == null || f._v < 6 || f.targetMeanPrice === undefined) {
     try {
       var r = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=fundamentals', {signal:AbortSignal.timeout(15000)});
       var d = await r.json();
       if(d && !d.error){ S.fundamentals[ticker] = d; f = d; window._cdLastF = d; }
-    } catch(e){}
+    } catch(e){ console.warn('loadCdAnalysts fetch error:', e); }
   }
 
   var px = price && price.price;
@@ -3258,7 +3260,7 @@ window.loadCdAnalysts = async function(ticker, price, f){
       '<td style="padding:10px 8px;text-align:right;font-size:12px" class="mono">'+epsAvg+'</td>' +
       '<td style="padding:10px 8px;text-align:right;font-size:11px;color:var(--muted)" class="mono">'+epsLo+' – '+epsHi+'</td>' +
       '<td style="padding:10px 8px;text-align:right;font-size:12px" class="mono">'+revFmt+'</td>' +
-      '<td style="padding:10px 8px;text-align:right;font-size:11px;color:var(--muted);font-size:11px" class="mono">'+e.epsCount!=null?e.epsCount+' analysts':'—'+'</td>' +
+      '<td style="padding:10px 8px;text-align:right;font-size:11px;color:var(--muted)" class="mono">'+(e.epsCount!=null?e.epsCount+' analysts':'—')+'</td>' +
     '</tr>';
   }
 
@@ -3289,13 +3291,13 @@ window.loadCdSector = async function(ticker, f){
   if(el.dataset.loaded === ticker) return;
   el.innerHTML = '<div style="text-align:center;padding:40px"><div class="spinner"></div></div>';
 
-  // S'assurer que les fundamentals + financials sont chargés
+  // S'assurer que les fundamentals V6+ sont chargés
   if(!f) { f = S.fundamentals[ticker]; }
-  if(!f) {
+  if(!f || f._v == null || f._v < 6 || f.sector === undefined) {
     try {
       var r = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=fundamentals', {signal:AbortSignal.timeout(15000)});
-      var d = await r.json(); if(d && !d.error){ S.fundamentals[ticker] = d; f = d; }
-    } catch(e){}
+      var d = await r.json(); if(d && !d.error){ S.fundamentals[ticker] = d; f = d; window._cdLastF = d; }
+    } catch(e){ console.warn('loadCdSector fetch error:', e); }
   }
   var fin = null;
   try {
@@ -3421,8 +3423,131 @@ window.loadCdSector = async function(ticker, f){
         : '<div style="font-size:10px;color:var(--muted);margin-top:8px">Benchmarks sectoriels non disponibles pour ce secteur.</div>') +
     '</div>';
 
-  el.innerHTML = watHtml + sectorHtml;
+  // ── Comparateur multi-tickers ─────────────────────────────────────────────
+  var cmpHtml = '<div class="card" style="margin-top:16px" id="cd-comparator-card">'+
+    '<div style="font-size:15px;font-weight:700;margin-bottom:4px">🔄 Comparer avec d\'autres entreprises</div>'+
+    '<div style="font-size:12px;color:var(--muted);margin-bottom:14px">Ajoute 1 à 4 tickers pour comparer leurs ratios côte à côte avec '+ticker+'</div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+
+      '<input id="cmp-input" class="form-input" style="flex:1;min-width:120px;max-width:180px;text-transform:uppercase" placeholder="Ex: AMD, INTC…" maxlength="10" '+
+        'onkeydown="if(event.key===\'Enter\') window.addCmpTicker(\''+ticker+'\')">'+
+      '<button class="btn btn-primary btn-sm" onclick="window.addCmpTicker(\''+ticker+'\')">+ Ajouter</button>'+
+      '<button class="btn btn-ghost btn-sm" onclick="window.clearCmpTickers(\''+ticker+'\')">Réinitialiser</button>'+
+    '</div>'+
+    '<div id="cmp-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px"></div>'+
+    '<div id="cmp-table"><div style="color:var(--muted);font-size:12px">Ajoute un ticker pour lancer la comparaison.</div></div>'+
+  '</div>';
+
+  el.innerHTML = watHtml + sectorHtml + cmpHtml;
   el.dataset.loaded = ticker;
+
+  // ── Logique du comparateur ──────────────────────────────────────────────
+  window._cmpTickers = window._cmpTickers || [];
+
+  window.addCmpTicker = async function(baseTicker){
+    var inp = document.getElementById('cmp-input'); if(!inp) return;
+    var tk = inp.value.trim().toUpperCase(); inp.value = '';
+    if(!tk || tk === baseTicker) return;
+    if(window._cmpTickers.indexOf(tk) >= 0) return; // déjà présent
+    if(window._cmpTickers.length >= 4) { showToast('Maximum 4 tickers en comparaison'); return; }
+    window._cmpTickers.push(tk);
+    window.renderCmpChips(baseTicker);
+    window.renderCmpTable(baseTicker);
+  };
+
+  window.removeCmpTicker = function(tk, baseTicker){
+    window._cmpTickers = window._cmpTickers.filter(function(t){ return t !== tk; });
+    window.renderCmpChips(baseTicker);
+    window.renderCmpTable(baseTicker);
+  };
+
+  window.clearCmpTickers = function(baseTicker){
+    window._cmpTickers = [];
+    window.renderCmpChips(baseTicker);
+    var tbl = document.getElementById('cmp-table');
+    if(tbl) tbl.innerHTML = '<div style="color:var(--muted);font-size:12px">Ajoute un ticker pour lancer la comparaison.</div>';
+  };
+
+  window.renderCmpChips = function(baseTicker){
+    var chips = document.getElementById('cmp-chips'); if(!chips) return;
+    chips.innerHTML = window._cmpTickers.map(function(tk){
+      return '<span style="display:inline-flex;align-items:center;gap:4px;background:var(--accent)22;color:var(--accent);'+
+        'border:1px solid var(--accent);border-radius:20px;padding:3px 10px;font-size:12px;font-weight:600">'+
+        tk+'<button onclick="window.removeCmpTicker(\''+tk+'\',\''+baseTicker+'\')" '+
+        'style="background:none;border:none;cursor:pointer;color:var(--accent);font-size:14px;line-height:1;padding:0 0 0 4px">×</button></span>';
+    }).join('');
+  };
+
+  window.renderCmpTable = async function(baseTicker){
+    var tbl = document.getElementById('cmp-table'); if(!tbl) return;
+    if(!window._cmpTickers.length) return;
+    tbl.innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div></div>';
+
+    // Charger les fundamentals de chaque ticker en parallèle
+    var allTickers = [baseTicker].concat(window._cmpTickers);
+    var data = {};
+    await Promise.all(allTickers.map(async function(tk){
+      if(S.fundamentals[tk] && S.fundamentals[tk]._v >= 6){ data[tk] = S.fundamentals[tk]; return; }
+      try{
+        var r = await fetch(API+'?symbol='+encodeURIComponent(tk)+'&type=fundamentals', {signal:AbortSignal.timeout(15000)});
+        var d = await r.json();
+        if(d && !d.error){ S.fundamentals[tk] = d; data[tk] = d; }
+        else { data[tk] = null; }
+      }catch(e){ data[tk] = null; }
+    }));
+
+    var metrics = [
+      {label:'P/E Trailing',   key:'trailingPE',        fmt:function(v){return v.toFixed(1)+'x';}, lower:true},
+      {label:'P/E Forward',    key:'forwardPE',          fmt:function(v){return v.toFixed(1)+'x';}, lower:true},
+      {label:'PEG',            key:'pegRatio',           fmt:function(v){return v.toFixed(2)+'x';}, lower:true},
+      {label:'P/FCF',          key:'pfcf',               fmt:function(v){return v.toFixed(1)+'x';}, lower:true},
+      {label:'Marge brute',    key:'grossMarginPct',     fmt:function(v){return v.toFixed(1)+'%';}, lower:false},
+      {label:'Marge opérat.',  key:'operatingMarginPct', fmt:function(v){return v.toFixed(1)+'%';}, lower:false},
+      {label:'Marge nette',    key:'profitMarginPct',    fmt:function(v){return v.toFixed(1)+'%';}, lower:false},
+      {label:'ROE',            key:'returnOnEquity',     fmt:function(v){return v.toFixed(1)+'%';}, lower:false},
+      {label:'Croissance CA 1A',key:'revenueGrowthYoY',  fmt:function(v){return (v>=0?'+':'')+v.toFixed(1)+'%';}, lower:false},
+      {label:'EPS fwd growth', key:'epsGrowthFwd1Y',     fmt:function(v){return (v>=0?'+':'')+v.toFixed(1)+'%';}, lower:false},
+      {label:'Dette/EBITDA',   key:'netDebtToEBITDA',    fmt:function(v){return v.toFixed(1)+'x';}, lower:true},
+    ];
+
+    // Trouver meilleur/moins bon par métrique
+    function bestVal(metricKey, lowerBetter){
+      var vals = allTickers.map(function(tk){ return data[tk] && data[tk][metricKey] != null ? data[tk][metricKey] : null; });
+      var valid = vals.filter(function(v){ return v != null; });
+      if(!valid.length) return {best:null, worst:null};
+      var best  = lowerBetter ? Math.min.apply(null,valid) : Math.max.apply(null,valid);
+      var worst = lowerBetter ? Math.max.apply(null,valid) : Math.min.apply(null,valid);
+      return {best:best, worst:worst};
+    }
+
+    var header = '<tr style="border-bottom:2px solid var(--border)">' +
+      '<th style="padding:8px;text-align:left;font-size:11px;color:var(--muted)">MÉTRIQUE</th>' +
+      allTickers.map(function(tk){
+        var isBold = tk === baseTicker;
+        return '<th style="padding:8px;text-align:right;font-size:11px;'+(isBold?'color:var(--accent);font-weight:800':'color:var(--muted)')+'">'+tk+(data[tk]?'':'<br><span style=\"color:var(--red);font-size:10px\">⚠</span>')+'</th>';
+      }).join('') +
+      '</tr>';
+
+    var rows = metrics.map(function(m){
+      var bv = bestVal(m.key, m.lower);
+      var cells = allTickers.map(function(tk){
+        var d2 = data[tk]; var v = d2 && d2[m.key] != null ? d2[m.key] : null;
+        var str = v != null ? m.fmt(v) : '—';
+        var isBest  = v != null && bv.best  != null && Math.abs(v - bv.best)  < 0.001;
+        var isWorst = v != null && bv.worst != null && Math.abs(v - bv.worst) < 0.001 && allTickers.length > 1;
+        var bg = isBest ? 'background:var(--green)18;' : isWorst ? 'background:var(--red)12;' : '';
+        var fw = tk === baseTicker ? 'font-weight:700;' : '';
+        return '<td style="padding:9px 8px;text-align:right;font-size:12px;'+bg+fw+'" class="mono">'+str+'</td>';
+      }).join('');
+      return '<tr style="border-bottom:1px solid var(--border2)">'+
+        '<td style="padding:9px 8px;font-size:12px;color:var(--muted)">'+m.label+'</td>'+cells+'</tr>';
+    }).join('');
+
+    tbl.innerHTML = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'+
+      '<thead>'+header+'</thead><tbody>'+rows+'</tbody></table></div>'+
+      '<div style="font-size:10px;color:var(--muted);margin-top:8px">'+
+        'Fond vert = meilleure valeur sur la ligne · Fond rouge = moins bonne. Source : Yahoo Finance.'+
+      '</div>';
+  };
 };
 
 // Onglets de la fiche : Vue d'ensemble (cd-content) vs sous-sections (cd-fin-section)
