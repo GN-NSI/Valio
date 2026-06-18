@@ -101,7 +101,7 @@ module.exports = async (req, res) => {
   if (type === 'fundamentals') {
     try {
       // Cache Supabase → réponse instantanée si données < 24h
-      const CACHE_V = 5; // Incrémenter pour invalider tous les caches
+      const CACHE_V = 6; // Incrémenter pour invalider tous les caches
       const cached = await getCache(symbol);
       const cacheValid = cached
         && cached._v === CACHE_V
@@ -110,7 +110,7 @@ module.exports = async (req, res) => {
       if (cacheValid) return res.json({ ...cached, _fromCache: true });
 
       // Sinon : Yahoo Finance quoteSummary
-      const yf = await yfSummary(symbol, 'defaultKeyStatistics,financialData,summaryDetail,earningsTrend,calendarEvents');
+      const yf = await yfSummary(symbol, 'defaultKeyStatistics,financialData,summaryDetail,earningsTrend,calendarEvents,assetProfile');
       if (!yf) return res.status(404).json({ error: `Pas de données pour ${symbol}` });
 
       const sd = yf.summaryDetail        || {};
@@ -153,6 +153,57 @@ module.exports = async (req, res) => {
       const revenueGrowthFwd1Y = trend1y?.revenueEstimate?.growth?.raw != null
         ? trend1y.revenueEstimate.growth.raw * 100 : null;
 
+      // ── ESTIMATIONS ANALYSTES PAR PÉRIODE ─────────────────────────────
+      const trend0q = trends.find(t => t.period === '0q');  // trimestre en cours
+      const trendP1q = trends.find(t => t.period === '+1q'); // trimestre suivant
+      const analystEstimates = {
+        // Trimestre en cours
+        currentQtr: trend0q ? {
+          period:       trend0q.period,
+          endDate:      trend0q.endDate || null,
+          epsAvg:       trend0q.earningsEstimate?.avg?.raw ?? null,
+          epsLow:       trend0q.earningsEstimate?.low?.raw ?? null,
+          epsHigh:      trend0q.earningsEstimate?.high?.raw ?? null,
+          epsCount:     trend0q.earningsEstimate?.numberOfAnalysts?.raw ?? null,
+          revAvg:       trend0q.revenueEstimate?.avg?.raw ?? null,
+          revLow:       trend0q.revenueEstimate?.low?.raw ?? null,
+          revHigh:      trend0q.revenueEstimate?.high?.raw ?? null,
+        } : null,
+        // Trimestre suivant
+        nextQtr: trendP1q ? {
+          period:       trendP1q.period,
+          endDate:      trendP1q.endDate || null,
+          epsAvg:       trendP1q.earningsEstimate?.avg?.raw ?? null,
+          epsLow:       trendP1q.earningsEstimate?.low?.raw ?? null,
+          epsHigh:      trendP1q.earningsEstimate?.high?.raw ?? null,
+          epsCount:     trendP1q.earningsEstimate?.numberOfAnalysts?.raw ?? null,
+          revAvg:       trendP1q.revenueEstimate?.avg?.raw ?? null,
+          revLow:       trendP1q.revenueEstimate?.low?.raw ?? null,
+          revHigh:      trendP1q.revenueEstimate?.high?.raw ?? null,
+        } : null,
+        // Année en cours
+        currentYear: trend1y ? {
+          epsAvg:       trend1y.earningsEstimate?.avg?.raw ?? null,
+          epsGrowth:    trend1y.earningsEstimate?.growth?.raw != null ? trend1y.earningsEstimate.growth.raw * 100 : null,
+          revAvg:       trend1y.revenueEstimate?.avg?.raw ?? null,
+          revGrowth:    trend1y.revenueEstimate?.growth?.raw != null ? trend1y.revenueEstimate.growth.raw * 100 : null,
+          count:        trend1y.earningsEstimate?.numberOfAnalysts?.raw ?? null,
+        } : null,
+      };
+
+      // ── COURS CIBLE ET RECOMMANDATION ANALYSTES ───────────────────────
+      const targetMeanPrice  = raw(fd.targetMeanPrice);
+      const targetHighPrice  = raw(fd.targetHighPrice);
+      const targetLowPrice   = raw(fd.targetLowPrice);
+      const analystCount     = raw(fd.numberOfAnalystOpinions);
+      const recommendationMean = raw(fd.recommendationMean);
+      const recommendationKey  = fd.recommendationKey || null;
+
+      // ── SECTEUR & INDUSTRIE (pour comparaison vs secteur) ─────────────
+      const ap = yf.assetProfile || {};
+      const sector   = ap.sector   || null;
+      const industry = ap.industry || null;
+
       const result = {
         symbol, _v: CACHE_V,
         trailingPE:      raw(sd.trailingPE),
@@ -174,6 +225,11 @@ module.exports = async (req, res) => {
         freeCashflow: fcf, operatingCashFlow: ocf,
         mktCap, sharesOutstanding, fcfGrowth: null, roic: null,
         nextEarningsTs,
+        // Nouvelles données analystes
+        analystEstimates,
+        targetMeanPrice, targetHighPrice, targetLowPrice,
+        analystCount, recommendationMean, recommendationKey,
+        sector, industry,
         timestamp: Date.now(),
       };
 
