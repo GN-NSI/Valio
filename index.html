@@ -1839,7 +1839,7 @@ async function renderCompanyDetail(ticker, name) {
     '</div>' +
     // Barre de sous-onglets en HAUT (plus besoin de descendre la page)
     '<div id="cd-tabbar" style="display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:20px;overflow-x:auto">'+
-      ['ensemble|📊 Vue d\u0027ensemble','ratios|📈 Ratios & prix','fin|📋 Historique financier','mat|🎯 Matrice','moat|🏰 MOAT & IA'].map(function(t){var p=t.split('|');
+      ['ensemble|📊 Vue d\'ensemble','ratios|📈 Ratios & prix','fin|📋 Historique financier','mat|🎯 Matrice','moat|🏰 MOAT & IA','analysts|🎯 Analystes','sector|🏭 Secteur'].map(function(t){var p=t.split('|');
         return '<button id="cdtb-'+p[0]+'" onclick="showCdTab(\''+p[0]+'\')" style="padding:9px 16px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;white-space:nowrap;color:'+(p[0]==='ensemble'?'var(--text)':'var(--muted)')+';border-bottom:2px solid '+(p[0]==='ensemble'?'var(--blue)':'transparent')+';margin-bottom:-1px">'+p[1]+'</button>';
       }).join('')+'</div>' +
     '<div id="cd-content"><div style="text-align:center;padding:60px"><div class="spinner"></div> Chargement des données…</div></div>';
@@ -1999,7 +1999,7 @@ async function renderCompanyDetail(ticker, name) {
 
   // Find user position for PRU line
   var pos = S.enrichedPos.find(function(p){return p.ticker===ticker;});
-  window._cdLastPos = pos;
+  window._cdLastPos = pos; window._cdLastTicker = ticker; window._cdLastPrice = price; window._cdLastF = f;
 
   // Fin section placeholder (chargement asynchrone)
   var finEl = document.getElementById('cd-fin-section');
@@ -2010,6 +2010,17 @@ async function renderCompanyDetail(ticker, name) {
     finEl.style.display='none'; // masqué : la Vue d'ensemble est l'onglet par défaut
     finEl.innerHTML='<div style="text-align:center;padding:16px"><div class="spinner"></div> <span style="color:var(--muted);font-size:12px">Chargement des analyses…</span></div>';
     document.getElementById('page').appendChild(finEl);
+  }
+  // Ajouter placeholders analystes et secteur si absents
+  if(!document.getElementById('cdtab-analysts')){
+    var _aEl=document.createElement('div'); _aEl.id='cdtab-analysts'; _aEl.style.display='none';
+    _aEl.innerHTML='<div style="text-align:center;padding:40px"><div class="spinner"></div></div>';
+    document.getElementById('page').appendChild(_aEl);
+  }
+  if(!document.getElementById('cdtab-sector')){
+    var _sEl=document.createElement('div'); _sEl.id='cdtab-sector'; _sEl.style.display='none';
+    _sEl.innerHTML='<div style="text-align:center;padding:40px"><div class="spinner"></div></div>';
+    document.getElementById('page').appendChild(_sEl);
   }
 
   // Dessiner le graphique
@@ -3169,9 +3180,254 @@ function cdRatioTimeChart(id,label,series,current,buyTs,sellTs){
       y:{position:'right',ticks:{font:{size:10},color:'#6b7280',callback:function(v){return v+'x';}},grid:{color:'rgba(255,255,255,.05)'}}}}});
 }
 
+
+// ══════════════════════════════════════════════════════════════════════════
+// ONGLET ANALYSTES — Cours cible, recommandations, estimations EPS/CA
+// ══════════════════════════════════════════════════════════════════════════
+window.loadCdAnalysts = async function(ticker, price, f){
+  var el = document.getElementById('cdtab-analysts'); if(!el) return;
+  if(el.dataset.loaded === ticker) return;
+  el.innerHTML = '<div style="text-align:center;padding:40px"><div class="spinner"></div></div>';
+
+  // S'assurer que les fundamentals sont chargés (ils contiennent les données analystes)
+  if(!f || !f.targetMeanPrice) {
+    try {
+      var r = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=fundamentals', {signal:AbortSignal.timeout(15000)});
+      var d = await r.json();
+      if(d && !d.error){ S.fundamentals[ticker] = d; f = d; window._cdLastF = d; }
+    } catch(e){}
+  }
+
+  var px = price && price.price;
+  var cur = price && price.currency === 'USD' ? '$' : '€';
+  var fmtP = function(v){ return v != null ? cur+fN(v) : '—'; };
+  var fmtPct = function(v){ if(v == null) return '—'; return (v>=0?'+':'')+v.toFixed(1)+'%'; };
+
+  // ── Bloc cours cible ──
+  var upside = (f && f.targetMeanPrice && px) ? (f.targetMeanPrice/px - 1)*100 : null;
+  var recKey = (f && f.recommendationKey) || null;
+  var recColors = {strongbuy:'var(--green)',buy:'#22c55e',hold:'var(--yellow)',sell:'var(--red)',strongsell:'var(--red)'};
+  var recLabels = {strongbuy:'Achat fort',buy:'Achat',hold:'Neutre',sell:'Vente',strongsell:'Vente forte'};
+  var recColor = recKey ? (recColors[recKey] || 'var(--muted)') : 'var(--muted)';
+  var recLabel = recKey ? (recLabels[recKey] || recKey) : '—';
+
+  var targetHtml = '<div class="card" style="margin-bottom:16px">' +
+    '<div style="font-size:15px;font-weight:700;margin-bottom:16px">🎯 Consensus analystes</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px">' +
+    '<div class="kpi-card"><div class="kpi-label">Cours cible moyen</div><div class="kpi-value">'+fmtP(f&&f.targetMeanPrice)+'</div>' +
+      '<div class="kpi-sub" style="color:'+(upside>=0?'var(--green)':'var(--red)')+'">'+(upside!=null?(upside>=0?'▲':'▼')+Math.abs(upside).toFixed(1)+'% vs cours actuel':'—')+'</div></div>' +
+    '<div class="kpi-card"><div class="kpi-label">Objectif haut</div><div class="kpi-value" style="color:var(--green)">'+fmtP(f&&f.targetHighPrice)+'</div></div>' +
+    '<div class="kpi-card"><div class="kpi-label">Objectif bas</div><div class="kpi-value" style="color:var(--red)">'+fmtP(f&&f.targetLowPrice)+'</div></div>' +
+    '<div class="kpi-card"><div class="kpi-label">Recommandation</div><div class="kpi-value" style="color:'+recColor+'">'+recLabel+'</div>' +
+      '<div class="kpi-sub">'+(f&&f.analystCount?f.analystCount+' analystes':'—')+'</div></div>' +
+    '</div>' +
+    // Barre visuelle cours cible
+    (f && f.targetLowPrice && f.targetHighPrice && px ? (function(){
+      var lo = f.targetLowPrice, hi = f.targetHighPrice, mn = f.targetMeanPrice || ((lo+hi)/2);
+      var range = hi - lo; if(range <= 0) return '';
+      var pxPct = Math.max(0, Math.min(100, (px-lo)/range*100));
+      var mnPct = Math.max(0, Math.min(100, (mn-lo)/range*100));
+      return '<div style="margin-top:8px">' +
+        '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:4px">' +
+          '<span>'+cur+fN(lo)+' (bas)</span><span>Cours actuel : '+cur+fN(px)+'</span><span>'+cur+fN(hi)+' (haut)</span>' +
+        '</div>' +
+        '<div style="position:relative;height:8px;background:var(--border2);border-radius:4px;margin-bottom:6px">' +
+          '<div style="position:absolute;left:0;top:0;height:100%;width:'+mnPct.toFixed(1)+'%;background:linear-gradient(90deg,var(--red),var(--yellow),var(--green));border-radius:4px"></div>' +
+          '<div style="position:absolute;top:-4px;left:calc('+pxPct.toFixed(1)+'% - 6px);width:12px;height:16px;background:white;border:2px solid var(--text);border-radius:3px"></div>' +
+        '</div>' +
+        '<div style="font-size:10px;color:var(--muted)">La barre montre la fourchette objectif bas–haut. Le curseur blanc = cours actuel.</div>' +
+      '</div>';
+    })() : '') +
+    '</div>';
+
+  // ── Estimations EPS & CA par trimestre ──
+  var ae = f && f.analystEstimates;
+  var estHtml = '<div class="card" style="margin-bottom:16px">' +
+    '<div style="font-size:15px;font-weight:700;margin-bottom:16px">📊 Estimations EPS & Chiffre d\'affaires</div>';
+
+  function estRow(label, e){
+    if(!e) return '<tr><td colspan="5" style="padding:8px;color:var(--muted);font-size:12px">'+label+' — données indisponibles</td></tr>';
+    var revFmt = e.revAvg != null ? (e.revAvg > 1e9 ? (e.revAvg/1e9).toFixed(2)+'Md' : (e.revAvg/1e6).toFixed(0)+'M') : '—';
+    var revLo  = e.revLow  != null ? (e.revLow  > 1e9 ? (e.revLow /1e9).toFixed(2)+'Md' : (e.revLow /1e6).toFixed(0)+'M') : '—';
+    var revHi  = e.revHigh != null ? (e.revHigh > 1e9 ? (e.revHigh/1e9).toFixed(2)+'Md' : (e.revHigh/1e6).toFixed(0)+'M') : '—';
+    var epsAvg = e.epsAvg != null ? cur+fN(e.epsAvg) : '—';
+    var epsLo  = e.epsLow != null ? cur+fN(e.epsLow) : '—';
+    var epsHi  = e.epsHigh != null ? cur+fN(e.epsHigh) : '—';
+    return '<tr style="border-bottom:1px solid var(--border2)">' +
+      '<td style="padding:10px 8px;font-weight:600;font-size:13px">'+label+'</td>' +
+      '<td style="padding:10px 8px;text-align:right;font-size:12px" class="mono">'+epsAvg+'</td>' +
+      '<td style="padding:10px 8px;text-align:right;font-size:11px;color:var(--muted)" class="mono">'+epsLo+' – '+epsHi+'</td>' +
+      '<td style="padding:10px 8px;text-align:right;font-size:12px" class="mono">'+revFmt+'</td>' +
+      '<td style="padding:10px 8px;text-align:right;font-size:11px;color:var(--muted);font-size:11px" class="mono">'+e.epsCount!=null?e.epsCount+' analysts':'—'+'</td>' +
+    '</tr>';
+  }
+
+  estHtml += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">' +
+    '<thead><tr style="border-bottom:1px solid var(--border)">' +
+      '<th style="padding:8px;text-align:left;font-size:11px;color:var(--muted)">PÉRIODE</th>' +
+      '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">EPS moy.</th>' +
+      '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">Fourchette</th>' +
+      '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">CA moy.</th>' +
+      '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">Analystes</th>' +
+    '</tr></thead><tbody>' +
+    estRow('Trim. en cours', ae&&ae.currentQtr) +
+    estRow('Trim. suivant',  ae&&ae.nextQtr) +
+    estRow('Année en cours (fwd)', ae&&ae.currentYear) +
+    '</tbody></table></div>' +
+    '<div style="font-size:10px;color:var(--muted);margin-top:8px">Source : Yahoo Finance — consensus analystes. Ces estimations sont susceptibles de révision.</div>' +
+    '</div>';
+
+  el.innerHTML = targetHtml + estHtml;
+  el.dataset.loaded = ticker;
+};
+
+// ══════════════════════════════════════════════════════════════════════════
+// ONGLET SECTEUR — Comparaison ratios vs industrie + Waterfall P&L
+// ══════════════════════════════════════════════════════════════════════════
+window.loadCdSector = async function(ticker, f){
+  var el = document.getElementById('cdtab-sector'); if(!el) return;
+  if(el.dataset.loaded === ticker) return;
+  el.innerHTML = '<div style="text-align:center;padding:40px"><div class="spinner"></div></div>';
+
+  // S'assurer que les fundamentals + financials sont chargés
+  if(!f) { f = S.fundamentals[ticker]; }
+  if(!f) {
+    try {
+      var r = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=fundamentals', {signal:AbortSignal.timeout(15000)});
+      var d = await r.json(); if(d && !d.error){ S.fundamentals[ticker] = d; f = d; }
+    } catch(e){}
+  }
+  var fin = null;
+  try {
+    var rf = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=financials', {signal:AbortSignal.timeout(15000)});
+    var df = await rf.json(); if(df && !df.error) fin = df;
+  } catch(e){}
+
+  // ── Waterfall P&L (dernière année) ──
+  var watHtml = '';
+  if(fin && fin.years && fin.years.length) {
+    var lastIdx = fin.years.length - 1;
+    var rev  = fin.revenue        && fin.revenue[lastIdx];
+    var gp   = fin.grossProfit    && fin.grossProfit[lastIdx];
+    var op   = fin.operatingIncome && fin.operatingIncome[lastIdx];
+    var ni   = fin.netIncome      && fin.netIncome[lastIdx];
+    var yr   = fin.years[lastIdx];
+
+    function wFmt(v){ if(v==null) return '—'; var b=Math.abs(v)/1e9; return (v<0?'-':'')+b.toFixed(1)+'Md€'; }
+    function wBar(val, ref, color){
+      if(!val || !ref) return '';
+      var w = Math.min(100, Math.abs(val)/Math.abs(ref)*100);
+      return '<div style="height:6px;background:var(--border2);border-radius:3px;margin-top:4px">' +
+        '<div style="height:100%;width:'+w.toFixed(1)+'%;background:'+color+';border-radius:3px"></div></div>';
+    }
+
+    if(rev && gp && ni) {
+      var cogs = gp != null && rev != null ? rev - gp : null;
+      var sga  = gp != null && op != null  ? gp  - op : null;
+      watHtml = '<div class="card" style="margin-bottom:16px">' +
+        '<div style="font-size:15px;font-weight:700;margin-bottom:4px">💧 Décomposition du compte de résultat</div>' +
+        '<div style="font-size:12px;color:var(--muted);margin-bottom:16px">Dernière année fiscale — '+yr+'</div>' +
+        '<div style="display:flex;flex-direction:column;gap:10px">' +
+          // Revenus
+          '<div><div style="display:flex;justify-content:space-between;align-items:center">' +
+            '<span style="font-size:13px;font-weight:600">📦 Revenus</span>' +
+            '<span class="mono" style="font-size:15px;font-weight:700;color:var(--blue)">'+wFmt(rev)+'</span></div>' +
+            wBar(rev, rev, 'var(--blue)') + '</div>' +
+          // Coût des ventes
+          (cogs != null ? '<div style="padding-left:20px"><div style="display:flex;justify-content:space-between;align-items:center">' +
+            '<span style="font-size:12px;color:var(--muted)">↳ Coût des ventes</span>' +
+            '<span class="mono" style="font-size:12px;color:var(--red)">−'+wFmt(cogs)+'</span></div>' +
+            wBar(cogs, rev, 'var(--red)') + '</div>' : '') +
+          // Marge brute
+          (gp != null ? '<div><div style="display:flex;justify-content:space-between;align-items:center">' +
+            '<span style="font-size:13px;font-weight:600">= Marge brute <span style="font-size:11px;font-weight:400;color:var(--muted)">('+((gp/rev)*100).toFixed(1)+'%)</span></span>' +
+            '<span class="mono" style="font-size:14px;font-weight:700;color:var(--green)">'+wFmt(gp)+'</span></div>' +
+            wBar(gp, rev, 'var(--green)') + '</div>' : '') +
+          // SGA/Opex
+          (sga != null ? '<div style="padding-left:20px"><div style="display:flex;justify-content:space-between;align-items:center">' +
+            '<span style="font-size:12px;color:var(--muted)">↳ Charges opérationnelles</span>' +
+            '<span class="mono" style="font-size:12px;color:var(--red)">−'+wFmt(sga)+'</span></div>' +
+            wBar(sga, rev, '#f97316') + '</div>' : '') +
+          // Résultat opérationnel
+          (op != null ? '<div><div style="display:flex;justify-content:space-between;align-items:center">' +
+            '<span style="font-size:13px;font-weight:600">= Résultat opérationnel <span style="font-size:11px;font-weight:400;color:var(--muted)">('+((op/rev)*100).toFixed(1)+'%)</span></span>' +
+            '<span class="mono" style="font-size:14px;font-weight:700;color:'+(op>=0?'var(--green)':'var(--red)')+'">'+wFmt(op)+'</span></div>' +
+            wBar(op, rev, op>=0?'var(--green)':'var(--red)') + '</div>' : '') +
+          // Résultat net
+          '<div><div style="display:flex;justify-content:space-between;align-items:center">' +
+            '<span style="font-size:13px;font-weight:600">= Résultat net <span style="font-size:11px;font-weight:400;color:var(--muted)">('+((ni/rev)*100).toFixed(1)+'%)</span></span>' +
+            '<span class="mono" style="font-size:15px;font-weight:800;color:'+(ni>=0?'var(--green)':'var(--red)')+'">'+wFmt(ni)+'</span></div>' +
+            wBar(ni, rev, ni>=0?'var(--green)':'var(--red)') + '</div>' +
+        '</div></div>';
+    } else {
+      watHtml = '<div class="card" style="margin-bottom:16px"><div style="color:var(--muted);font-size:12px">Données financières indisponibles pour ce titre.</div></div>';
+    }
+  }
+
+  // ── Comparaison vs secteur ──
+  // Yahoo expose des moyennes sectorielles partielles dans summaryDetail
+  // On affiche les métriques disponibles avec le secteur/industrie
+  var sectorLabel = (f && f.sector) ? f.sector : null;
+  var industryLabel = (f && f.industry) ? f.industry : null;
+
+  // Benchmarks sectoriels approximatifs (moyennes US par grand secteur — à enrichir)
+  var SECTOR_BENCHMARKS = {
+    'Technology':           {pe:28, fpe:24, gm:55, om:22, nm:18, roe:25, growth:12},
+    'Healthcare':           {pe:22, fpe:18, gm:60, om:18, nm:12, roe:18, growth:8},
+    'Financial Services':   {pe:14, fpe:12, gm:null,om:null,nm:20,roe:12,growth:6},
+    'Consumer Cyclical':    {pe:20, fpe:17, gm:35, om:10, nm:6,  roe:18, growth:8},
+    'Consumer Defensive':   {pe:22, fpe:20, gm:40, om:12, nm:8,  roe:15, growth:5},
+    'Communication Services':{pe:20,fpe:17, gm:50, om:18, nm:14, roe:20, growth:10},
+    'Industrials':          {pe:22, fpe:19, gm:35, om:12, nm:8,  roe:15, growth:7},
+    'Energy':               {pe:12, fpe:11, gm:40, om:15, nm:10, roe:14, growth:5},
+    'Basic Materials':      {pe:14, fpe:12, gm:30, om:12, nm:8,  roe:12, growth:4},
+    'Real Estate':          {pe:30, fpe:25, gm:70, om:30, nm:20, roe:8,  growth:4},
+    'Utilities':            {pe:18, fpe:16, gm:40, om:20, nm:12, roe:10, growth:3},
+  };
+  var bm = sectorLabel ? (SECTOR_BENCHMARKS[sectorLabel] || null) : null;
+
+  function vsRow(label, val, bmVal, fmt, colorFn, higherBetter){
+    var fmtFn = fmt || function(v){return fN(v)+'x';};
+    var vStr = val != null ? fmtFn(val) : '—';
+    var bmStr = bmVal != null ? fmtFn(bmVal) : 'N/A';
+    var beat = (val != null && bmVal != null) ? (higherBetter ? val > bmVal : val < bmVal) : null;
+    var col = beat===true ? 'var(--green)' : beat===false ? 'var(--red)' : 'var(--text)';
+    var badge = beat===true ? '✅' : beat===false ? '⚠️' : '';
+    return '<tr style="border-bottom:1px solid var(--border2)">' +
+      '<td style="padding:10px 8px;font-size:12px;color:var(--muted)">'+label+'</td>' +
+      '<td style="padding:10px 8px;text-align:right;font-size:13px;font-weight:700;color:'+col+'" class="mono">'+vStr+' '+badge+'</td>' +
+      '<td style="padding:10px 8px;text-align:right;font-size:12px;color:var(--muted)" class="mono">'+bmStr+'</td>' +
+    '</tr>';
+  }
+
+  var sectorHtml = '<div class="card">' +
+    '<div style="font-size:15px;font-weight:700;margin-bottom:4px">🏭 Comparaison vs secteur</div>' +
+    (sectorLabel ? '<div style="font-size:12px;color:var(--muted);margin-bottom:16px">'+sectorLabel+(industryLabel?' — '+industryLabel:'')+'</div>' : '<div style="font-size:12px;color:var(--muted);margin-bottom:16px">Secteur non disponible</div>') +
+    '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">' +
+    '<thead><tr style="border-bottom:1px solid var(--border)">' +
+      '<th style="padding:8px;text-align:left;font-size:11px;color:var(--muted)">MÉTRIQUE</th>' +
+      '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">'+ticker+'</th>' +
+      '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">Secteur moy.</th>' +
+    '</tr></thead><tbody>' +
+    vsRow('P/E Trailing',       f&&f.trailingPE,        bm&&bm.pe,     function(v){return v.toFixed(1)+'x';}, null, false) +
+    vsRow('P/E Forward',        f&&f.forwardPE,         bm&&bm.fpe,    function(v){return v.toFixed(1)+'x';}, null, false) +
+    vsRow('Marge brute',        f&&f.grossMarginPct,    bm&&bm.gm,     function(v){return v.toFixed(1)+'%';}, null, true) +
+    vsRow('Marge opérationnelle',f&&f.operatingMarginPct,bm&&bm.om,   function(v){return v.toFixed(1)+'%';}, null, true) +
+    vsRow('Marge nette',        f&&f.profitMarginPct,   bm&&bm.nm,     function(v){return v.toFixed(1)+'%';}, null, true) +
+    vsRow('ROE',                f&&f.returnOnEquity,    bm&&bm.roe,    function(v){return v.toFixed(1)+'%';}, null, true) +
+    vsRow('Croissance CA 1A',   f&&f.revenueGrowthYoY,  bm&&bm.growth, function(v){return (v>=0?'+':'')+v.toFixed(1)+'%';}, null, true) +
+    '</tbody></table></div>' +
+    (bm ? '<div style="font-size:10px;color:var(--muted);margin-top:8px">Moyennes sectorielles indicatives (marché US) — à titre de repère uniquement. ✅ = au-dessus de la moyenne, ⚠️ = en dessous.</div>'
+        : '<div style="font-size:10px;color:var(--muted);margin-top:8px">Benchmarks sectoriels non disponibles pour ce secteur.</div>') +
+    '</div>';
+
+  el.innerHTML = watHtml + sectorHtml;
+  el.dataset.loaded = ticker;
+};
+
 // Onglets de la fiche : Vue d'ensemble (cd-content) vs sous-sections (cd-fin-section)
 window.showCdTab=function(t,noScroll){
-  var keys=['ensemble','ratios','fin','mat','moat'];
+  var keys=['ensemble','ratios','fin','mat','moat','analysts','sector'];
   keys.forEach(function(k){
     var b=document.getElementById('cdtb-'+k);
     if(b){ b.style.color=(k===t?'var(--text)':'var(--muted)'); b.style.borderBottom='2px solid '+(k===t?'var(--blue)':'transparent'); }
@@ -3185,10 +3441,13 @@ window.showCdTab=function(t,noScroll){
     if(overview) overview.style.display='none';
     if(fin) fin.style.display='';
     // n'afficher que la sous-section choisie
-    ['ratios','fin','mat','moat'].forEach(function(k){
+    ['ratios','fin','mat','moat','analysts','sector'].forEach(function(k){
       var c=document.getElementById('cdtab-'+k);
       if(c) c.style.display=(k===t?'':'none');
     });
+    // Chargement lazy des onglets analystes et secteur
+    if(t==='analysts' && window._cdLastTicker) loadCdAnalysts(window._cdLastTicker, window._cdLastPrice, window._cdLastF);
+    if(t==='sector'   && window._cdLastTicker) loadCdSector(window._cdLastTicker, window._cdLastF);
   }
   window.scrollTo({top:0,behavior:'smooth'});
   // Forcer Chart.js à recalculer la taille (les graphes dessinés en display:none
