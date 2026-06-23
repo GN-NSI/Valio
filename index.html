@@ -1857,6 +1857,141 @@ function openCompanyDetail(ticker, name) {
   renderCompanyDetail(ticker, name || ticker);
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// SCORE QUALITÉ/VALORISATION /100 — Approche Quality Growth Long Terme
+// Basé sur : Valuation (30pts) + Qualité/Profitabilité (35pts) +
+//            Croissance (25pts) + Santé financière (10pts)
+// Sources : Greenblatt (Magic Formula), Damodaran, Morgan Stanley Quality screen
+// ══════════════════════════════════════════════════════════════════════════
+function calcQualityScore(f, price) {
+  if(!f || !price) return null;
+  var score = 0, details = [];
+  var px = price.price;
+  var cur = price.currency === 'EUR' ? '€' : '$';
+
+  // ── BLOC 1 : VALORISATION (30 pts) ─────────────────────────────────────
+  // Forward PE (12 pts) : < 15 excellent, 15-25 bien, 25-35 acceptable, > 35 cher
+  var fpe = f.forwardPE;
+  if(fpe != null && fpe > 0) {
+    var fpeScore = fpe < 15 ? 12 : fpe < 20 ? 10 : fpe < 25 ? 8 : fpe < 30 ? 5 : fpe < 40 ? 3 : 1;
+    score += fpeScore;
+    details.push({label:'P/E Fwd', val: fpe.toFixed(1)+'x', pts: fpeScore, max: 12});
+  }
+  // PEG (10 pts) : < 1 excellent, 1-1.5 bien, 1.5-2 acceptable, > 2 cher
+  var peg = f.pegRatio;
+  if(peg != null && peg > 0) {
+    var pegScore = peg < 0.8 ? 10 : peg < 1.2 ? 8 : peg < 1.5 ? 6 : peg < 2 ? 4 : 2;
+    score += pegScore;
+    details.push({label:'PEG', val: peg.toFixed(2)+'x', pts: pegScore, max: 10});
+  }
+  // P/FCF (8 pts) : < 15 excellent, 15-25 bien, 25-35 correct, > 35 cher
+  var pfcf = f.pfcf;
+  if(pfcf != null && pfcf > 0) {
+    var pfcfScore = pfcf < 15 ? 8 : pfcf < 25 ? 6 : pfcf < 35 ? 4 : 2;
+    score += pfcfScore;
+    details.push({label:'P/FCF', val: pfcf.toFixed(1)+'x', pts: pfcfScore, max: 8});
+  }
+
+  // ── BLOC 2 : QUALITÉ & PROFITABILITÉ (35 pts) ───────────────────────────
+  // Marge nette (10 pts) : > 30% excellent, 20-30% bien, 10-20% correct, < 10% faible
+  var nm = f.profitMarginPct;
+  if(nm != null) {
+    var nmScore = nm > 30 ? 10 : nm > 20 ? 8 : nm > 10 ? 5 : nm > 0 ? 2 : 0;
+    score += nmScore;
+    details.push({label:'Marge nette', val: nm.toFixed(1)+'%', pts: nmScore, max: 10});
+  }
+  // Marge brute (8 pts) : > 60% excellent (software/tech), 40-60% bien, 20-40% correct
+  var gm = f.grossMarginPct;
+  if(gm != null) {
+    var gmScore = gm > 60 ? 8 : gm > 40 ? 6 : gm > 25 ? 4 : 2;
+    score += gmScore;
+    details.push({label:'Marge brute', val: gm.toFixed(1)+'%', pts: gmScore, max: 8});
+  }
+  // ROE (9 pts) : > 30% excellent (Buffett), 20-30% bien, 10-20% correct
+  var roe = f.returnOnEquity;
+  if(roe != null) {
+    var roeScore = roe > 30 ? 9 : roe > 20 ? 7 : roe > 10 ? 4 : 1;
+    score += roeScore;
+    details.push({label:'ROE', val: roe.toFixed(1)+'%', pts: roeScore, max: 9});
+  }
+  // ROIC (8 pts) : > 25% excellent, 15-25% bien, 10-15% correct
+  var roic = f.roic;
+  if(roic != null) {
+    var roicScore = roic > 25 ? 8 : roic > 15 ? 6 : roic > 10 ? 3 : 1;
+    score += roicScore;
+    details.push({label:'ROIC', val: roic.toFixed(1)+'%', pts: roicScore, max: 8});
+  }
+
+  // ── BLOC 3 : CROISSANCE (25 pts) ────────────────────────────────────────
+  // Croissance CA YoY (10 pts)
+  var caGrw = f.revenueGrowthYoY;
+  if(caGrw != null) {
+    var caScore = caGrw > 25 ? 10 : caGrw > 15 ? 8 : caGrw > 8 ? 6 : caGrw > 3 ? 3 : caGrw >= 0 ? 1 : 0;
+    score += caScore;
+    details.push({label:'Crois. CA 1A', val: (caGrw>=0?'+':'')+caGrw.toFixed(1)+'%', pts: caScore, max: 10});
+  }
+  // Croissance EPS forward (15 pts) — le plus important pour le long terme
+  var epsGrw = f.epsGrowthFwd1Y;
+  if(epsGrw != null) {
+    var epsScore = epsGrw > 30 ? 15 : epsGrw > 20 ? 12 : epsGrw > 12 ? 9 : epsGrw > 6 ? 5 : epsGrw >= 0 ? 2 : 0;
+    score += epsScore;
+    details.push({label:'Crois. EPS fwd', val: (epsGrw>=0?'+':'')+epsGrw.toFixed(1)+'%', pts: epsScore, max: 15});
+  }
+
+  // ── BLOC 4 : SANTÉ FINANCIÈRE (10 pts) ──────────────────────────────────
+  // Dette/EBITDA (5 pts) : < 1 excellent, 1-2 bien, 2-3.5 acceptable, > 3.5 risqué
+  var debt = f.netDebtToEBITDA;
+  if(debt != null) {
+    var debtScore = debt < 0 ? 5 : debt < 1 ? 5 : debt < 2 ? 4 : debt < 3.5 ? 2 : 0;
+    score += debtScore;
+    details.push({label:'Dette/EBITDA', val: debt.toFixed(1)+'x', pts: debtScore, max: 5});
+  }
+  // Current ratio (5 pts) : > 2 excellent, 1.5-2 bien, 1-1.5 correct, < 1 risqué
+  var cr = f.currentRatio;
+  if(cr != null) {
+    var crScore = cr > 2 ? 5 : cr > 1.5 ? 4 : cr > 1 ? 2 : 0;
+    score += crScore;
+    details.push({label:'Current Ratio', val: cr.toFixed(1)+'x', pts: crScore, max: 5});
+  }
+
+  // Normaliser sur 100 si certains champs manquent
+  var maxPossible = details.reduce(function(a,d){return a+d.max;},0);
+  var normalizedScore = maxPossible > 0 ? Math.round(score / maxPossible * 100) : null;
+
+  return {score: normalizedScore, raw: score, maxPossible: maxPossible, details: details};
+}
+
+function renderQualityBadge(f, price) {
+  var qs = calcQualityScore(f, price);
+  if(!qs || qs.score == null) return '';
+  var s = qs.score;
+  var bg = s >= 75 ? '#16a34a' : s >= 55 ? '#ca8a04' : s >= 35 ? '#f97316' : '#dc2626';
+  var label = s >= 75 ? 'Excellent' : s >= 55 ? 'Bon' : s >= 35 ? 'Correct' : 'Faible';
+  var pct = s + '%';
+  // Donut SVG simple
+  var r = 16, circ = 2*Math.PI*r;
+  var dash = (s/100)*circ, gap = circ - dash;
+  var svg = '<svg width="44" height="44" style="transform:rotate(-90deg)">' +
+    '<circle cx="22" cy="22" r="'+r+'" fill="none" stroke="var(--border2)" stroke-width="4"/>' +
+    '<circle cx="22" cy="22" r="'+r+'" fill="none" stroke="'+bg+'" stroke-width="4" ' +
+      'stroke-dasharray="'+dash.toFixed(1)+' '+gap.toFixed(1)+'" stroke-linecap="round"/>' +
+    '</svg>';
+  return '<div title="Score Qualité/Valorisation — cliquez sur Vue densemble" '+
+    'style="display:flex;align-items:center;gap:8px;background:'+bg+'18;border:1px solid '+bg+'44;'+
+    'border-radius:10px;padding:6px 12px;cursor:default;position:relative">' +
+    '<div style="position:relative;width:44px;height:44px">' +
+      svg +
+      '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:'+bg+';transform:rotate(90deg)">' +
+        s +
+      '</div>' +
+    '</div>' +
+    '<div>' +
+      '<div style="font-size:14px;font-weight:800;color:'+bg+'">'+label+'</div>' +
+      '<div style="font-size:10px;color:var(--muted)">Score qualité</div>' +
+    '</div>' +
+  '</div>';
+}
+
 async function renderCompanyDetail(ticker, name) {
   var pg = document.getElementById('page');
   pg.innerHTML = '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">' +
@@ -1938,6 +2073,7 @@ async function renderCompanyDetail(ticker, name) {
     } catch(e) {}
   }
 
+  var _qualityBadge = renderQualityBadge(f, price);
   cd.innerHTML =
     // Layout 2 colonnes : gauche = ratios, droite = graphique
     '<div style="display:grid;grid-template-columns:minmax(320px,2fr) 3fr;gap:20px;align-items:start">' +
@@ -1948,6 +2084,7 @@ async function renderCompanyDetail(ticker, name) {
         '<div><div class="cd-price" style="font-size:32px;font-weight:800">'+priceStr+'</div>' +
         '<div style="font-size:16px;color:'+chgColor+';margin-top:2px">'+chgStr+' aujourd&#x27;hui</div></div>' +
         (sub ? '<div style="color:var(--muted);font-size:13px">'+sub+'</div>' : '') +
+        _qualityBadge +
         '<div style="display:flex;gap:16px;margin-left:auto">' +
           '<div style="text-align:center"><div style="font-size:11px;color:var(--muted);text-transform:uppercase">1 mois</div><div style="font-weight:700;color:var(--blue)">'+perf1m+'</div></div>' +
           '<div style="text-align:center"><div style="font-size:11px;color:var(--muted);text-transform:uppercase">YTD</div><div style="font-weight:700;color:var(--blue)">'+perfYTD+'</div></div>' +
@@ -3235,21 +3372,38 @@ window.loadCdAnalysts = async function(ticker, price, f){
   // ── Bloc cours cible ──
   var upside = (f && f.targetMeanPrice && px) ? (f.targetMeanPrice/px - 1)*100 : null;
   var recKey = (f && f.recommendationKey) || null;
-  var recColors = {strongbuy:'var(--green)',buy:'#22c55e',hold:'var(--yellow)',sell:'var(--red)',strongsell:'var(--red)'};
-  var recLabels = {strongbuy:'Achat fort',buy:'Achat',hold:'Neutre',sell:'Vente',strongsell:'Vente forte'};
-  var recColor = recKey ? (recColors[recKey] || 'var(--muted)') : 'var(--muted)';
-  var recLabel = recKey ? (recLabels[recKey] || recKey) : '—';
+  var recBg = {strongbuy:'#16a34a',buy:'#22c55e',hold:'#ca8a04',sell:'#dc2626',strongsell:'#991b1b'};
+  var recTxt = {strongbuy:'💚 Achat fort',buy:'✅ Achat',hold:'⚡ Neutre',sell:'⚠️ Vente',strongsell:'🔴 Vente forte'};
+  var recScore = {strongbuy:5,buy:4,hold:3,sell:2,strongsell:1};
+  var recColor = recKey ? (recBg[recKey] || '#6b7280') : '#6b7280';
+  var recLabel = recKey ? (recTxt[recKey] || recKey) : '—';
+  var recNum = recKey ? (recScore[recKey]||3) : 3;
 
   var targetHtml = '<div class="card" style="margin-bottom:16px">' +
     '<div style="font-size:15px;font-weight:700;margin-bottom:16px">🎯 Consensus analystes</div>' +
-    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px">' +
-    '<div class="kpi-card"><div class="kpi-label">Cours cible moyen</div><div class="kpi-value">'+fmtP(f&&f.targetMeanPrice)+'</div>' +
-      '<div class="kpi-sub" style="color:'+(upside>=0?'var(--green)':'var(--red)')+'">'+(upside!=null?(upside>=0?'▲':'▼')+Math.abs(upside).toFixed(1)+'% vs cours actuel':'—')+'</div></div>' +
-    '<div class="kpi-card"><div class="kpi-label">Objectif haut</div><div class="kpi-value" style="color:var(--green)">'+fmtP(f&&f.targetHighPrice)+'</div></div>' +
-    '<div class="kpi-card"><div class="kpi-label">Objectif bas</div><div class="kpi-value" style="color:var(--red)">'+fmtP(f&&f.targetLowPrice)+'</div></div>' +
-    '<div class="kpi-card"><div class="kpi-label">Recommandation</div><div class="kpi-value" style="color:'+recColor+'">'+recLabel+'</div>' +
-      '<div class="kpi-sub">'+(f&&f.analystCount?f.analystCount+' analystes':'—')+'</div></div>' +
-    '</div>' +
+    // Ligne principale : recommandation + cours
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px">' +
+      '<div style="background:'+recColor+'22;border:1px solid '+recColor+'44;border-radius:10px;padding:14px;text-align:center">' +
+        '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">RECOMMANDATION</div>' +
+        '<div style="font-size:17px;font-weight:800;color:'+recColor+'">'+recLabel+'</div>' +
+        '<div style="font-size:11px;color:var(--muted);margin-top:4px">'+(f&&f.analystCount?f.analystCount+' analystes':'—')+'</div>' +
+        // Mini-score bar (1=vente forte, 5=achat fort)
+        '<div style="margin-top:8px;display:flex;align-items:center;gap:4px;justify-content:center">' +
+          [1,2,3,4,5].map(function(n){ return '<div style="width:14px;height:14px;border-radius:3px;background:'+(n<=recNum?recColor:'var(--border2)')+';"></div>'; }).join('') +
+        '</div>' +
+      '</div>' +
+      '<div style="background:var(--bg2);border-radius:10px;padding:14px;text-align:center">' +
+        '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">COURS CIBLE MOYEN</div>' +
+        '<div style="font-size:20px;font-weight:800;color:var(--text)">'+fmtP(f&&f.targetMeanPrice)+'</div>' +
+        '<div style="font-size:12px;font-weight:600;margin-top:4px;color:'+(upside>=0?'var(--green)':'var(--red)')+'">'+(upside!=null?(upside>=0?'▲ +':'▼ ')+Math.abs(upside).toFixed(1)+'% potentiel':'—')+'</div>' +
+      '</div>' +
+      '<div style="background:var(--bg2);border-radius:10px;padding:14px">' +
+        '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">FOURCHETTE OBJECTIFS</div>' +
+        '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:6px">' +
+          '<span style="color:var(--red);font-weight:600">'+fmtP(f&&f.targetLowPrice)+'</span>' +
+          '<span style="color:var(--text);font-size:10px">cours: '+fmtP(px)+'</span>' +
+          '<span style="color:var(--green);font-weight:600">'+fmtP(f&&f.targetHighPrice)+'</span>' +
+        '</div>' +
     // Barre visuelle cours cible
     (f && f.targetLowPrice && f.targetHighPrice && px ? (function(){
       var lo = f.targetLowPrice, hi = f.targetHighPrice, mn = f.targetMeanPrice || ((lo+hi)/2);
@@ -3342,10 +3496,17 @@ window.loadCdSector = async function(ticker, f){
     var ni   = fin.netIncome      && fin.netIncome[lastIdx];
     var yr   = fin.years[lastIdx];
 
-    function wFmt(v){ if(v==null) return '—'; var b=Math.abs(v)/1e9; return (v<0?'-':'')+b.toFixed(1)+'Md€'; }
+    function wFmt(v){
+      if(v==null) return '—';
+      // Les données de fin.revenue peuvent être en unités ($) ou en milliards selon la source
+      // On détecte : si abs(v) > 1e8 → en unités → diviser par 1e9
+      //              si abs(v) < 1e4 → déjà en milliards
+      var b = Math.abs(v) > 1e8 ? Math.abs(v)/1e9 : Math.abs(v);
+      return (v<0?'-':'')+b.toFixed(2)+'Md$';
+    }
     function wBar(val, ref, color){
-      if(!val || !ref) return '';
-      var w = Math.min(100, Math.abs(val)/Math.abs(ref)*100);
+      if(val==null || !ref) return '';
+      var w = Math.min(100, Math.max(1, Math.abs(val)/Math.abs(ref)*100));
       return '<div style="height:6px;background:var(--border2);border-radius:3px;margin-top:4px">' +
         '<div style="height:100%;width:'+w.toFixed(1)+'%;background:'+color+';border-radius:3px"></div></div>';
     }
@@ -3629,9 +3790,15 @@ function renderYieldMatrix(ticker, price, f, fin){
   var _histCAGR=(_iF>=0&&_iL>_iF)?(Math.pow(_eps[_iL]/_eps[_iF],1/(_iL-_iF))-1)*100:null;
   var _hG=(_histCAGR!=null&&isFinite(_histCAGR))?Math.min(45,_histCAGR):null;
   var _aG=(f&&f.epsGrowthFwd1Y!=null&&f.epsGrowthFwd1Y>0)?f.epsGrowthFwd1Y:null;
-  var _gcand=(_hG!=null&&_aG!=null)?(0.5*_hG+0.5*_aG):(_hG!=null?_hG:(_aG!=null?_aG:12));
+  // Croissance centrale : consensus analystes en priorité (60%) + historique (40%)
+  // pour refléter les estimations actuelles de marché plutôt que le passé seul
+  var _gcand=(_hG!=null&&_aG!=null)?(0.4*_hG+0.6*_aG):(_aG!=null?_aG:(_hG!=null?_hG:12));
   var gC=st.gC!=null?st.gC:Math.min(35,Math.max(4,Math.round(_gcand)));
-  var mCur=st.mC!=null?st.mC:Math.min(60,Math.max(8,Math.round((f&&(f.forwardPE||f.trailingPE))||20)));
+  // Multiple central : Forward PE actuel, avec un plancher de 20x
+  // (une entreprise quality/growth ne se valorise pas moins que 20x même en conservatif)
+  var _rawFPE = f && (f.forwardPE || f.trailingPE);
+  var _fpeForMatrix = _rawFPE ? Math.max(20, Math.round(_rawFPE)) : 22;
+  var mCur=st.mC!=null?st.mC:Math.min(60, _fpeForMatrix);
   if(st.g==null||st.m==null){ st={g:gC,m:mCur,eps:eps0,gC:gC,mC:mCur}; _ymSel[ticker]=st; }
   st.eps=eps0; st.gC=gC; st.mC=mCur;
   var sel=st;
@@ -4968,6 +5135,9 @@ async function buildPortfolioLine(transactions, range){
     var ri=0;
     if(vAfterBuy.val>1 && vBeforeNext.hasPrice){
       ri=vBeforeNext.val/vAfterBuy.val-1;
+      // Borne de sécurité : un segment ne peut pas contribuer plus de ±200%
+      // Évite l'explosion quand vAfterBuy est minuscule (position < 1€)
+      ri=Math.max(-0.99, Math.min(2.0, ri));
     }
     // Facteur cumulé pour ce segment
     twrFactors.push(twrFactors[twrFactors.length-1]*(1+ri));
