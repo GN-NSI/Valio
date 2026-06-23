@@ -3403,9 +3403,10 @@ function cdRatioTimeChart(id,label,series,current,buyTs,sellTs){
 // ══════════════════════════════════════════════════════════════════════════
 // ONGLET ANALYSTES — Cours cible, recommandations, estimations EPS/CA
 // ══════════════════════════════════════════════════════════════════════════
-window.loadCdAnalysts = async function(ticker, price, f){
+window.loadCdAnalysts = async function(ticker, price, f, forceReload){
   var el = document.getElementById('cdtab-analysts'); if(!el) return;
-  if(el.dataset.loaded === ticker) return;
+  if(!forceReload && el.dataset.loaded === ticker) return;
+  el.dataset.loaded = ''; // reset pour forcer rechargement si nouvelles données
   el.innerHTML = '<div style="text-align:center;padding:40px"><div class="spinner"></div></div>';
 
   if(!f || f._v == null || f._v < 7 || f.targetMeanPrice === undefined) {
@@ -3439,17 +3440,71 @@ window.loadCdAnalysts = async function(ticker, price, f){
   if(lo != null && hi != null && px != null && hi > lo) {
     var range = hi - lo;
     var pxPct = Math.max(2, Math.min(98, (px-lo)/range*100));
+    var mnPct = mn != null ? Math.max(2, Math.min(98, (mn-lo)/range*100)) : null;
+
+    // Calcul des repères : graduation automatique selon la plage
+    var rawStep = range / 5;
+    // Arrondir au multiple de 10 le plus proche
+    var magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    var niceMults = [1,2,5,10];
+    var step = magnitude;
+    for(var _s=0;_s<niceMults.length;_s++){
+      if(magnitude*niceMults[_s] >= rawStep){ step=magnitude*niceMults[_s]; break; }
+    }
+    // Générer les repères
+    var tickStart = Math.ceil(lo/step)*step;
+    var ticks = [];
+    for(var tv=tickStart; tv<=hi; tv+=step){
+      var tp = (tv-lo)/range*100;
+      if(tp > 3 && tp < 97) ticks.push({v:tv, pct:tp});
+    }
+    // Toujours inclure la cible moyenne comme repère si présente
+    if(mn != null) {
+      var mpct = (mn-lo)/range*100;
+      if(mpct > 3 && mpct < 97) ticks.push({v:mn, pct:mpct, isMn:true});
+    }
+    ticks.sort(function(a,b){return a.pct-b.pct;});
+
+    var ticksHtml = ticks.map(function(t){
+      var isMn = t.isMn;
+      return '<div style="position:absolute;left:calc('+t.pct.toFixed(1)+'% - '+(isMn?'1px':'0.5px')+');top:0;bottom:0;'+
+        'width:'+(isMn?'2px':'1px')+';background:'+(isMn?'white':'rgba(255,255,255,0.4)')+';pointer-events:none"></div>';
+    }).join('');
+
+    var labelsHtml = ticks.filter(function(t){ return t.isMn || ticks.length <= 6; }).map(function(t){
+      return '<div style="position:absolute;left:'+t.pct.toFixed(1)+'%;transform:translateX(-50%);font-size:9px;'+
+        'color:'+(t.isMn?'white':'rgba(255,255,255,.6)')+';font-weight:'+(t.isMn?'700':'400')+';white-space:nowrap">'+
+        cur+fN(Math.round(t.v))+(t.isMn?' ★':'')+'</div>';
+    }).join('');
+
     barHtml = '<div style="margin-top:12px">' +
-      '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:6px">' +
-        '<span style="color:#ef4444;font-weight:600">'+fmtP(lo)+' bas</span>' +
-        '<span style="color:var(--muted)">cours actuel : <b style="color:var(--text)">'+fmtP(px)+'</b></span>' +
-        '<span style="color:#16a34a;font-weight:600">'+fmtP(hi)+' haut</span>' +
+      // Labels haut
+      '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">' +
+        '<span style="color:#ef4444;font-weight:700">'+fmtP(lo)+'<br><span style="font-size:9px;font-weight:400">objectif bas</span></span>' +
+        '<span style="text-align:center;color:var(--muted);font-size:10px">cours actuel<br><b style="color:var(--text);font-size:12px">'+fmtP(px)+'</b></span>' +
+        '<span style="text-align:right;color:#16a34a;font-weight:700">'+fmtP(hi)+'<br><span style="font-size:9px;font-weight:400">objectif haut</span></span>' +
       '</div>' +
-      '<div style="position:relative;height:10px;background:linear-gradient(90deg,#ef4444,#d97706,#16a34a);border-radius:5px">' +
-        '<div style="position:absolute;top:-3px;left:calc('+pxPct.toFixed(1)+'% - 8px);width:16px;height:16px;background:white;border:2.5px solid rgba(0,0,0,0.5);border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>' +
+      // Barre principale avec repères
+      '<div style="position:relative;height:20px">' +
+        // Graduation
+        '<div style="position:relative;height:12px;background:linear-gradient(90deg,#ef4444,#d97706 40%,#16a34a);border-radius:6px;overflow:hidden">' +
+          ticksHtml +
+        '</div>' +
+        // Curseur cours actuel
+        '<div style="position:absolute;top:-2px;left:calc('+pxPct.toFixed(1)+'% - 9px);width:18px;height:16px;'+
+          'background:white;border:2px solid rgba(0,0,0,0.5);border-radius:4px;box-shadow:0 2px 6px rgba(0,0,0,.5);'+
+          'display:flex;align-items:center;justify-content:center">' +
+          '<div style="width:2px;height:8px;background:#334;border-radius:1px"></div>' +
+        '</div>' +
+        // Labels sous la barre
+        '<div style="position:relative;height:16px;margin-top:2px">' + labelsHtml + '</div>' +
       '</div>' +
-      (mn != null ? '<div style="font-size:11px;color:var(--muted);margin-top:8px;text-align:center">Cible moy. analystes : <b style="color:var(--text)">'+fmtP(mn)+'</b>' +
-        (upside != null ? ' \u2014 <span style="color:'+(upside>=0?'#22c55e':'#ef4444')+';font-weight:700">'+(upside>=0?'+':'')+upside.toFixed(1)+'% de potentiel</span>' : '') +
+      // Résumé cible moy
+      (mn != null ? '<div style="font-size:12px;margin-top:10px;padding:8px 12px;background:rgba(255,255,255,.05);border-radius:6px;display:flex;justify-content:space-between;align-items:center">' +
+        '<span style="color:var(--muted)">Cible moyenne analystes</span>' +
+        '<span><b style="font-size:14px">'+fmtP(mn)+'</b>' +
+          (upside != null ? ' <span style="color:'+(upside>=0?'#22c55e':'#ef4444')+';font-weight:700;font-size:13px">'+(upside>=0?'+':'')+upside.toFixed(1)+'%</span>' : '') +
+        '</span>' +
       '</div>' : '') +
     '</div>';
   }
@@ -3863,7 +3918,7 @@ window.showCdTab=function(t,noScroll){
       if(c) c.style.display=(k===t?'':'none');
     });
     // Chargement lazy des onglets analystes et secteur
-    if(t==='analysts' && window._cdLastTicker) loadCdAnalysts(window._cdLastTicker, window._cdLastPrice, window._cdLastF);
+    if(t==='analysts' && window._cdLastTicker) loadCdAnalysts(window._cdLastTicker, window._cdLastPrice, window._cdLastF, true);
     if(t==='sector'   && window._cdLastTicker) loadCdSector(window._cdLastTicker, window._cdLastF);
   }
   window.scrollTo({top:0,behavior:'smooth'});
