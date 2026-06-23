@@ -206,6 +206,21 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 
 </head>
 <body>
+<style>
+/* Fix global : supprimer les espaces noirs à droite sur toutes les pages */
+#page > div, .page-content, .friend-portfolio-wrap, .deposits-wrap {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+/* Grilles à 2 colonnes : si la 2ème colonne est vide, elle ne crée pas d'espace */
+.two-col-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+/* Rendre toutes les pages fluides sans overflow horizontal */
+html, body { max-width: 100%; overflow-x: hidden; }
+</style>
 <div id="auth-screen">
   <div class="auth-box">
     <div class="auth-logo"><div class="mark"><img src="/logo.png" alt="Valio"></div><h1>Valio</h1><p>Votre portefeuille intelligent</p></div>
@@ -249,6 +264,18 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
       <div id="topbar">
         <span class="topbar-title" id="page-title">Portefeuille</span>
         <span id="eurusd-rate" style="font-size:12px;color:var(--muted)"></span>
+        <div style="display:flex;align-items:center;gap:4px">
+          <input id="ticker-search-input"
+            class="form-input"
+            style="width:100px;height:28px;font-size:12px;padding:3px 8px;text-transform:uppercase;border-radius:6px"
+            placeholder="🔍 Ticker…"
+            maxlength="12"
+            title="Rechercher une entreprise (ex: AAPL, MSFT, MC.PA)"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();window.openTickerSearch();}"
+          >
+          <button class="btn btn-ghost btn-sm" style="height:28px;padding:3px 7px;font-size:11px;color:var(--muted)"
+            onclick="window.openTickerSearch()" title="Analyser ce ticker">→</button>
+        </div>
         <button class="btn btn-ghost btn-sm" id="notif-btn" onclick="notifBtnClick()" style="color:var(--muted)" title="Notifications">🔔</button>
         <button class="btn btn-ghost btn-sm" onclick="refreshData()" style="color:var(--muted)">↻ Actualiser</button>
       </div>
@@ -4796,95 +4823,197 @@ async function getFriendTransactions(friendId){
 
 
 
-// ── Performance portefeuille (positions actuelles × prix historiques) ────────
-// Utilise le coût total comme dénominateur → P&L% cohérent avec la page portefeuille
+// ── Performance portefeuille — TWR (Time-Weighted Return) sur la fenêtre ─────
+// Méthode : on découpe la vie du portefeuille en sous-périodes délimitées par
+// chaque achat/vente. Pour chaque sous-période r_i = V_fin / V_déb − 1.
+// TWR = ∏(1+r_i) − 1. Neutralise l'effet des montants déposés : seule la
+// qualité des choix compte. Courbe rebasée à 0% au début de la fenêtre.
 async function buildPortfolioLine(transactions, range){
-  // ════════════════════════════════════════════════════════════════════════
-  // MÉTHODE DÉFINITIVE — P&L cumulée rapportée au CAPITAL ACTUEL (dénominateur
-  // constant). Pourquoi : les méthodes "P&L vs coût du moment" (÷ coût(t)) et TWR
-  // explosent quand le capital de départ est minuscule (gains énormes en % sur peu
-  // d'argent). En divisant par le coût ACTUEL (constant, grand), c'est :
-  //   • STABLE : jamais d'explosion (dénominateur fixe)
-  //   • COHÉRENT : la courbe finit EXACTEMENT sur la perf affichée (P&L global)
-  //   • COMPARABLE : rebasé à 0 en début de fenêtre → on lit la perf de la période
-  //   pnl(t) = V(t) − coût_détenu(t) + réalisé(t)   ·   pct(t) = pnl(t) / coût_actuel
-  // ════════════════════════════════════════════════════════════════════════
   var txns=(transactions||[]).filter(function(t){return t.ticker;})
     .slice().sort(function(a,b){return new Date(a.transaction_date)-new Date(b.transaction_date);});
   if(!txns.length) return [];
+
   var tickers=[...new Set(txns.map(function(t){return t.ticker;}))];
   var curByTk={};
   txns.forEach(function(t){ if(t.currency&&!curByTk[t.ticker]) curByTk[t.ticker]=t.currency.toUpperCase(); });
-  // Devise AUTORITAIRE depuis l'API (corrige les titres KRW/TWD/SEK dont la devise de
-  // transaction est absente/fausse → sinon un prix en wons est compté comme des dollars,
-  // ce qui gonfle énormément le coût et fait exploser la courbe). On préfetch ce qui manque.
-  await Promise.all(tickers.filter(function(tk){return !(S.prices[tk]&&S.prices[tk].currency);}).map(async function(tk){
-    try{ var r=await fetch(API+'?symbol='+encodeURIComponent(tk),{signal:AbortSignal.timeout(8000)}); var d=await r.json();
-      if(d&&d.currency){ if(!S.prices[tk])S.prices[tk]={}; S.prices[tk].currency=d.currency; if(d.price)S.prices[tk].price=d.price; } }catch(e){}
+
+  // Devise autoritaire depuis l'API (corrige KRW/TWD/SEK)
+  await Promise.all(tickers.filter(function(tk){
+    return !(S.prices[tk]&&S.prices[tk].currency);
+  }).map(async function(tk){
+    try{
+      var r=await fetch(API+'?symbol='+encodeURIComponent(tk),{signal:AbortSignal.timeout(8000)});
+      var d=await r.json();
+      if(d&&d.currency){ if(!S.prices[tk])S.prices[tk]={}; S.prices[tk].currency=d.currency; if(d.price)S.prices[tk].price=d.price; }
+    }catch(e){}
   }));
 
+  // Charger historiques prix
   var hists={}; var BATCH=4, DELAY=300;
   for(var i=0;i<tickers.length;i+=BATCH){
-    await Promise.all(tickers.slice(i,i+BATCH).map(async function(tk){ hists[tk]=await fetchPriceHistory(tk,range); }));
+    await Promise.all(tickers.slice(i,i+BATCH).map(async function(tk){
+      hists[tk]=await fetchPriceHistory(tk,range);
+    }));
     if(i+BATCH<tickers.length) await new Promise(function(r){setTimeout(r,DELAY);});
   }
 
-  var firstTx=Math.floor(new Date(txns[0].transaction_date).getTime()/1000);
-  var tsSet={}; Object.values(hists).forEach(function(pts){(pts||[]).forEach(function(p){if(p.t>=firstTx)tsSet[p.t]=true;});});
-  var timestamps=Object.keys(tsSet).map(Number).sort(function(a,b){return a-b;});
-  if(timestamps.length<2) return [];
-  var step=Math.max(1,Math.floor(timestamps.length/90));
-  timestamps=timestamps.filter(function(_,i){return i%step===0||i===timestamps.length-1;});
-
   function cur(tk){ return (S.prices[tk]&&S.prices[tk].currency)||curByTk[tk]||'USD'; }
-  function priceAt(tk,t){ var pts=(hists[tk]||[]); var v=null; for(var j=0;j<pts.length;j++){ if(pts[j].t<=t) v=pts[j].c; else break; } return v; }
 
-  // État reconstruit à t : quantités détenues, coût des titres détenus (€), P&L réalisé (€)
-  function stateAt(t){
-    var hold={}, costTk={}, realized=0;
-    txns.forEach(function(tx){
-      if(Math.floor(new Date(tx.transaction_date).getTime()/1000)>t) return;
-      var ty=(tx.transaction_type||tx.type||'').toLowerCase(); var tk=tx.ticker, q=tx.quantity||0;
-      var buyEur=q*toEur(tx.price||0,cur(tk))+toEur(tx.fees||0,cur(tk));
-      if(ty==='buy'){ hold[tk]=(hold[tk]||0)+q; costTk[tk]=(costTk[tk]||0)+buyEur; }
-      else if(ty==='sell'&&(hold[tk]||0)>1e-9){
-        var avg=costTk[tk]/hold[tk];
-        var proceeds=q*toEur(tx.price||0,cur(tk))-toEur(tx.fees||0,cur(tk));
-        realized+=proceeds-q*avg; costTk[tk]-=q*avg; hold[tk]-=q;
+  // Cours le plus proche à ou avant timestamp t
+  function priceAt(tk,t){
+    var pts=(hists[tk]||[]); var v=null;
+    for(var j=0;j<pts.length;j++){ if(pts[j].t<=t) v=pts[j].c; else break; }
+    return v;
+  }
+
+  // Valeur du portefeuille à t (en €), avec les quantités reconstituées jusqu'à t
+  // Si un titre n'a pas de cours historique → on l'évalue au coût (neutre)
+  function portfolioValueAt(t){
+    var hold={}, costTk={};
+    for(var i=0;i<txns.length;i++){
+      var tx=txns[i];
+      var txT=Math.floor(new Date(tx.transaction_date).getTime()/1000);
+      if(txT>t) break;
+      var ty=(tx.transaction_type||tx.type||'').toLowerCase();
+      var tk=tx.ticker, q=tx.quantity||0;
+      var costEur=q*toEur(tx.price||0,cur(tk))+toEur(tx.fees||0,cur(tk));
+      if(ty==='buy'){
+        hold[tk]=(hold[tk]||0)+q;
+        costTk[tk]=(costTk[tk]||0)+costEur;
+      } else if(ty==='sell'&&(hold[tk]||0)>1e-9){
+        var avg=(costTk[tk]||0)/(hold[tk]||1);
+        costTk[tk]=Math.max(0,costTk[tk]-q*avg);
+        hold[tk]=Math.max(0,hold[tk]-q);
       }
-    });
-    return {hold:hold,costTk:costTk,realized:realized};
-  }
-  function costOf(st){ var c=0; Object.keys(st.costTk).forEach(function(tk){ if((st.hold[tk]||0)>1e-7) c+=st.costTk[tk]; }); return c; }
-  function pnlAt(t){
-    var st=stateAt(t), v=0, priced=false;
-    Object.keys(st.hold).forEach(function(tk){
-      var q=st.hold[tk]; if(q<=1e-7) return;
+    }
+    var val=0, hasPrice=false;
+    Object.keys(hold).forEach(function(tk){
+      var q=hold[tk]; if(q<=1e-7) return;
       var pr=priceAt(tk,t);
-      if(pr==null){ v+=(st.costTk[tk]||0); return; } // pas de prix → au coût (neutre)
-      v+=q*toEur(pr,cur(tk)); priced=true;
+      if(pr!=null){ val+=q*toEur(pr,cur(tk)); hasPrice=true; }
+      else { val+=(costTk[tk]||0); } // pas de cours → au coût
     });
-    return {pnl:v-costOf(st)+st.realized, priced:priced};
+    return {val:val, hasPrice:hasPrice};
   }
 
-  // Dénominateur CONSTANT = coût actuel des titres détenus (≈ "Investi" du portefeuille)
+  // Déterminer la borne de départ de la fenêtre
+  var rangeSeconds={'1mo':30*86400,'6mo':182*86400,'1y':365*86400,'3y':3*365*86400,'5y':5*365*86400,'10y':10*365*86400,'max':50*365*86400};
+  var windowSec=rangeSeconds[range]||365*86400;
   var now=Math.floor(Date.now()/1000);
-  var denom=costOf(stateAt(now));
-  if(denom<=1) denom=costOf(stateAt(timestamps[timestamps.length-1]));
-  if(denom<=1) return [];
+  var windowStart=now-windowSec;
 
-  var out=[];
-  timestamps.forEach(function(t){
-    var r=pnlAt(t);
-    if(!r.priced && out.length===0) return;
-    var pct=r.pnl/denom*100;
-    if(isFinite(pct)) out.push({t:t,pct:pct});
+  // Filtrer les transactions dans la fenêtre + la dernière avant la fenêtre (état initial)
+  var txnsInWindow=txns.filter(function(tx){
+    return Math.floor(new Date(tx.transaction_date).getTime()/1000)>=windowStart;
   });
-  if(out.length<2) return [];
-  // Rebasage à 0 en début de fenêtre : la courbe montre la perf DE LA PÉRIODE
-  // sélectionnée (1M, 6M, 1A…), pas la perf all-time. Le delta final reste cohérent.
-  var base=out[0].pct;
-  return out.map(function(p){return {t:p.t,pct:p.pct-base};});
+
+  // Si aucune transaction dans la fenêtre : portefeuille stable sur toute la période
+  // → sous-période unique : valeur début fenêtre → valeur aujourd'hui
+  if(!txnsInWindow.length){
+    var vStart=portfolioValueAt(windowStart);
+    if(!vStart.hasPrice||vStart.val<=0) return [];
+    // Construire la courbe sur les timestamps historiques
+    var tsSet={};
+    Object.values(hists).forEach(function(pts){
+      (pts||[]).forEach(function(p){ if(p.t>=windowStart) tsSet[p.t]=true; });
+    });
+    var ts=Object.keys(tsSet).map(Number).sort(function(a,b){return a-b;});
+    if(ts.length<2) return [];
+    var step=Math.max(1,Math.floor(ts.length/90));
+    ts=ts.filter(function(_,i){return i%step===0||i===ts.length-1;});
+    var out=[];
+    ts.forEach(function(t){
+      var v=portfolioValueAt(t);
+      if(!v.hasPrice&&!out.length) return;
+      var pct=(v.val/vStart.val-1)*100;
+      if(isFinite(pct)) out.push({t:t,pct:pct});
+    });
+    if(out.length<2) return [];
+    var base=out[0].pct;
+    return out.map(function(p){return {t:p.t,pct:p.pct-base};});
+  }
+
+  // ── TWR avec sous-périodes ────────────────────────────────────────────────
+  // Points de coupure : chaque transaction dans la fenêtre crée une sous-période
+  // Sous-période i : [t_avant_tx_i → t_avant_tx_{i+1}]
+  // r_i = V_juste_avant_tx_{i+1} / V_juste_après_tx_i − 1
+
+  // Construire la liste des événements (timestamps des transactions dans la fenêtre)
+  // + points intermédiaires pour dessiner la courbe
+  var cutTimes=[windowStart];
+  txnsInWindow.forEach(function(tx){
+    var t=Math.floor(new Date(tx.transaction_date).getTime()/1000);
+    if(t>windowStart) cutTimes.push(t);
+  });
+  cutTimes.push(now);
+  // Dédupliquer et trier
+  cutTimes=[...new Set(cutTimes)].sort(function(a,b){return a-b;});
+
+  // Calculer le facteur de croissance cumulé (TWR) à chaque point de coupure
+  // Le facteur au point k = ∏(1+r_i) pour i de 0 à k
+  var twrFactors=[1.0]; // facteur initial = 1 (= 0% de perf)
+  var segStartVal=null;  // valeur juste après la transaction de début de segment
+
+  for(var k=0;k<cutTimes.length-1;k++){
+    var tStart=cutTimes[k];
+    var tEnd=cutTimes[k+1];
+    var tStartPlus=tStart+60; // "juste après" la transaction (1 minute)
+    var tEndMinus=tEnd-60;    // "juste avant" la transaction suivante
+
+    // Valeur juste après le début du segment (= après achat/vente à tStart)
+    var vAfterBuy=portfolioValueAt(tStartPlus);
+    // Valeur juste avant la prochaine transaction (ou fin de fenêtre)
+    var vBeforeNext=portfolioValueAt(tEndMinus);
+
+    var ri=0;
+    if(vAfterBuy.val>1 && vBeforeNext.hasPrice){
+      ri=vBeforeNext.val/vAfterBuy.val-1;
+    }
+    // Facteur cumulé pour ce segment
+    twrFactors.push(twrFactors[twrFactors.length-1]*(1+ri));
+  }
+
+  // Construire la courbe continue : pour chaque timestamp historique,
+  // interpoler le facteur TWR dans son segment
+  var tsSet={};
+  Object.values(hists).forEach(function(pts){
+    (pts||[]).forEach(function(p){ if(p.t>=windowStart) tsSet[p.t]=true; });
+  });
+  cutTimes.forEach(function(t){ tsSet[t]=true; });
+  var allTs=Object.keys(tsSet).map(Number).sort(function(a,b){return a-b;});
+  if(allTs.length<2) return [];
+
+  // Échantillonner à ~90 points max
+  var step2=Math.max(1,Math.floor(allTs.length/90));
+  var sampledTs=allTs.filter(function(_,i){return i%step2===0||i===allTs.length-1;});
+
+  var out2=[];
+  sampledTs.forEach(function(t){
+    // Trouver dans quel segment on est
+    var segIdx=0;
+    for(var k=0;k<cutTimes.length-1;k++){
+      if(t>=cutTimes[k]&&t<cutTimes[k+1]){ segIdx=k; break; }
+      if(t>=cutTimes[cutTimes.length-1]){ segIdx=cutTimes.length-2; break; }
+    }
+    // Facteur TWR au début du segment
+    var segFactor=twrFactors[segIdx];
+    // Performance intra-segment : V(t) / V(début_segment + 1min)
+    var tSegStart=cutTimes[segIdx];
+    var vSegStart=portfolioValueAt(tSegStart+60);
+    var vT=portfolioValueAt(t);
+
+    var intraFactor=1;
+    if(vSegStart.val>1&&vT.hasPrice){ intraFactor=vT.val/vSegStart.val; }
+
+    var totalFactor=segFactor*intraFactor;
+    var pct=(totalFactor-1)*100;
+    if(isFinite(pct)&&(vT.hasPrice||out2.length>0)) out2.push({t:t,pct:pct});
+  });
+
+  if(out2.length<2) return [];
+  // Rebasage à 0% au début de la fenêtre (courbes comparables visuellement)
+  var base2=out2[0].pct;
+  return out2.map(function(p){return {t:p.t,pct:p.pct-base2};});
 }
 
 // ── Performance indice
@@ -5598,6 +5727,27 @@ document.addEventListener('click', function(e){
 });
 </script>
 <script>
+// ── Recherche libre de ticker ─────────────────────────────────────────────
+window.openTickerSearch = async function(){
+  var inp = document.getElementById('ticker-search-input');
+  if(!inp) return;
+  var tk = (inp.value||'').trim().toUpperCase();
+  if(!tk){ inp.focus(); return; }
+  inp.value = '';
+  showToast('Chargement de '+tk+'...');
+  var price = S.prices[tk];
+  if(!price){
+    try {
+      var r = await fetch(API+'?symbol='+encodeURIComponent(tk), {signal:AbortSignal.timeout(10000)});
+      var d = await r.json();
+      if(d && d.price){ S.prices[tk] = d; price = d; }
+      else { showToast('Ticker introuvable : '+tk); return; }
+    } catch(e){ showToast('Erreur reseau pour : '+tk); return; }
+  }
+  var fakePos = {ticker:tk, quantity:0, totalCostEur:0, priceEur:price&&price.price||0, _search:true};
+  openCompanyDetail(tk, price, fakePos);
+};
+
 // Enregistrement du service worker (PWA installable). Sans effet en local file://.
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', function () {
