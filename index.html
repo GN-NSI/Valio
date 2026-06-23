@@ -1961,36 +1961,65 @@ function calcQualityScore(f, price) {
   return {score: normalizedScore, raw: score, maxPossible: maxPossible, details: details};
 }
 
-function renderQualityBadge(f, price) {
+function renderQualityBadge(f, price, ticker) {
   var qs = calcQualityScore(f, price);
   if(!qs || qs.score == null) return '';
   var s = qs.score;
   var bg = s >= 75 ? '#16a34a' : s >= 55 ? '#ca8a04' : s >= 35 ? '#f97316' : '#dc2626';
   var label = s >= 75 ? 'Excellent' : s >= 55 ? 'Bon' : s >= 35 ? 'Correct' : 'Faible';
-  var pct = s + '%';
-  // Donut SVG simple
-  var r = 16, circ = 2*Math.PI*r;
+  var r2 = 16, circ = 2*Math.PI*r2;
   var dash = (s/100)*circ, gap = circ - dash;
-  var svg = '<svg width="44" height="44" style="transform:rotate(-90deg)">' +
-    '<circle cx="22" cy="22" r="'+r+'" fill="none" stroke="var(--border2)" stroke-width="4"/>' +
-    '<circle cx="22" cy="22" r="'+r+'" fill="none" stroke="'+bg+'" stroke-width="4" ' +
+  var svg = '<svg width="40" height="40" style="transform:rotate(-90deg)">' +
+    '<circle cx="20" cy="20" r="'+r2+'" fill="none" stroke="var(--border2)" stroke-width="3.5"/>' +
+    '<circle cx="20" cy="20" r="'+r2+'" fill="none" stroke="'+bg+'" stroke-width="3.5" ' +
       'stroke-dasharray="'+dash.toFixed(1)+' '+gap.toFixed(1)+'" stroke-linecap="round"/>' +
     '</svg>';
-  return '<div title="Score Qualité/Valorisation — cliquez sur Vue densemble" '+
-    'style="display:flex;align-items:center;gap:8px;background:'+bg+'18;border:1px solid '+bg+'44;'+
-    'border-radius:10px;padding:6px 12px;cursor:default;position:relative">' +
-    '<div style="position:relative;width:44px;height:44px">' +
+  window._qualityDetails = window._qualityDetails || {};
+  var tkKey = (ticker||'_').replace(/[^A-Za-z0-9]/g,'');
+  window._qualityDetails[tkKey] = qs;
+  return '<div onclick="window.showQualityDetail(\''+tkKey+'\');" '+
+    'style="display:flex;align-items:center;gap:8px;background:'+bg+'18;border:1px solid '+bg+'55;'+
+    'border-radius:10px;padding:6px 10px;cursor:pointer" title="Cliquer pour voir le detail du score">' +
+    '<div style="position:relative;width:40px;height:40px;flex-shrink:0">' +
       svg +
-      '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:'+bg+';transform:rotate(90deg)">' +
-        s +
-      '</div>' +
+      '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:'+bg+';transform:rotate(90deg)">'+s+'</div>' +
     '</div>' +
-    '<div>' +
-      '<div style="font-size:14px;font-weight:800;color:'+bg+'">'+label+'</div>' +
-      '<div style="font-size:10px;color:var(--muted)">Score qualité</div>' +
-    '</div>' +
+    '<div><div style="font-size:13px;font-weight:800;color:'+bg+'">'+label+'</div>' +
+    '<div style="font-size:10px;color:var(--muted)">Score qualite</div></div>' +
   '</div>';
 }
+
+window.showQualityDetail = function(tkKey){
+  var qs = window._qualityDetails && window._qualityDetails[tkKey];
+  if(!qs) return;
+  var s = qs.score;
+  var bg = s >= 75 ? '#16a34a' : s >= 55 ? '#ca8a04' : s >= 35 ? '#f97316' : '#dc2626';
+  var label = s >= 75 ? 'Excellent' : s >= 55 ? 'Bon' : s >= 35 ? 'Correct' : 'Faible';
+  var rows = qs.details.map(function(d){
+    var pct2 = Math.round(d.pts/d.max*100);
+    var col2 = pct2>=75?'#16a34a':pct2>=50?'#22c55e':pct2>=30?'#d97706':'#ef4444';
+    var bar = '<div style="flex:1;height:6px;background:var(--border2);border-radius:3px;overflow:hidden">' +
+      '<div style="width:'+pct2+'%;height:100%;background:'+col2+';border-radius:3px"></div></div>';
+    return '<tr style="border-bottom:1px solid var(--border2)">' +
+      '<td style="padding:9px 8px;font-size:12px">'+d.label+'</td>' +
+      '<td style="padding:9px 8px;text-align:right;font-size:12px;font-weight:600" class="mono">'+d.val+'</td>' +
+      '<td style="padding:9px 8px;width:120px"><div style="display:flex;align-items:center;gap:6px">'+bar+
+        '<span style="font-size:11px;color:var(--muted);white-space:nowrap">'+d.pts+'/'+d.max+'</span></div></td>' +
+    '</tr>';
+  }).join('');
+  showModal('<div style="padding:24px">' +
+    '<div style="font-size:22px;font-weight:900;color:'+bg+';margin-bottom:4px">'+s+'/100 \u2014 '+label+'</div>' +
+    '<div style="font-size:12px;color:var(--muted);margin-bottom:16px">'+qs.raw+' pts / '+qs.maxPossible+' mesures \u2014 Approche Quality Growth long terme</div>' +
+    '<table style="width:100%;border-collapse:collapse">' +
+    '<thead><tr style="border-bottom:2px solid var(--border)">' +
+      '<th style="padding:8px;text-align:left;font-size:11px;color:var(--muted)">CRITERE</th>' +
+      '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">VALEUR</th>' +
+      '<th style="padding:8px;font-size:11px;color:var(--muted)">SCORE</th>' +
+    '</tr></thead><tbody>'+rows+'</tbody></table>' +
+    '<div style="font-size:10px;color:var(--muted);margin-top:12px">Valorisation (P/E Fwd, PEG, P/FCF) \u00b7 Qualite (Marges, ROE, ROIC) \u00b7 Croissance (CA, EPS fwd) \u00b7 Sante (Dette, Current Ratio)</div>' +
+  '</div>', 'Score Qualite / Valorisation');
+};
+
 
 async function renderCompanyDetail(ticker, name) {
   var pg = document.getElementById('page');
@@ -2045,7 +2074,7 @@ async function renderCompanyDetail(ticker, name) {
   function pct(v) { return (v >= 0 ? '+' : '')+v.toFixed(1)+'%'; }
   function xs(v) { return fN(v)+'x'; }
   function col_pe(v) { return v < 15 ? 'var(--green)' : v < 30 ? 'var(--yellow)' : v < 50 ? '#f97316' : 'var(--red)'; }
-  function col_fpe(v) { return v < 20 ? 'var(--green)' : v < 25 ? 'var(--yellow)' : v < 30 ? '#f97316' : 'var(--red)'; }
+  function col_fpe(v) { return v < 20 ? 'var(--green)' : v < 28 ? 'var(--yellow)' : v < 40 ? '#f97316' : 'var(--red)'; }
   function col_mg(v) { return v > 20 ? 'var(--green)' : v > 10 ? 'var(--yellow)' : v > 0 ? '#f97316' : 'var(--red)'; }
   function col_grw(v) { return v > 15 ? 'var(--green)' : v > 5 ? 'var(--yellow)' : v >= 0 ? '#f97316' : 'var(--red)'; }
   function col_roe(v) { return v > 20 ? 'var(--green)' : v > 10 ? 'var(--yellow)' : 'var(--red)'; }
@@ -2073,7 +2102,7 @@ async function renderCompanyDetail(ticker, name) {
     } catch(e) {}
   }
 
-  var _qualityBadge = renderQualityBadge(f, price);
+  var _qualityBadge = renderQualityBadge(f, price, ticker);
   cd.innerHTML =
     // Layout 2 colonnes : gauche = ratios, droite = graphique
     '<div style="display:grid;grid-template-columns:minmax(320px,2fr) 3fr;gap:20px;align-items:start">' +
@@ -3354,113 +3383,123 @@ window.loadCdAnalysts = async function(ticker, price, f){
   if(el.dataset.loaded === ticker) return;
   el.innerHTML = '<div style="text-align:center;padding:40px"><div class="spinner"></div></div>';
 
-  // S'assurer que les fundamentals V6+ sont chargés (contiennent les données analystes)
-  // On recharge si absent, ou si version cache < 6 (ne contient pas encore targetMeanPrice)
-  if(!f || f._v == null || f._v < 6 || f.targetMeanPrice === undefined) {
+  if(!f || f._v == null || f._v < 7 || f.targetMeanPrice === undefined) {
     try {
       var r = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=fundamentals', {signal:AbortSignal.timeout(15000)});
       var d = await r.json();
       if(d && !d.error){ S.fundamentals[ticker] = d; f = d; window._cdLastF = d; }
-    } catch(e){ console.warn('loadCdAnalysts fetch error:', e); }
+    } catch(e){}
   }
 
   var px = price && price.price;
-  var cur = price && price.currency === 'USD' ? '$' : '€';
-  var fmtP = function(v){ return v != null ? cur+fN(v) : '—'; };
-  var fmtPct = function(v){ if(v == null) return '—'; return (v>=0?'+':'')+v.toFixed(1)+'%'; };
+  var cur = (price && price.currency === 'EUR') ? '\u20ac' : '$';
+  var fmtP = function(v){ return v != null ? cur+fN(v) : '\u2014'; };
 
-  // ── Bloc cours cible ──
-  var upside = (f && f.targetMeanPrice && px) ? (f.targetMeanPrice/px - 1)*100 : null;
   var recKey = (f && f.recommendationKey) || null;
-  var recBg = {strongbuy:'#16a34a',buy:'#22c55e',hold:'#ca8a04',sell:'#dc2626',strongsell:'#991b1b'};
-  var recTxt = {strongbuy:'💚 Achat fort',buy:'✅ Achat',hold:'⚡ Neutre',sell:'⚠️ Vente',strongsell:'🔴 Vente forte'};
-  var recScore = {strongbuy:5,buy:4,hold:3,sell:2,strongsell:1};
-  var recColor = recKey ? (recBg[recKey] || '#6b7280') : '#6b7280';
-  var recLabel = recKey ? (recTxt[recKey] || recKey) : '—';
-  var recNum = recKey ? (recScore[recKey]||3) : 3;
+  var recColors = {strongbuy:'#16a34a',buy:'#22c55e',hold:'#d97706',sell:'#ef4444',strongsell:'#991b1b'};
+  var recLabels = {strongbuy:'Achat fort',buy:'Achat',hold:'Neutre',sell:'Vente',strongsell:'Vente forte'};
+  var recIcons  = {strongbuy:'\u25b2\u25b2',buy:'\u25b2',hold:'\u25b6',sell:'\u25bc',strongsell:'\u25bc\u25bc'};
+  var recScores = {strongbuy:5,buy:4,hold:3,sell:2,strongsell:1};
+  var recColor  = recKey ? (recColors[recKey] || '#6b7280') : '#6b7280';
+  var recLabel  = recKey ? (recLabels[recKey] || recKey) : '\u2014';
+  var recIcon   = recKey ? (recIcons[recKey]  || '') : '';
+  var recNum    = recKey ? (recScores[recKey] || 3) : 0;
+  var upside    = (f && f.targetMeanPrice && px) ? (f.targetMeanPrice/px - 1)*100 : null;
 
-  var targetHtml = '<div class="card" style="margin-bottom:16px">' +
-    '<div style="font-size:15px;font-weight:700;margin-bottom:16px">🎯 Consensus analystes</div>' +
-    // Ligne principale : recommandation + cours
-    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px">' +
-      '<div style="background:'+recColor+'22;border:1px solid '+recColor+'44;border-radius:10px;padding:14px;text-align:center">' +
-        '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">RECOMMANDATION</div>' +
-        '<div style="font-size:17px;font-weight:800;color:'+recColor+'">'+recLabel+'</div>' +
-        '<div style="font-size:11px;color:var(--muted);margin-top:4px">'+(f&&f.analystCount?f.analystCount+' analystes':'—')+'</div>' +
-        // Mini-score bar (1=vente forte, 5=achat fort)
-        '<div style="margin-top:8px;display:flex;align-items:center;gap:4px;justify-content:center">' +
-          [1,2,3,4,5].map(function(n){ return '<div style="width:14px;height:14px;border-radius:3px;background:'+(n<=recNum?recColor:'var(--border2)')+';"></div>'; }).join('') +
-        '</div>' +
+  // Fourchette securisee : garantir lo < hi
+  var lo = f && f.targetLowPrice, hi = f && f.targetHighPrice, mn = f && f.targetMeanPrice;
+  if(lo != null && hi != null && lo > hi){ var tmp=lo; lo=hi; hi=tmp; }
+
+  var barHtml = '';
+  if(lo != null && hi != null && px != null && hi > lo) {
+    var range = hi - lo;
+    var pxPct = Math.max(2, Math.min(98, (px-lo)/range*100));
+    barHtml = '<div style="margin-top:12px">' +
+      '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:6px">' +
+        '<span style="color:#ef4444;font-weight:600">'+fmtP(lo)+' bas</span>' +
+        '<span style="color:var(--muted)">cours actuel : <b style="color:var(--text)">'+fmtP(px)+'</b></span>' +
+        '<span style="color:#16a34a;font-weight:600">'+fmtP(hi)+' haut</span>' +
       '</div>' +
-      '<div style="background:var(--bg2);border-radius:10px;padding:14px;text-align:center">' +
-        '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">COURS CIBLE MOYEN</div>' +
-        '<div style="font-size:20px;font-weight:800;color:var(--text)">'+fmtP(f&&f.targetMeanPrice)+'</div>' +
-        '<div style="font-size:12px;font-weight:600;margin-top:4px;color:'+(upside>=0?'var(--green)':'var(--red)')+'">'+(upside!=null?(upside>=0?'▲ +':'▼ ')+Math.abs(upside).toFixed(1)+'% potentiel':'—')+'</div>' +
+      '<div style="position:relative;height:10px;background:linear-gradient(90deg,#ef4444,#d97706,#16a34a);border-radius:5px">' +
+        '<div style="position:absolute;top:-3px;left:calc('+pxPct.toFixed(1)+'% - 8px);width:16px;height:16px;background:white;border:2.5px solid rgba(0,0,0,0.5);border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>' +
       '</div>' +
-      '<div style="background:var(--bg2);border-radius:10px;padding:14px">' +
-        '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">FOURCHETTE OBJECTIFS</div>' +
-        '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:6px">' +
-          '<span style="color:var(--red);font-weight:600">'+fmtP(f&&f.targetLowPrice)+'</span>' +
-          '<span style="color:var(--text);font-size:10px">cours: '+fmtP(px)+'</span>' +
-          '<span style="color:var(--green);font-weight:600">'+fmtP(f&&f.targetHighPrice)+'</span>' +
-        '</div>' +
-    // Barre visuelle cours cible
-    (f && f.targetLowPrice && f.targetHighPrice && px ? (function(){
-      var lo = f.targetLowPrice, hi = f.targetHighPrice, mn = f.targetMeanPrice || ((lo+hi)/2);
-      var range = hi - lo; if(range <= 0) return '';
-      var pxPct = Math.max(0, Math.min(100, (px-lo)/range*100));
-      var mnPct = Math.max(0, Math.min(100, (mn-lo)/range*100));
-      return '<div style="margin-top:8px">' +
-        '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:4px">' +
-          '<span>'+cur+fN(lo)+' (bas)</span><span>Cours actuel : '+cur+fN(px)+'</span><span>'+cur+fN(hi)+' (haut)</span>' +
-        '</div>' +
-        '<div style="position:relative;height:8px;background:var(--border2);border-radius:4px;margin-bottom:6px">' +
-          '<div style="position:absolute;left:0;top:0;height:100%;width:'+mnPct.toFixed(1)+'%;background:linear-gradient(90deg,var(--red),var(--yellow),var(--green));border-radius:4px"></div>' +
-          '<div style="position:absolute;top:-4px;left:calc('+pxPct.toFixed(1)+'% - 6px);width:12px;height:16px;background:white;border:2px solid var(--text);border-radius:3px"></div>' +
-        '</div>' +
-        '<div style="font-size:10px;color:var(--muted)">La barre montre la fourchette objectif bas–haut. Le curseur blanc = cours actuel.</div>' +
-      '</div>';
-    })() : '') +
+      (mn != null ? '<div style="font-size:11px;color:var(--muted);margin-top:8px;text-align:center">Cible moy. analystes : <b style="color:var(--text)">'+fmtP(mn)+'</b>' +
+        (upside != null ? ' \u2014 <span style="color:'+(upside>=0?'#22c55e':'#ef4444')+';font-weight:700">'+(upside>=0?'+':'')+upside.toFixed(1)+'% de potentiel</span>' : '') +
+      '</div>' : '') +
     '</div>';
+  }
 
-  // ── Estimations EPS & CA par trimestre ──
+  var consensusHtml = '<div class="card" style="margin-bottom:16px">' +
+    '<div style="font-size:15px;font-weight:700;margin-bottom:16px">\ud83c\udfaf Consensus analystes' +
+      (f&&f.analystCount ? ' <span style="font-size:12px;font-weight:400;color:var(--muted)">'+f.analystCount+' analystes</span>' : '') +
+    '</div>' +
+    '<div style="display:grid;grid-template-columns:140px 1fr;gap:20px;align-items:center">' +
+      '<div style="background:'+recColor+';border-radius:12px;padding:16px;text-align:center">' +
+        '<div style="font-size:20px;color:white;font-weight:900">'+recIcon+'</div>' +
+        '<div style="font-size:15px;font-weight:800;color:white;margin-top:4px">'+recLabel+'</div>' +
+        '<div style="display:flex;gap:3px;justify-content:center;margin-top:8px">' +
+          [1,2,3,4,5].map(function(n){
+            return '<div style="width:18px;height:5px;border-radius:2px;background:'+(n<=recNum?'rgba(255,255,255,.9)':'rgba(255,255,255,.2)')+'"></div>';
+          }).join('') +
+        '</div>' +
+      '</div>' +
+      '<div>' + barHtml + '</div>' +
+    '</div>' +
+  '</div>';
+
+  // EPS table avec dernier reel comme reference
+  var lastEpsAnnual = null;
+  try {
+    var fin2 = window._cdLastFin;
+    if(fin2 && fin2.eps) { for(var _i=fin2.eps.length-1;_i>=0;_i--){ if(fin2.eps[_i]!=null&&fin2.eps[_i]>0){lastEpsAnnual=fin2.eps[_i];break;} } }
+  } catch(e){}
+
   var ae = f && f.analystEstimates;
-  var estHtml = '<div class="card" style="margin-bottom:16px">' +
-    '<div style="font-size:15px;font-weight:700;margin-bottom:16px">📊 Estimations EPS & Chiffre d\'affaires</div>';
 
-  function estRow(label, e){
-    if(!e) return '<tr><td colspan="5" style="padding:8px;color:var(--muted);font-size:12px">'+label+' — données indisponibles</td></tr>';
-    var revFmt = e.revAvg != null ? (e.revAvg > 1e9 ? (e.revAvg/1e9).toFixed(2)+'Md' : (e.revAvg/1e6).toFixed(0)+'M') : '—';
-    var revLo  = e.revLow  != null ? (e.revLow  > 1e9 ? (e.revLow /1e9).toFixed(2)+'Md' : (e.revLow /1e6).toFixed(0)+'M') : '—';
-    var revHi  = e.revHigh != null ? (e.revHigh > 1e9 ? (e.revHigh/1e9).toFixed(2)+'Md' : (e.revHigh/1e6).toFixed(0)+'M') : '—';
-    var epsAvg = e.epsAvg != null ? cur+fN(e.epsAvg) : '—';
-    var epsLo  = e.epsLow != null ? cur+fN(e.epsLow) : '—';
-    var epsHi  = e.epsHigh != null ? cur+fN(e.epsHigh) : '—';
+  function estRow(label, e, showGrowth){
+    if(!e) return '<tr><td colspan="5" style="padding:10px 8px;color:var(--muted);font-size:12px">'+label+' \u2014 donn\u00e9es indisponibles</td></tr>';
+    var epsAvg = e.epsAvg, epsLo = e.epsLow, epsHi = e.epsHigh, revAvg = e.revAvg;
+    var revFmt = revAvg != null ? (revAvg > 1e9 ? (revAvg/1e9).toFixed(2)+'Md' : (revAvg/1e6).toFixed(0)+'M') : '\u2014';
+    var epsStr = epsAvg != null ? '<b>'+cur+fN(epsAvg)+'</b>' : '\u2014';
+    var frcStr = (epsLo != null && epsHi != null) ? cur+fN(epsLo)+' \u2013 '+cur+fN(epsHi) : '\u2014';
+    var growthBadge = '';
+    if(showGrowth && epsAvg != null && lastEpsAnnual != null && lastEpsAnnual > 0){
+      var g = (epsAvg/lastEpsAnnual-1)*100;
+      growthBadge = ' <span style="font-size:10px;font-weight:700;color:'+(g>=0?'#22c55e':'#ef4444')+'">'+(g>=0?'+':'')+g.toFixed(1)+'%</span>';
+    }
     return '<tr style="border-bottom:1px solid var(--border2)">' +
-      '<td style="padding:10px 8px;font-weight:600;font-size:13px">'+label+'</td>' +
-      '<td style="padding:10px 8px;text-align:right;font-size:12px" class="mono">'+epsAvg+'</td>' +
-      '<td style="padding:10px 8px;text-align:right;font-size:11px;color:var(--muted)" class="mono">'+epsLo+' – '+epsHi+'</td>' +
+      '<td style="padding:10px 8px;font-size:13px;font-weight:600">'+label+'</td>' +
+      '<td style="padding:10px 8px;text-align:right;font-size:13px" class="mono">'+epsStr+growthBadge+'</td>' +
+      '<td style="padding:10px 8px;text-align:right;font-size:11px;color:var(--muted)" class="mono">'+frcStr+'</td>' +
       '<td style="padding:10px 8px;text-align:right;font-size:12px" class="mono">'+revFmt+'</td>' +
-      '<td style="padding:10px 8px;text-align:right;font-size:11px;color:var(--muted)" class="mono">'+(e.epsCount!=null?e.epsCount+' analysts':'—')+'</td>' +
+      '<td style="padding:10px 8px;text-align:right;font-size:11px;color:var(--muted)">'+(e.epsCount!=null?e.epsCount+' anal.':'\u2014')+'</td>' +
     '</tr>';
   }
 
-  estHtml += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">' +
-    '<thead><tr style="border-bottom:1px solid var(--border)">' +
-      '<th style="padding:8px;text-align:left;font-size:11px;color:var(--muted)">PÉRIODE</th>' +
-      '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">EPS moy.</th>' +
-      '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">Fourchette</th>' +
-      '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">CA moy.</th>' +
-      '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">Analystes</th>' +
+  var epsHtml = '<div class="card">' +
+    '<div style="font-size:15px;font-weight:700;margin-bottom:4px">\ud83d\udcca Estimations EPS & CA</div>' +
+    (lastEpsAnnual ? '<div style="font-size:12px;color:var(--muted);margin-bottom:14px">Dernier EPS annuel r\u00e9el : <b style="color:var(--text)">'+cur+fN(lastEpsAnnual)+'</b></div>' : '<div style="margin-bottom:14px"></div>') +
+    '<table style="width:100%;border-collapse:collapse">' +
+    '<thead><tr style="border-bottom:2px solid var(--border)">' +
+      '<th style="padding:8px;text-align:left;font-size:11px;color:var(--muted)">P\u00c9RIODE</th>' +
+      '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">EPS MOY.</th>' +
+      '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">FOURCHETTE</th>' +
+      '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">CA MOY.</th>' +
+      '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">ANAL.</th>' +
     '</tr></thead><tbody>' +
-    estRow('Trim. en cours', ae&&ae.currentQtr) +
-    estRow('Trim. suivant',  ae&&ae.nextQtr) +
-    estRow('Année en cours (fwd)', ae&&ae.currentYear) +
-    '</tbody></table></div>' +
-    '<div style="font-size:10px;color:var(--muted);margin-top:8px">Source : Yahoo Finance — consensus analystes. Ces estimations sont susceptibles de révision.</div>' +
-    '</div>';
+    (lastEpsAnnual ? '<tr style="background:rgba(99,75,228,.08);border-bottom:1px solid var(--border2)">' +
+      '<td style="padding:9px 8px;font-size:12px;color:var(--muted)">Dernier annuel r\u00e9el</td>' +
+      '<td style="padding:9px 8px;text-align:right;font-size:13px;font-weight:700" class="mono">'+cur+fN(lastEpsAnnual)+'</td>' +
+      '<td colspan="3" style="padding:9px 8px;font-size:11px;color:var(--muted)">R\u00e9f\u00e9rence pour la croissance</td>' +
+    '</tr>' : '') +
+    estRow('Trim. en cours', ae&&ae.currentQtr, false) +
+    estRow('Trim. suivant',  ae&&ae.nextQtr,    false) +
+    estRow('Ann\u00e9e fwd', ae&&ae.currentYear, true) +
+    '</tbody></table>' +
+    '<div style="font-size:10px;color:var(--muted);margin-top:10px">Source : Yahoo Finance \u2014 estimations consensus. Susceptibles de r\u00e9vision.</div>' +
+  '</div>';
 
-  el.innerHTML = targetHtml + estHtml;
+  el.innerHTML = consensusHtml + epsHtml;
   el.dataset.loaded = ticker;
 };
 
@@ -5129,17 +5168,16 @@ async function buildPortfolioLine(transactions, range){
 
     // Valeur juste après le début du segment (= après achat/vente à tStart)
     var vAfterBuy=portfolioValueAt(tStartPlus);
-    // Valeur juste avant la prochaine transaction (ou fin de fenêtre)
     var vBeforeNext=portfolioValueAt(tEndMinus);
 
     var ri=0;
-    if(vAfterBuy.val>1 && vBeforeNext.hasPrice){
+    if(vAfterBuy.val>10 && vBeforeNext.hasPrice && vBeforeNext.val>0){
       ri=vBeforeNext.val/vAfterBuy.val-1;
-      // Borne de sécurité : un segment ne peut pas contribuer plus de ±200%
-      // Évite l'explosion quand vAfterBuy est minuscule (position < 1€)
-      ri=Math.max(-0.99, Math.min(2.0, ri));
+      // Borne conservatrice : ±150% max par segment
+      // Cela limite les artefacts quand la valeur post-achat est très faible
+      // mais ne masque pas les vraies bonnes perfs sur des positions établies
+      ri=Math.max(-0.95, Math.min(1.5, ri));
     }
-    // Facteur cumulé pour ce segment
     twrFactors.push(twrFactors[twrFactors.length-1]*(1+ri));
   }
 
