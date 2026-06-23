@@ -101,7 +101,7 @@ module.exports = async (req, res) => {
   if (type === 'fundamentals') {
     try {
       // Cache Supabase → réponse instantanée si données < 24h
-      const CACHE_V = 5; // Incrémenter pour invalider tous les caches
+      const CACHE_V = 7; // Incrémenter pour invalider tous les caches
       const cached = await getCache(symbol);
       const cacheValid = cached
         && cached._v === CACHE_V
@@ -110,7 +110,7 @@ module.exports = async (req, res) => {
       if (cacheValid) return res.json({ ...cached, _fromCache: true });
 
       // Sinon : Yahoo Finance quoteSummary
-      const yf = await yfSummary(symbol, 'defaultKeyStatistics,financialData,summaryDetail,earningsTrend,calendarEvents');
+      const yf = await yfSummary(symbol, 'defaultKeyStatistics,financialData,summaryDetail,earningsTrend,calendarEvents,assetProfile');
       if (!yf) return res.status(404).json({ error: `Pas de données pour ${symbol}` });
 
       const sd = yf.summaryDetail        || {};
@@ -153,10 +153,74 @@ module.exports = async (req, res) => {
       const revenueGrowthFwd1Y = trend1y?.revenueEstimate?.growth?.raw != null
         ? trend1y.revenueEstimate.growth.raw * 100 : null;
 
+      // ── ESTIMATIONS ANALYSTES PAR PÉRIODE ─────────────────────────────
+      const trend0q = trends.find(t => t.period === '0q');  // trimestre en cours
+      const trendP1q = trends.find(t => t.period === '+1q'); // trimestre suivant
+      const analystEstimates = {
+        // Trimestre en cours
+        currentQtr: trend0q ? {
+          period:       trend0q.period,
+          endDate:      trend0q.endDate || null,
+          epsAvg:       trend0q.earningsEstimate?.avg?.raw ?? null,
+          epsLow:       trend0q.earningsEstimate?.low?.raw ?? null,
+          epsHigh:      trend0q.earningsEstimate?.high?.raw ?? null,
+          epsCount:     trend0q.earningsEstimate?.numberOfAnalysts?.raw ?? null,
+          revAvg:       trend0q.revenueEstimate?.avg?.raw ?? null,
+          revLow:       trend0q.revenueEstimate?.low?.raw ?? null,
+          revHigh:      trend0q.revenueEstimate?.high?.raw ?? null,
+        } : null,
+        // Trimestre suivant
+        nextQtr: trendP1q ? {
+          period:       trendP1q.period,
+          endDate:      trendP1q.endDate || null,
+          epsAvg:       trendP1q.earningsEstimate?.avg?.raw ?? null,
+          epsLow:       trendP1q.earningsEstimate?.low?.raw ?? null,
+          epsHigh:      trendP1q.earningsEstimate?.high?.raw ?? null,
+          epsCount:     trendP1q.earningsEstimate?.numberOfAnalysts?.raw ?? null,
+          revAvg:       trendP1q.revenueEstimate?.avg?.raw ?? null,
+          revLow:       trendP1q.revenueEstimate?.low?.raw ?? null,
+          revHigh:      trendP1q.revenueEstimate?.high?.raw ?? null,
+        } : null,
+        // Année en cours
+        currentYear: trend1y ? {
+          epsAvg:       trend1y.earningsEstimate?.avg?.raw ?? null,
+          epsGrowth:    trend1y.earningsEstimate?.growth?.raw != null ? trend1y.earningsEstimate.growth.raw * 100 : null,
+          revAvg:       trend1y.revenueEstimate?.avg?.raw ?? null,
+          revGrowth:    trend1y.revenueEstimate?.growth?.raw != null ? trend1y.revenueEstimate.growth.raw * 100 : null,
+          count:        trend1y.earningsEstimate?.numberOfAnalysts?.raw ?? null,
+        } : null,
+      };
+
+      // ── COURS CIBLE ET RECOMMANDATION ANALYSTES ───────────────────────
+      const targetMeanPrice  = raw(fd.targetMeanPrice);
+      const targetHighPrice  = raw(fd.targetHighPrice);
+      const targetLowPrice   = raw(fd.targetLowPrice);
+      const analystCount     = raw(fd.numberOfAnalystOpinions);
+      const recommendationMean = raw(fd.recommendationMean);
+      const recommendationKey  = fd.recommendationKey || null;
+
+      // ── SECTEUR & INDUSTRIE (pour comparaison vs secteur) ─────────────
+      const ap = yf.assetProfile || {};
+      const sector   = ap.sector   || null;
+      const industry = ap.industry || null;
+
       const result = {
         symbol, _v: CACHE_V,
         trailingPE:      raw(sd.trailingPE),
-        forwardPE:       raw(sd.forwardPE),
+        // Forward PE NTM calculé manuellement : cours / EPS forward consensus
+        // sd.forwardPE de Yahoo utilise l'EPS GAAP fiscal (fausse la valeur pour NVDA etc.)
+        // On préfère : cours / avg(earningsTrend année en cours) si disponible
+        forwardPE: (function(){
+          // EPS forward = moyenne analystes année en cours (earningsTrend '0y' ou '1y')
+          var epsFwd = trend1y && trend1y.earningsEstimate && trend1y.earningsEstimate.avg
+            ? trend1y.earningsEstimate.avg.raw : null;
+          if(epsFwd && epsFwd > 0) {
+            var px = raw(sd.regularMarketPrice) || raw(sd.previousClose);
+            if(px && px > 0) return Math.round((px / epsFwd) * 10) / 10;
+          }
+          // Fallback sur sd.forwardPE si earningsTrend indispo
+          return raw(sd.forwardPE);
+        })(),
         pegRatio:        raw(ks.pegRatio),
         pfcf, pocf,
         profitMarginPct:    pct(fd.profitMargins),
@@ -174,6 +238,11 @@ module.exports = async (req, res) => {
         freeCashflow: fcf, operatingCashFlow: ocf,
         mktCap, sharesOutstanding, fcfGrowth: null, roic: null,
         nextEarningsTs,
+        // Nouvelles données analystes
+        analystEstimates,
+        targetMeanPrice, targetHighPrice, targetLowPrice,
+        analystCount, recommendationMean, recommendationKey,
+        sector, industry,
         timestamp: Date.now(),
       };
 
@@ -435,7 +504,18 @@ Rules:
 
     const meta = chart.meta;
     const price = meta.regularMarketPrice || meta.previousClose;
-    const prev  = meta.previousClose || meta.chartPreviousClose;
+    // Utiliser la vraie clôture J-1 depuis le tableau des closes 5d
+    // (meta.chartPreviousClose peut être la clôture de la semaine précédente pour certains marchés)
+    const closes5d  = chart?.indicators?.adjclose?.[0]?.adjclose || chart?.indicators?.quote?.[0]?.close || [];
+    const times5d   = chart?.timestamp || [];
+    const today     = Math.floor(Date.now() / 1000);
+    const dayAgo    = today - 86400;
+    // Trouver la dernière clôture datant d'avant aujourd'hui
+    let prevFromChart = null;
+    for (let i = closes5d.length - 1; i >= 0; i--) {
+      if (times5d[i] < dayAgo - 3600 && closes5d[i] != null) { prevFromChart = closes5d[i]; break; }
+    }
+    const prev  = prevFromChart || meta.previousClose || meta.chartPreviousClose;
     const changeAbs = price - prev;
     const changePct = prev ? (changeAbs / prev) * 100 : 0;
 
