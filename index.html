@@ -1863,7 +1863,7 @@ function openCompanyDetail(ticker, name) {
 //            Croissance (25pts) + Santé financière (10pts)
 // Sources : Greenblatt (Magic Formula), Damodaran, Morgan Stanley Quality screen
 // ══════════════════════════════════════════════════════════════════════════
-function calcQualityScore(f, price) {
+function calcQualityScore(f, price, analysis) {
   if(!f || !price) return null;
   var score = 0, details = [];
   var px = price.price;
@@ -1954,6 +1954,25 @@ function calcQualityScore(f, price) {
     details.push({label:'Current Ratio', val: cr.toFixed(1)+'x', pts: crScore, max: 5});
   }
 
+  // ── BLOC 5 : MOAT & LEVIER IA (10 pts) ─────────────────────────────────
+  // Basé sur l'analyse manuelle MOAT & IA saisie dans Valio
+  // MOAT (5 pts) : score MOAT /100 → ≥70 = 5pts, ≥40 = 3pts, sinon 1pt
+  // IA (5 pts)   : score IA /100  → ≥70 = 5pts, ≥40 = 3pts, sinon 1pt
+  if(analysis && analysis.moat) {
+    var ms = _moatScore(analysis.moat);
+    var moatNorm = Math.round(ms / 100 * 100); // déjà sur 100 (somme_max=25*4=100)
+    var moatPts = moatNorm >= 70 ? 5 : moatNorm >= 40 ? 3 : 1;
+    score += moatPts;
+    details.push({label:'MOAT', val: moatNorm+'/100', pts: moatPts, max: 5});
+  }
+  if(analysis && analysis.ai) {
+    var as2 = _aiScore(analysis.ai, analysis.ai_flags);
+    var aiNorm = Math.round(as2 / 100 * 100);
+    var aiPts = aiNorm >= 70 ? 5 : aiNorm >= 40 ? 3 : 1;
+    score += aiPts;
+    details.push({label:'Levier IA', val: aiNorm+'/100', pts: aiPts, max: 5});
+  }
+
   // Normaliser sur 100 si certains champs manquent
   var maxPossible = details.reduce(function(a,d){return a+d.max;},0);
   var normalizedScore = maxPossible > 0 ? Math.round(score / maxPossible * 100) : null;
@@ -1961,8 +1980,8 @@ function calcQualityScore(f, price) {
   return {score: normalizedScore, raw: score, maxPossible: maxPossible, details: details};
 }
 
-function renderQualityBadge(f, price, ticker) {
-  var qs = calcQualityScore(f, price);
+function renderQualityBadge(f, price, ticker, analysis) {
+  var qs = calcQualityScore(f, price, analysis);
   if(!qs || qs.score == null) return '';
   var s = qs.score;
   var bg = s >= 75 ? '#16a34a' : s >= 55 ? '#ca8a04' : s >= 35 ? '#f97316' : '#dc2626';
@@ -2102,7 +2121,13 @@ async function renderCompanyDetail(ticker, name) {
     } catch(e) {}
   }
 
-  var _qualityBadge = renderQualityBadge(f, price, ticker);
+  // Charger l'analyse MOAT/IA si disponible (pour enrichir le score)
+  var _moatAnalysis = null;
+  try {
+    var _moatRow = await loadAnalysis(ticker);
+    if(_moatRow && _moatRow.data) _moatAnalysis = _moatRow.data;
+  } catch(e){}
+  var _qualityBadge = renderQualityBadge(f, price, ticker, _moatAnalysis);
   cd.innerHTML =
     // Layout 2 colonnes : gauche = ratios, droite = graphique
     '<div style="display:grid;grid-template-columns:minmax(320px,2fr) 3fr;gap:20px;align-items:start">' +
@@ -3447,56 +3472,96 @@ window.loadCdAnalysts = async function(ticker, price, f){
     '</div>' +
   '</div>';
 
-  // EPS table avec dernier reel comme reference
+  // ── EPS réels depuis financials quarterly + TTM ──────────────────────────
+  var qFin = null;
+  try {
+    var qr = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=financials_quarterly', {signal:AbortSignal.timeout(12000)});
+    var qd = await qr.json();
+    if(qd && !qd.error && qd.quarters) qFin = qd;
+  } catch(e){}
+
+  var epsQArr = qFin && qFin.eps ? qFin.eps : [];
+  var qtrLabels = qFin && qFin.quarters ? qFin.quarters : [];
+
+  // EPS TTM = somme des 4 derniers trimestres
+  var epsTTM = null;
+  if(epsQArr.length >= 4) {
+    var last4 = epsQArr.slice(-4).filter(function(v){ return v != null; });
+    if(last4.length === 4) epsTTM = last4.reduce(function(a,b){return a+b;}, 0);
+  }
+
+  // Dernier trimestre réel + même trim N-1 pour YoY
+  var lastQtrEps = null, lastQtrLabel = null, prevYearQtrEps = null;
+  var lastQtrIdx = -1;
+  for(var _qi = epsQArr.length-1; _qi >= 0; _qi--) {
+    if(epsQArr[_qi] != null){ lastQtrEps = epsQArr[_qi]; lastQtrLabel = qtrLabels[_qi]||null; lastQtrIdx = _qi; break; }
+  }
+  if(lastQtrIdx >= 4) prevYearQtrEps = epsQArr[lastQtrIdx-4];
+
+  // EPS annuel depuis fin annuels (pour fallback)
   var lastEpsAnnual = null;
   try {
     var fin2 = window._cdLastFin;
-    if(fin2 && fin2.eps) { for(var _i=fin2.eps.length-1;_i>=0;_i--){ if(fin2.eps[_i]!=null&&fin2.eps[_i]>0){lastEpsAnnual=fin2.eps[_i];break;} } }
+    if(fin2 && fin2.eps) { for(var _ai=fin2.eps.length-1;_ai>=0;_ai--){ if(fin2.eps[_ai]!=null&&fin2.eps[_ai]>0){lastEpsAnnual=fin2.eps[_ai];break;} } }
   } catch(e){}
+  var annualBase = epsTTM || lastEpsAnnual;
 
   var ae = f && f.analystEstimates;
 
-  function estRow(label, e, showGrowth){
-    if(!e) return '<tr><td colspan="5" style="padding:10px 8px;color:var(--muted);font-size:12px">'+label+' \u2014 donn\u00e9es indisponibles</td></tr>';
+  function growthBadge(v, base) {
+    if(v == null || base == null || base <= 0) return '';
+    var g = (v/base-1)*100;
+    return '<span style="font-size:10px;font-weight:700;background:'+(g>=0?'rgba(34,197,94,.15)':'rgba(239,68,68,.15)')+';color:'+(g>=0?'#22c55e':'#ef4444')+';border-radius:4px;padding:1px 5px;margin-left:6px">'+(g>=0?'+':'')+g.toFixed(1)+'% YoY</span>';
+  }
+
+  function estRow(label, e, base, yoyNote){
+    if(!e) return '<tr><td colspan="5" style="padding:9px 8px;color:var(--muted);font-size:12px">'+label+' \u2014 donn\u00e9es indisponibles</td></tr>';
     var epsAvg = e.epsAvg, epsLo = e.epsLow, epsHi = e.epsHigh, revAvg = e.revAvg;
     var revFmt = revAvg != null ? (revAvg > 1e9 ? (revAvg/1e9).toFixed(2)+'Md' : (revAvg/1e6).toFixed(0)+'M') : '\u2014';
     var epsStr = epsAvg != null ? '<b>'+cur+fN(epsAvg)+'</b>' : '\u2014';
     var frcStr = (epsLo != null && epsHi != null) ? cur+fN(epsLo)+' \u2013 '+cur+fN(epsHi) : '\u2014';
-    var growthBadge = '';
-    if(showGrowth && epsAvg != null && lastEpsAnnual != null && lastEpsAnnual > 0){
-      var g = (epsAvg/lastEpsAnnual-1)*100;
-      growthBadge = ' <span style="font-size:10px;font-weight:700;color:'+(g>=0?'#22c55e':'#ef4444')+'">'+(g>=0?'+':'')+g.toFixed(1)+'%</span>';
-    }
+    var gb = growthBadge(epsAvg, base);
+    var note = yoyNote ? '<br><span style="font-size:9px;color:var(--muted)">'+yoyNote+'</span>' : '';
     return '<tr style="border-bottom:1px solid var(--border2)">' +
-      '<td style="padding:10px 8px;font-size:13px;font-weight:600">'+label+'</td>' +
-      '<td style="padding:10px 8px;text-align:right;font-size:13px" class="mono">'+epsStr+growthBadge+'</td>' +
-      '<td style="padding:10px 8px;text-align:right;font-size:11px;color:var(--muted)" class="mono">'+frcStr+'</td>' +
-      '<td style="padding:10px 8px;text-align:right;font-size:12px" class="mono">'+revFmt+'</td>' +
-      '<td style="padding:10px 8px;text-align:right;font-size:11px;color:var(--muted)">'+(e.epsCount!=null?e.epsCount+' anal.':'\u2014')+'</td>' +
+      '<td style="padding:9px 8px;font-size:13px;font-weight:600">'+label+note+'</td>' +
+      '<td style="padding:9px 8px;text-align:right;font-size:13px" class="mono">'+epsStr+gb+'</td>' +
+      '<td style="padding:9px 8px;text-align:right;font-size:11px;color:var(--muted)" class="mono">'+frcStr+'</td>' +
+      '<td style="padding:9px 8px;text-align:right;font-size:12px" class="mono">'+revFmt+'</td>' +
+      '<td style="padding:9px 8px;text-align:right;font-size:11px;color:var(--muted)">'+(e.epsCount!=null?e.epsCount+' anal.':'\u2014')+'</td>' +
     '</tr>';
   }
 
+  var ttmRow = epsTTM != null ? '<tr style="border-bottom:1px solid var(--border2);background:rgba(99,75,228,.08)">' +
+    '<td style="padding:9px 8px;font-size:12px;font-weight:600">EPS TTM <span style="font-size:10px;font-weight:400;color:var(--muted)">(4 dern. trim.)</span></td>' +
+    '<td style="padding:9px 8px;text-align:right;font-size:14px;font-weight:800" class="mono">'+cur+fN(epsTTM)+'</td>' +
+    '<td colspan="3" style="padding:9px 8px;font-size:11px;color:var(--muted)">Somme 4 derniers trimestres r\u00e9els \u2014 base comparaison annuelle</td>' +
+  '</tr>' : '';
+
+  var lastQtrRow = lastQtrEps != null ? '<tr style="border-bottom:1px solid var(--border2)">' +
+    '<td style="padding:9px 8px;font-size:12px;font-weight:600">'+(lastQtrLabel||'Dernier trim.')+' <span style="font-size:10px;font-weight:400;color:var(--muted)">(r\u00e9el)</span></td>' +
+    '<td style="padding:9px 8px;text-align:right;font-size:13px;font-weight:700" class="mono">'+cur+fN(lastQtrEps)+growthBadge(lastQtrEps, prevYearQtrEps)+'</td>' +
+    '<td colspan="3" style="padding:9px 8px;font-size:11px;color:var(--muted)">'+(prevYearQtrEps!=null?'Comp. m\u00eame trim. N-1 : '+cur+fN(prevYearQtrEps):'YoY indisponible')+'</td>' +
+  '</tr>' : '';
+
   var epsHtml = '<div class="card">' +
-    '<div style="font-size:15px;font-weight:700;margin-bottom:4px">\ud83d\udcca Estimations EPS & CA</div>' +
-    (lastEpsAnnual ? '<div style="font-size:12px;color:var(--muted);margin-bottom:14px">Dernier EPS annuel r\u00e9el : <b style="color:var(--text)">'+cur+fN(lastEpsAnnual)+'</b></div>' : '<div style="margin-bottom:14px"></div>') +
+    '<div style="font-size:15px;font-weight:700;margin-bottom:14px">\ud83d\udcca EPS R\u00e9els & Estimations analystes</div>' +
     '<table style="width:100%;border-collapse:collapse">' +
     '<thead><tr style="border-bottom:2px solid var(--border)">' +
       '<th style="padding:8px;text-align:left;font-size:11px;color:var(--muted)">P\u00c9RIODE</th>' +
-      '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">EPS MOY.</th>' +
+      '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">EPS</th>' +
       '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">FOURCHETTE</th>' +
       '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">CA MOY.</th>' +
       '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">ANAL.</th>' +
     '</tr></thead><tbody>' +
-    (lastEpsAnnual ? '<tr style="background:rgba(99,75,228,.08);border-bottom:1px solid var(--border2)">' +
-      '<td style="padding:9px 8px;font-size:12px;color:var(--muted)">Dernier annuel r\u00e9el</td>' +
-      '<td style="padding:9px 8px;text-align:right;font-size:13px;font-weight:700" class="mono">'+cur+fN(lastEpsAnnual)+'</td>' +
-      '<td colspan="3" style="padding:9px 8px;font-size:11px;color:var(--muted)">R\u00e9f\u00e9rence pour la croissance</td>' +
-    '</tr>' : '') +
-    estRow('Trim. en cours', ae&&ae.currentQtr, false) +
-    estRow('Trim. suivant',  ae&&ae.nextQtr,    false) +
-    estRow('Ann\u00e9e fwd', ae&&ae.currentYear, true) +
+    ttmRow + lastQtrRow +
+    '<tr><td colspan="5" style="padding:5px 8px;font-size:10px;color:var(--muted2);letter-spacing:.05em;background:rgba(255,255,255,.015)">' +
+      'ESTIMATIONS ANALYSTES (pr\u00e9visions, pas encore publi\u00e9es)' +
+    '</td></tr>' +
+    estRow('Trim. en cours', ae&&ae.currentQtr, prevYearQtrEps, 'Croissance vs m\u00eame trim. N-1') +
+    estRow('Trim. suivant',  ae&&ae.nextQtr,    null, null) +
+    estRow('Ann\u00e9e fwd', ae&&ae.currentYear, annualBase, annualBase===epsTTM?'Croissance vs EPS TTM':'Croissance vs dernier annuel') +
     '</tbody></table>' +
-    '<div style="font-size:10px;color:var(--muted);margin-top:10px">Source : Yahoo Finance \u2014 estimations consensus. Susceptibles de r\u00e9vision.</div>' +
+    '<div style="font-size:10px;color:var(--muted);margin-top:10px">EPS r\u00e9els = donn\u00e9es Yahoo Finance GAAP. Estimations = consensus analystes non-GAAP. Les comparaisons YoY peuvent diff\u00e9rer selon le r\u00e9f\u00e9rentiel utilis\u00e9.</div>' +
   '</div>';
 
   el.innerHTML = consensusHtml + epsHtml;
