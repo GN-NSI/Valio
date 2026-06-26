@@ -2756,7 +2756,7 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
     '</div>' +
     '</div>' +
     '<div id="cdtab-mat" style="display:none">' +
-    '<h3 style="font-size:15px;font-weight:700;margin:4px 0 4px">🎯 Matrice de rendement — 5 ans</h3>' +
+    '<h3 style="font-size:15px;font-weight:700;margin:4px 0 4px" id="cd-matrix-title">🎯 Matrice de rendement — 5 ans</h3>' +
     '<p style="font-size:11px;color:var(--muted);margin:0 0 12px">Rendement annualisé selon croissance de l\u0027EPS × multiple de sortie. Clique une cellule pour choisir ton scénario — les hypothèses sont éditables.</p>' +
     '<div class="card" id="cd-yield-matrix"><div style="color:var(--muted);font-size:12px;padding:10px">Calcul…</div></div>' +
     '</div>' +
@@ -4037,84 +4037,53 @@ window.showCdTab=function(t,noScroll){
   },80);
 };
 
-// ═══ MATRICE DE RENDEMENT (5 ans) — inspirée baggr ═══════════════════════
-// Rendement annualisé = ((EPS0 × (1+g)^5 × multiple) / prix)^(1/5) − 1
-// Prix juste = valeur future actualisée à 10 %/an · Marge de sécurité = 1 − prix/prix juste
+// ═══ MATRICE DE RENDEMENT (5 ou 10 ans) ═════════════════════════════════
+// Rendement annualisé = ((EPS0 × (1+g)^N × multiple) / prix)^(1/N) − 1
+// Prix juste = valeur future actualisée à 10 %/an
 var _ymSel={};
 function renderYieldMatrix(ticker, price, f, fin){
   var el=document.getElementById('cd-yield-matrix'); if(!el) return;
   function lastNN(arr){ if(!arr)return null; for(var i=arr.length-1;i>=0;i--){ if(arr[i]!=null) return arr[i]; } return null; }
   var st=_ymSel[ticker]||{};
-  // EPS de départ : éditable ; défaut = TTM via P/E Yahoo, sinon dernier EPS annuel connu
+
+  // Horizon 5 ou 10 ans
+  var N=(st.n===10)?10:5;
+  var titleEl=document.getElementById('cd-matrix-title');
+  if(titleEl) titleEl.textContent='\uD83C\uDFAF Matrice de rendement \u2014 '+N+' ans';
+
   var eps0=st.eps!=null?st.eps:((f&&f.trailingPE&&price)?(price/f.trailingPE):lastNN(fin&&fin.eps));
-  if(!(eps0>0)||!(price>0)){ el.innerHTML='<div style="color:var(--muted);font-size:12px">EPS indisponible — saisis un EPS annuel dans les résultats pour activer la matrice.</div>'; return; }
-  // ── CROISSANCE CONSENSUS — hiérarchie corrigée ─────────────────────────────
-  // PIÈGE à éviter : epsGrowthFwd1Y = croissance "+1y vs 0y" de Yahoo
-  //   = incrément marginal FY(N+2) / FY(N+1) − 1, ex. +2% pour GOOGL alors
-  //   que la vraie croissance implicite consensus est ~25%.
-  //   → NE PAS utiliser en position principale pour une matrice 5 ans.
-  //
-  // Hiérarchie (du plus pertinent au plus approximatif) :
-  //   1. epsGrowthFwd5Y — consensus long terme Yahoo (5 ans annualisé) ← IDÉAL pour matrice 5 ans
-  //   2. Croissance implicite EPS : estimFwd / eps0 − 1 (estimation N+1 vs trailing réel)
-  //   3. Historique CAGR (GAAP, peut être distordu par one-offs)
-  //   4. epsGrowthFwd1Y en dernier recours (peut valoir 2% pour GOOGL)
+  if(!(eps0>0)||!(price>0)){ el.innerHTML='<div style="color:var(--muted);font-size:12px">EPS indisponible \u2014 saisis un EPS annuel dans les r\u00e9sultats pour activer la matrice.</div>'; return; }
+
+  // Croissance consensus
   var _eps=(fin&&fin.eps)||[];
   var _iF=-1,_iL=-1; for(var _i=0;_i<_eps.length;_i++){ if(_eps[_i]!=null&&_eps[_i]>0){ if(_iF<0)_iF=_i; _iL=_i; } }
   var _histCAGR=(_iF>=0&&_iL>_iF)?(Math.pow(_eps[_iL]/_eps[_iF],1/(_iL-_iF))-1)*100:null;
   var _hG=(_histCAGR!=null&&isFinite(_histCAGR))?Math.min(45,Math.max(-30,_histCAGR)):null;
-
-  // Signal 1 : consensus long terme 5 ans (le meilleur pour horizon 5 ans)
   var _aG5y=(f&&f.epsGrowthFwd5Y!=null&&f.epsGrowthFwd5Y>1&&f.epsGrowthFwd5Y<80)?f.epsGrowthFwd5Y:null;
-
-  // Signal 2 : epsGrowth de l'exercice EN COURS (trend0y, non-GAAP vs non-GAAP réel N-1)
-  // C'est le signal le plus propre : Yahoo compare déjà estimation non-GAAP vs réel non-GAAP.
-  // Ex: GOOGL FY2026 $14.22 vs FY2025 $10.81 → +31.5% (au lieu de +2% qui était le marginal)
   var _aGThisYear=null;
   var _tyObj=(f&&f.analystEstimates)?f.analystEstimates.thisYear:null;
   if(_tyObj&&_tyObj.epsGrowth!=null&&_tyObj.epsGrowth>0&&_tyObj.epsGrowth<200) _aGThisYear=_tyObj.epsGrowth;
-
-  // Fallback : croissance implicite = estimation FY+1 / EPS trailing − 1 (peut mélanger GAAP/nonGAAP)
   var _aGImpl=null;
   var _fwdEps=(f&&f.analystEstimates&&f.analystEstimates.currentYear)?f.analystEstimates.currentYear.epsAvg:null;
-  if(_fwdEps&&_fwdEps>0&&eps0>0){
-    var _ig=(_fwdEps/eps0-1)*100;
-    if(_ig>0&&_ig<150) _aGImpl=_ig;
-  }
-  // Meilleur signal court terme : thisYear (0y, propre) > implied (cross-GAAP) > marginal 1y
+  if(_fwdEps&&_fwdEps>0&&eps0>0){ var _ig=(_fwdEps/eps0-1)*100; if(_ig>0&&_ig<150) _aGImpl=_ig; }
   var _aGBest1Y=_aGThisYear||_aGImpl;
-
-  // Signal 3 (dernier recours) : epsGrowthFwd1Y = incrément marginal an 2 vs an 1
   var _aG1y=(f&&f.epsGrowthFwd1Y!=null&&f.epsGrowthFwd1Y>1)?f.epsGrowthFwd1Y:null;
-
-  // Calcul du centre selon disponibilité des signaux
   var _gcand;
-  if(_aG5y!=null&&_aGBest1Y!=null){
-    // Cas idéal : consensus 5 ans + signal court terme
-    // Poids : 60% long-terme (durable) + 40% court-terme (ce que le marché price maintenant)
-    // Ex GOOGL: 0.6*15% + 0.4*31.5% = 9+12.6 = 21.6% → arrondi 22% ✓
-    _gcand=0.6*_aG5y+0.4*Math.min(60,_aGBest1Y);
-  } else if(_aG5y!=null){
-    _gcand=_aG5y;
-  } else if(_aGBest1Y!=null&&_hG!=null){
-    // Pas de consensus 5 ans : blend court-terme + histo (atténue les rebonds non-durables)
-    _gcand=0.55*Math.min(50,_aGBest1Y)+0.45*_hG;
-  } else if(_aGBest1Y!=null){
-    _gcand=Math.min(40,_aGBest1Y);
-  } else if(_aG1y!=null&&_hG!=null){
-    _gcand=0.4*_hG+0.6*_aG1y;
-  } else if(_aG1y!=null){
-    _gcand=_aG1y;
-  } else {
-    _gcand=_hG!=null?_hG:12;
-  }
+  if(_aG5y!=null&&_aGBest1Y!=null){ _gcand=0.6*_aG5y+0.4*Math.min(60,_aGBest1Y);
+  } else if(_aG5y!=null){ _gcand=_aG5y;
+  } else if(_aGBest1Y!=null&&_hG!=null){ _gcand=0.55*Math.min(50,_aGBest1Y)+0.45*_hG;
+  } else if(_aGBest1Y!=null){ _gcand=Math.min(40,_aGBest1Y);
+  } else if(_aG1y!=null&&_hG!=null){ _gcand=0.4*_hG+0.6*_aG1y;
+  } else if(_aG1y!=null){ _gcand=_aG1y;
+  } else { _gcand=_hG!=null?_hG:12; }
   var gC=st.gC!=null?st.gC:Math.min(50,Math.max(2,Math.round(_gcand)));
-  // Multiple central : Forward PE actuel, avec un plancher de 20x
-  // (une entreprise quality/growth ne se valorise pas moins que 20x même en conservatif)
-  var _rawFPE = f && (f.forwardPE || f.trailingPE);
-  var _fpeForMatrix = _rawFPE ? Math.max(20, Math.round(_rawFPE)) : 22;
-  var mCur=st.mC!=null?st.mC:Math.min(60, _fpeForMatrix);
-  if(st.g==null||st.m==null){ st={g:gC,m:mCur,eps:eps0,gC:gC,mC:mCur}; _ymSel[ticker]=st; }
+
+  // Multiple : plafonné à 25x (normalisé long terme)
+  // min(fwd P/E actuel, 25x) — conservateur pour boîtes chères, garde le marché pour les autres
+  var _rawFPE=f&&(f.forwardPE||f.trailingPE);
+  var _fpeForMatrix=_rawFPE?Math.min(Math.max(15,Math.round(_rawFPE)),25):22;
+  var mCur=st.mC!=null?st.mC:_fpeForMatrix;
+  if(st.g==null||st.m==null){ st={g:gC,m:mCur,eps:eps0,gC:gC,mC:mCur,n:N}; _ymSel[ticker]=st; }
   st.eps=eps0; st.gC=gC; st.mC=mCur;
   var sel=st;
   var gRows=[],mCols=[];
@@ -4122,41 +4091,50 @@ function renderYieldMatrix(ticker, price, f, fin){
   for(var m=Math.max(5,mCur-7);m<=mCur+7;m++) mCols.push(m);
   if(gRows.indexOf(sel.g)<0) sel.g=gC; if(mCols.indexOf(sel.m)<0) sel.m=mCur;
 
-  function annRet(g,m){ return (Math.pow((eps0*Math.pow(1+g/100,5)*m)/price,1/5)-1)*100; }
+  function annRet(g,m){ return (Math.pow((eps0*Math.pow(1+g/100,N)*m)/price,1/N)-1)*100; }
   function cellColor(r){ return r<8?'#ef4444':r<12?'#f59e0b':'#22c55e'; }
-
   var selRet=annRet(sel.g,sel.m);
-  var fair=eps0*Math.pow(1+sel.g/100,5)*sel.m/Math.pow(1.10,5);
+  var fair=eps0*Math.pow(1+sel.g/100,N)*sel.m/Math.pow(1.10,N);
   var marge=(1-price/fair)*100;
-  var cSym=(S.prices[ticker]&&S.prices[ticker].currency==='EUR')?'€':'$';
+  var cSym=(S.prices[ticker]&&S.prices[ticker].currency==='EUR')?'\u20ac':'$';
+  var tName=ticker.replace(/'/g,"\\'");
 
-  var html='<div style="display:flex;gap:26px;flex-wrap:wrap;margin-bottom:10px">'+
-    '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Prix juste (10 %/an)</div><div style="font-size:20px;font-weight:800;color:#634BE4" class="mono">'+fair.toFixed(2)+' '+cSym+'</div></div>'+
-    '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Rendement estimé</div><div style="font-size:20px;font-weight:800;color:'+cellColor(selRet)+'" class="mono">'+selRet.toFixed(2)+' %/an</div></div>'+
-    '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Marge de sécurité</div><div style="font-size:20px;font-weight:800;color:'+(marge>=0?'#22c55e':'#f59e0b')+'" class="mono">'+(marge>=0?'+':'')+marge.toFixed(2)+' %</div></div>'+
-  '</div>'+
-  // Hypothèses éditables
-  '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin-bottom:14px;padding:10px;background:var(--bg2,rgba(255,255,255,.02));border-radius:8px">'+
-    '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">EPS de base ('+cSym+')</label><br><input id="ym-eps" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+eps0.toFixed(2)+'"></div>'+
-    '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Croissance centrale %</label><br><input id="ym-g" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+gC+'"></div>'+
-    '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Multiple central</label><br><input id="ym-m" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+mCur+'"></div>'+
-    '<button class="btn btn-ghost btn-sm" onclick="window._ymApply(\''+ticker.replace(/'/g,"\\'")+'\')">Appliquer</button>'+
-    '<button class="btn btn-ghost btn-sm" onclick="window._ymReset(\''+ticker.replace(/'/g,"\\'")+'\')" title="Revenir au consensus analystes">↺ Consensus</button>'+
-    '<span style="font-size:10px;color:var(--muted2)">Défauts : croissance = consensus analystes 5 ans Yahoo (ou estimation N+1 / EPS réels si indisponible) · multiple = fwd P/E actuel</span>'+
-  '</div>'+
-  '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:11px;white-space:nowrap" class="mono">'+
-  '<tr><th style="padding:5px 8px;color:var(--muted);font-size:9px;text-align:left">CROISS. \\ MULT.</th>'+
-    mCols.map(function(m){return '<th style="padding:5px 8px;color:'+(m===mCur?'#634BE4':'var(--muted)')+';font-weight:'+(m===mCur?'800':'600')+'">'+m+'</th>';}).join('')+'</tr>'+
-  gRows.map(function(g){
-    return '<tr'+(g===sel.g?' style="background:rgba(99,75,228,.10)"':'')+'><td style="padding:5px 8px;color:'+(g===sel.g?'#634BE4':'var(--muted)')+';font-weight:700">'+g.toFixed(1)+' %</td>'+
-      mCols.map(function(m){
-        var r=annRet(g,m); var isSel=(g===sel.g&&m===sel.m);
-        return '<td onclick="window._ymPick(\''+ticker.replace(/'/g,"\\'")+'\','+g+','+m+')" style="padding:5px 8px;text-align:right;cursor:pointer;color:'+cellColor(r)+';'+(isSel?'outline:1.5px solid #634BE4;border-radius:4px;font-weight:800;':'')+(m===mCur?'background:rgba(99,75,228,.07);':'')+'">'+r.toFixed(2)+'%</td>';
-      }).join('')+'</tr>';
-  }).join('')+'</table></div>'+
-  '<div style="font-size:10px;color:var(--muted2);margin-top:10px">Scénario : EPS +'+sel.g+' %/an × multiple '+sel.m+'x · EPS base '+eps0.toFixed(2)+' '+cSym+'. Modèle simplifié : EPS projeté 5 ans, valorisé au multiple de sortie (= P/E <i>trailing</i> en année 5), hors dividendes/rachats. Vert ≥ 12 %/an · Orange 8–12 % · Rouge < 8 %.</div>';
+  function togBtn(label,nVal){
+    var active=(N===nVal);
+    return '<button onclick="window._ymSetN(\''+tName+'\','+nVal+')" style="padding:4px 12px;font-size:11px;font-weight:700;border-radius:6px;cursor:pointer;border:none;'+(active?'background:#634BE4;color:white;':'background:rgba(255,255,255,.08);color:var(--muted);')+'">'+label+'</button>';
+  }
+
+  var html=
+    '<div style="display:flex;align-items:center;gap:6px;margin-bottom:14px">'+
+      togBtn('5 ans',5)+togBtn('10 ans',10)+
+      '<div style="margin-left:16px;display:flex;gap:26px;flex-wrap:wrap">'+
+        '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Prix juste (10 %/an)</div><div style="font-size:20px;font-weight:800;color:#634BE4" class="mono">'+fair.toFixed(2)+' '+cSym+'</div></div>'+
+        '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Rendement estim\u00e9</div><div style="font-size:20px;font-weight:800;color:'+cellColor(selRet)+'" class="mono">'+selRet.toFixed(2)+' %/an</div></div>'+
+        '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Marge de s\u00e9curit\u00e9</div><div style="font-size:20px;font-weight:800;color:'+(marge>=0?'#22c55e':'#f59e0b')+'" class="mono">'+(marge>=0?'+':'')+marge.toFixed(2)+' %</div></div>'+
+      '</div>'+
+    '</div>'+
+    '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin-bottom:14px;padding:10px;background:var(--bg2,rgba(255,255,255,.02));border-radius:8px">'+
+      '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">EPS de base ('+cSym+')</label><br><input id="ym-eps" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+eps0.toFixed(2)+'"></div>'+
+      '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Croissance centrale %</label><br><input id="ym-g" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+gC+'"></div>'+
+      '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Multiple de sortie</label><br><input id="ym-m" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+mCur+'"></div>'+
+      '<button class="btn btn-ghost btn-sm" onclick="window._ymApply(\''+tName+'\')">Appliquer</button>'+
+      '<button class="btn btn-ghost btn-sm" onclick="window._ymReset(\''+tName+'\')" title="Revenir au consensus analystes">\u21ba Consensus</button>'+
+      '<span style="font-size:10px;color:var(--muted2)">Croissance = consensus 5 ans Yahoo \u00b7 Multiple plafonn\u00e9 25x \u00b7 Ajuster pour re-rating ou horizon 10 ans</span>'+
+    '</div>'+
+    '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:11px;white-space:nowrap" class="mono">'+
+    '<tr><th style="padding:5px 8px;color:var(--muted);font-size:9px;text-align:left">CROISS. \\ MULT.</th>'+
+      mCols.map(function(m){return '<th style="padding:5px 8px;color:'+(m===mCur?'#634BE4':'var(--muted)')+';font-weight:'+(m===mCur?'800':'600')+'">'+m+'</th>';}).join('')+'</tr>'+
+    gRows.map(function(g){
+      return '<tr'+(g===sel.g?' style="background:rgba(99,75,228,.10)"':'')+'><td style="padding:5px 8px;color:'+(g===sel.g?'#634BE4':'var(--muted)')+';font-weight:700">'+g.toFixed(1)+' %</td>'+
+        mCols.map(function(m){
+          var r=annRet(g,m); var isSel=(g===sel.g&&m===sel.m);
+          return '<td onclick="window._ymPick(\''+tName+'\','+g+','+m+')" style="padding:5px 8px;text-align:right;cursor:pointer;color:'+cellColor(r)+';'+(isSel?'outline:1.5px solid #634BE4;border-radius:4px;font-weight:800;':'')+(m===mCur?'background:rgba(99,75,228,.07);':'')+'">'+r.toFixed(2)+'%</td>';
+        }).join('')+'</tr>';
+    }).join('')+'</table></div>'+
+    '<div style="font-size:10px;color:var(--muted2);margin-top:10px">Sc\u00e9nario\u00a0: EPS +'+sel.g+' %/an \u00d7 multiple '+sel.m+'x \u00b7 EPS base '+eps0.toFixed(2)+' '+cSym+' \u00b7 horizon '+N+' ans. EPS projet\u00e9 '+N+' ans, valoaris\u00e9 au multiple de sortie, hors dividendes/rachats. Vert \u2265 12\u00a0%/an \u00b7 Orange 8\u201312\u00a0% \u00b7 Rouge < 8\u00a0%.'+(N===10?' \u26a0\ufe0f Pour 10 ans\u00a0: ajuster la croissance vers un rythme soutenable (\u00bd du consensus court terme est souvent plus r\u00e9aliste).':'')+'</div>';
   el.innerHTML=html;
 }
+window._ymSetN=function(ticker,n){ var st=_ymSel[ticker]||{}; st.n=n; _ymSel[ticker]=st; window._ymRerender(ticker); };
 window._ymApply=function(ticker){
   function v(id){ var x=parseFloat((document.getElementById(id).value||'').replace(',','.')); return isFinite(x)?x:null; }
   var st=_ymSel[ticker]||{};
