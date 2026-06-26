@@ -3409,7 +3409,7 @@ window.loadCdAnalysts = async function(ticker, price, f, forceReload){
   el.dataset.loaded = ''; // reset pour forcer rechargement si nouvelles données
   el.innerHTML = '<div style="text-align:center;padding:40px"><div class="spinner"></div></div>';
 
-  if(!f || f._v == null || f._v < 8 || f.targetMeanPrice === undefined) {
+  if(!f || f._v == null || f._v < 9 || f.targetMeanPrice === undefined) {
     try {
       var r = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=fundamentals', {signal:AbortSignal.timeout(15000)});
       var d = await r.json();
@@ -3664,7 +3664,27 @@ window.loadCdAnalysts = async function(ticker, price, f, forceReload){
       '<td style="padding:9px 8px;text-align:right;font-size:11px;color:var(--muted)">'+(e.epsCount!=null?e.epsCount+' anal.':'\u2014')+'</td>' +
     '</tr>';
   }
-  // Ligne Année fwd (currentYear = exercice suivant)
+  // ── Ligne Année en cours (thisYear = 0y = exercice fiscal en cours, ex: FY2026 GOOGL)
+  // Croissance = non-GAAP cohérent Yahoo : estimation FY en cours vs réel FY précédent
+  var ty=ae&&ae.thisYear;
+  var tyGrowth='';
+  if(ty){
+    if(ty.epsGrowth!=null) tyGrowth+='<div style="font-size:11px"><span style="color:var(--muted)">BPA</span> '+gIn(ty.epsGrowth)+'</div>';
+    if(ty.revGrowth!=null) tyGrowth+='<div style="font-size:11px"><span style="color:var(--muted)">CA</span> '+gIn(ty.revGrowth)+'</div>';
+  }
+  if(!tyGrowth) tyGrowth='\u2014';
+  var thisYearRow=ty?
+    '<tr style="border-bottom:1px solid var(--border2);background:rgba(99,75,228,.05)">' +
+      '<td style="padding:9px 8px"><div style="font-size:13px;font-weight:700">Ann\u00e9e en cours</div><div style="font-size:10px;color:var(--muted)">exercice fiscal en cours \u00b7 YoY vs N-1</div></td>' +
+      '<td style="padding:9px 8px;text-align:right;font-size:13px;font-weight:700" class="mono">'+fEps(ty.epsAvg)+'</td>' +
+      '<td style="padding:9px 8px;text-align:right;font-size:11px;color:var(--muted)" class="mono">'+((ty.epsLow!=null&&ty.epsHigh!=null)?fEps(ty.epsLow)+'\u2013'+fEps(ty.epsHigh):'\u2014')+'</td>' +
+      '<td style="padding:9px 8px;text-align:right;font-size:12px" class="mono">'+fMdRaw(ty.revAvg)+'</td>' +
+      '<td style="padding:9px 8px;text-align:right">'+tyGrowth+'</td>' +
+      '<td style="padding:9px 8px;text-align:right;font-size:11px;color:var(--muted)">'+(ty.epsCount!=null?ty.epsCount+' anal.':'\u2014')+'</td>' +
+    '</tr>'
+  : '';
+
+  // ── Ligne Année suivante (currentYear = +1y = prochain exercice fiscal, ex: FY2027 GOOGL)
   var cy=ae&&ae.currentYear;
   var fwdGrowth='';
   if(cy){
@@ -3673,14 +3693,14 @@ window.loadCdAnalysts = async function(ticker, price, f, forceReload){
   }
   if(!fwdGrowth) fwdGrowth='\u2014';
   var fwdRow=cy?
-    '<tr><td style="padding:9px 8px"><div style="font-size:13px;font-weight:600">Ann\u00e9e fwd</div><div style="font-size:10px;color:var(--muted)">prochain exercice \u00b7 vs exercice en cours</div></td>' +
+    '<tr><td style="padding:9px 8px"><div style="font-size:13px;font-weight:600">Ann\u00e9e suivante</div><div style="font-size:10px;color:var(--muted)">prochain exercice \u00b7 YoY vs exercice en cours</div></td>' +
       '<td style="padding:9px 8px;text-align:right;font-size:13px;font-weight:700" class="mono">'+fEps(cy.epsAvg)+'</td>' +
-      '<td style="padding:9px 8px;text-align:right;font-size:11px;color:var(--muted)">\u2014</td>' +
+      '<td style="padding:9px 8px;text-align:right;font-size:11px;color:var(--muted)">'+((cy.epsLow!=null&&cy.epsHigh!=null)?fEps(cy.epsLow)+'\u2013'+fEps(cy.epsHigh):'\u2014')+'</td>' +
       '<td style="padding:9px 8px;text-align:right;font-size:12px" class="mono">'+fMdRaw(cy.revAvg)+'</td>' +
       '<td style="padding:9px 8px;text-align:right">'+fwdGrowth+'</td>' +
-      '<td style="padding:9px 8px;text-align:right;font-size:11px;color:var(--muted)">'+(cy.count!=null?cy.count+' anal.':'\u2014')+'</td>' +
+      '<td style="padding:9px 8px;text-align:right;font-size:11px;color:var(--muted)">'+(cy.count!=null?cy.count+' anal.':cy.epsCount!=null?cy.epsCount+' anal.':'\u2014')+'</td>' +
     '</tr>'
-  : '<tr><td colspan="6" style="padding:9px 8px;color:var(--muted);font-size:12px">Ann\u00e9e fwd \u2014 donn\u00e9es indisponibles</td></tr>';
+  : '<tr><td colspan="6" style="padding:9px 8px;color:var(--muted);font-size:12px">Ann\u00e9e suivante \u2014 donn\u00e9es indisponibles</td></tr>';
 
   var estTable =
     '<div style="font-size:13px;font-weight:700;margin:18px 0 4px;color:var(--text)">\ud83d\udd2e Pr\u00e9visions analystes</div>' +
@@ -3696,6 +3716,7 @@ window.loadCdAnalysts = async function(ticker, price, f, forceReload){
     '</tr></thead><tbody>' +
       estRow('Trim. en cours', 'YoY vs m\u00eame trim. N-1', ae&&ae.currentQtr) +
       estRow('Trim. suivant',  'YoY vs m\u00eame trim. N-1', ae&&ae.nextQtr) +
+      thisYearRow +
       fwdRow +
     '</tbody></table>';
 
@@ -4046,32 +4067,40 @@ function renderYieldMatrix(ticker, price, f, fin){
   // Signal 1 : consensus long terme 5 ans (le meilleur pour horizon 5 ans)
   var _aG5y=(f&&f.epsGrowthFwd5Y!=null&&f.epsGrowthFwd5Y>1&&f.epsGrowthFwd5Y<80)?f.epsGrowthFwd5Y:null;
 
-  // Signal 2 : croissance implicite = estimation FY(N+1) / EPS trailing − 1
-  // (ce que les analystes anticipent RÉELLEMENT sur la première année vs les réels)
+  // Signal 2 : epsGrowth de l'exercice EN COURS (trend0y, non-GAAP vs non-GAAP réel N-1)
+  // C'est le signal le plus propre : Yahoo compare déjà estimation non-GAAP vs réel non-GAAP.
+  // Ex: GOOGL FY2026 $14.22 vs FY2025 $10.81 → +31.5% (au lieu de +2% qui était le marginal)
+  var _aGThisYear=null;
+  var _tyObj=(f&&f.analystEstimates)?f.analystEstimates.thisYear:null;
+  if(_tyObj&&_tyObj.epsGrowth!=null&&_tyObj.epsGrowth>0&&_tyObj.epsGrowth<200) _aGThisYear=_tyObj.epsGrowth;
+
+  // Fallback : croissance implicite = estimation FY+1 / EPS trailing − 1 (peut mélanger GAAP/nonGAAP)
   var _aGImpl=null;
   var _fwdEps=(f&&f.analystEstimates&&f.analystEstimates.currentYear)?f.analystEstimates.currentYear.epsAvg:null;
   if(_fwdEps&&_fwdEps>0&&eps0>0){
     var _ig=(_fwdEps/eps0-1)*100;
-    if(_ig>0&&_ig<150) _aGImpl=_ig; // cap 150% : évite les années de rebond exceptionnel
+    if(_ig>0&&_ig<150) _aGImpl=_ig;
   }
+  // Meilleur signal court terme : thisYear (0y, propre) > implied (cross-GAAP) > marginal 1y
+  var _aGBest1Y=_aGThisYear||_aGImpl;
 
   // Signal 3 (dernier recours) : epsGrowthFwd1Y = incrément marginal an 2 vs an 1
   var _aG1y=(f&&f.epsGrowthFwd1Y!=null&&f.epsGrowthFwd1Y>1)?f.epsGrowthFwd1Y:null;
 
   // Calcul du centre selon disponibilité des signaux
   var _gcand;
-  if(_aG5y!=null&&_hG!=null){
-    // Cas idéal : consensus 5 ans + histo → blend 60/40
-    _gcand=0.6*_aG5y+0.4*_hG;
+  if(_aG5y!=null&&_aGBest1Y!=null){
+    // Cas idéal : consensus 5 ans + signal court terme
+    // Poids : 60% long-terme (durable) + 40% court-terme (ce que le marché price maintenant)
+    // Ex GOOGL: 0.6*15% + 0.4*31.5% = 9+12.6 = 21.6% → arrondi 22% ✓
+    _gcand=0.6*_aG5y+0.4*Math.min(60,_aGBest1Y);
   } else if(_aG5y!=null){
     _gcand=_aG5y;
-  } else if(_aGImpl!=null&&_hG!=null){
-    // Croissance implicite 1A vs histo → blend conservateur (on atténue l'implicite
-    // car les années de fort rebond ne durent pas 5 ans)
-    _gcand=0.55*Math.min(50,_aGImpl)+0.45*_hG;
-  } else if(_aGImpl!=null){
-    // Seul l'implicite : on le plafonne à 40% pour la projection 5 ans
-    _gcand=Math.min(40,_aGImpl);
+  } else if(_aGBest1Y!=null&&_hG!=null){
+    // Pas de consensus 5 ans : blend court-terme + histo (atténue les rebonds non-durables)
+    _gcand=0.55*Math.min(50,_aGBest1Y)+0.45*_hG;
+  } else if(_aGBest1Y!=null){
+    _gcand=Math.min(40,_aGBest1Y);
   } else if(_aG1y!=null&&_hG!=null){
     _gcand=0.4*_hG+0.6*_aG1y;
   } else if(_aG1y!=null){
