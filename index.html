@@ -4027,18 +4027,59 @@ function renderYieldMatrix(ticker, price, f, fin){
   // EPS de départ : éditable ; défaut = TTM via P/E Yahoo, sinon dernier EPS annuel connu
   var eps0=st.eps!=null?st.eps:((f&&f.trailingPE&&price)?(price/f.trailingPE):lastNN(fin&&fin.eps));
   if(!(eps0>0)||!(price>0)){ el.innerHTML='<div style="color:var(--muted);font-size:12px">EPS indisponible — saisis un EPS annuel dans les résultats pour activer la matrice.</div>'; return; }
-  // Centres éditables. CROISSANCE : le champ analyste Yahoo (earningsTrend) est
-  // souvent corrompu (6% pour META/GOOGL = absurde). On calcule donc la croissance
-  // HISTORIQUE réelle des EPS depuis les comptes, qu'on mélange avec l'analyste si fiable.
+  // ── CROISSANCE CONSENSUS — hiérarchie corrigée ─────────────────────────────
+  // PIÈGE à éviter : epsGrowthFwd1Y = croissance "+1y vs 0y" de Yahoo
+  //   = incrément marginal FY(N+2) / FY(N+1) − 1, ex. +2% pour GOOGL alors
+  //   que la vraie croissance implicite consensus est ~25%.
+  //   → NE PAS utiliser en position principale pour une matrice 5 ans.
+  //
+  // Hiérarchie (du plus pertinent au plus approximatif) :
+  //   1. epsGrowthFwd5Y — consensus long terme Yahoo (5 ans annualisé) ← IDÉAL pour matrice 5 ans
+  //   2. Croissance implicite EPS : estimFwd / eps0 − 1 (estimation N+1 vs trailing réel)
+  //   3. Historique CAGR (GAAP, peut être distordu par one-offs)
+  //   4. epsGrowthFwd1Y en dernier recours (peut valoir 2% pour GOOGL)
   var _eps=(fin&&fin.eps)||[];
   var _iF=-1,_iL=-1; for(var _i=0;_i<_eps.length;_i++){ if(_eps[_i]!=null&&_eps[_i]>0){ if(_iF<0)_iF=_i; _iL=_i; } }
   var _histCAGR=(_iF>=0&&_iL>_iF)?(Math.pow(_eps[_iL]/_eps[_iF],1/(_iL-_iF))-1)*100:null;
-  var _hG=(_histCAGR!=null&&isFinite(_histCAGR))?Math.min(45,_histCAGR):null;
-  var _aG=(f&&f.epsGrowthFwd1Y!=null&&f.epsGrowthFwd1Y>0)?f.epsGrowthFwd1Y:null;
-  // Croissance centrale : consensus analystes en priorité (60%) + historique (40%)
-  // pour refléter les estimations actuelles de marché plutôt que le passé seul
-  var _gcand=(_hG!=null&&_aG!=null)?(0.4*_hG+0.6*_aG):(_aG!=null?_aG:(_hG!=null?_hG:12));
-  var gC=st.gC!=null?st.gC:Math.min(35,Math.max(4,Math.round(_gcand)));
+  var _hG=(_histCAGR!=null&&isFinite(_histCAGR))?Math.min(45,Math.max(-30,_histCAGR)):null;
+
+  // Signal 1 : consensus long terme 5 ans (le meilleur pour horizon 5 ans)
+  var _aG5y=(f&&f.epsGrowthFwd5Y!=null&&f.epsGrowthFwd5Y>1&&f.epsGrowthFwd5Y<80)?f.epsGrowthFwd5Y:null;
+
+  // Signal 2 : croissance implicite = estimation FY(N+1) / EPS trailing − 1
+  // (ce que les analystes anticipent RÉELLEMENT sur la première année vs les réels)
+  var _aGImpl=null;
+  var _fwdEps=(f&&f.analystEstimates&&f.analystEstimates.currentYear)?f.analystEstimates.currentYear.epsAvg:null;
+  if(_fwdEps&&_fwdEps>0&&eps0>0){
+    var _ig=(_fwdEps/eps0-1)*100;
+    if(_ig>0&&_ig<150) _aGImpl=_ig; // cap 150% : évite les années de rebond exceptionnel
+  }
+
+  // Signal 3 (dernier recours) : epsGrowthFwd1Y = incrément marginal an 2 vs an 1
+  var _aG1y=(f&&f.epsGrowthFwd1Y!=null&&f.epsGrowthFwd1Y>1)?f.epsGrowthFwd1Y:null;
+
+  // Calcul du centre selon disponibilité des signaux
+  var _gcand;
+  if(_aG5y!=null&&_hG!=null){
+    // Cas idéal : consensus 5 ans + histo → blend 60/40
+    _gcand=0.6*_aG5y+0.4*_hG;
+  } else if(_aG5y!=null){
+    _gcand=_aG5y;
+  } else if(_aGImpl!=null&&_hG!=null){
+    // Croissance implicite 1A vs histo → blend conservateur (on atténue l'implicite
+    // car les années de fort rebond ne durent pas 5 ans)
+    _gcand=0.55*Math.min(50,_aGImpl)+0.45*_hG;
+  } else if(_aGImpl!=null){
+    // Seul l'implicite : on le plafonne à 40% pour la projection 5 ans
+    _gcand=Math.min(40,_aGImpl);
+  } else if(_aG1y!=null&&_hG!=null){
+    _gcand=0.4*_hG+0.6*_aG1y;
+  } else if(_aG1y!=null){
+    _gcand=_aG1y;
+  } else {
+    _gcand=_hG!=null?_hG:12;
+  }
+  var gC=st.gC!=null?st.gC:Math.min(50,Math.max(2,Math.round(_gcand)));
   // Multiple central : Forward PE actuel, avec un plancher de 20x
   // (une entreprise quality/growth ne se valorise pas moins que 20x même en conservatif)
   var _rawFPE = f && (f.forwardPE || f.trailingPE);
@@ -4072,7 +4113,7 @@ function renderYieldMatrix(ticker, price, f, fin){
     '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Multiple central</label><br><input id="ym-m" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+mCur+'"></div>'+
     '<button class="btn btn-ghost btn-sm" onclick="window._ymApply(\''+ticker.replace(/'/g,"\\'")+'\')">Appliquer</button>'+
     '<button class="btn btn-ghost btn-sm" onclick="window._ymReset(\''+ticker.replace(/'/g,"\\'")+'\')" title="Revenir au consensus analystes">↺ Consensus</button>'+
-    '<span style="font-size:10px;color:var(--muted2)">Défauts : croissance = mix croissance EPS historique + analyste · multiple = fwd P/E actuel</span>'+
+    '<span style="font-size:10px;color:var(--muted2)">Défauts : croissance = consensus analystes 5 ans Yahoo (ou estimation N+1 / EPS réels si indisponible) · multiple = fwd P/E actuel</span>'+
   '</div>'+
   '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:11px;white-space:nowrap" class="mono">'+
   '<tr><th style="padding:5px 8px;color:var(--muted);font-size:9px;text-align:left">CROISS. \\ MULT.</th>'+
