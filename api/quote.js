@@ -101,7 +101,7 @@ module.exports = async (req, res) => {
   if (type === 'fundamentals') {
     try {
       // Cache Supabase → réponse instantanée si données < 24h
-      const CACHE_V = 8; // Incrémenter pour invalider tous les caches (v8 = + epsGrowth/revGrowth trimestriels)
+      const CACHE_V = 9; // v9 = + thisYear (trend0y = exercice fiscal en cours, ex: FY2026 GOOGL)
       const cached = await getCache(symbol);
       const cacheValid = cached
         && cached._v === CACHE_V
@@ -154,9 +154,25 @@ module.exports = async (req, res) => {
         ? trend1y.revenueEstimate.growth.raw * 100 : null;
 
       // ── ESTIMATIONS ANALYSTES PAR PÉRIODE ─────────────────────────────
-      const trend0q = trends.find(t => t.period === '0q');  // trimestre en cours
+      const trend0y  = trends.find(t => t.period === '0y');   // exercice fiscal EN COURS (ex: FY2026)
+      const trend0q  = trends.find(t => t.period === '0q');  // trimestre en cours
       const trendP1q = trends.find(t => t.period === '+1q'); // trimestre suivant
       const analystEstimates = {
+        // Exercice fiscal EN COURS (0y) — ex: FY2026 pour GOOGL
+        // C'est le signal le plus pertinent pour la matrice : croissance non-GAAP cohérente
+        // (estimation FY en cours vs réel FY précédent). Ex: +31.5% pour GOOGL ($14.22/$10.81)
+        thisYear: trend0y ? {
+          period:    '0y',
+          epsAvg:    trend0y.earningsEstimate?.avg?.raw ?? null,
+          epsLow:    trend0y.earningsEstimate?.low?.raw ?? null,
+          epsHigh:   trend0y.earningsEstimate?.high?.raw ?? null,
+          epsCount:  trend0y.earningsEstimate?.numberOfAnalysts?.raw ?? null,
+          epsGrowth: trend0y.earningsEstimate?.growth?.raw != null ? trend0y.earningsEstimate.growth.raw * 100 : null,
+          revAvg:    trend0y.revenueEstimate?.avg?.raw ?? null,
+          revLow:    trend0y.revenueEstimate?.low?.raw ?? null,
+          revHigh:   trend0y.revenueEstimate?.high?.raw ?? null,
+          revGrowth: trend0y.revenueEstimate?.growth?.raw != null ? trend0y.revenueEstimate.growth.raw * 100 : null,
+        } : null,
         // Trimestre en cours
         currentQtr: trend0q ? {
           period:       trend0q.period,
@@ -165,7 +181,6 @@ module.exports = async (req, res) => {
           epsLow:       trend0q.earningsEstimate?.low?.raw ?? null,
           epsHigh:      trend0q.earningsEstimate?.high?.raw ?? null,
           epsCount:     trend0q.earningsEstimate?.numberOfAnalysts?.raw ?? null,
-          // Croissance YoY non-GAAP cohérente (estimation vs estimation N-1), fournie par Yahoo
           epsGrowth:    trend0q.earningsEstimate?.growth?.raw != null ? trend0q.earningsEstimate.growth.raw * 100 : null,
           revGrowth:    trend0q.revenueEstimate?.growth?.raw != null ? trend0q.revenueEstimate.growth.raw * 100 : null,
           revAvg:       trend0q.revenueEstimate?.avg?.raw ?? null,
@@ -186,13 +201,18 @@ module.exports = async (req, res) => {
           revLow:       trendP1q.revenueEstimate?.low?.raw ?? null,
           revHigh:      trendP1q.revenueEstimate?.high?.raw ?? null,
         } : null,
-        // Année en cours
+        // Exercice suivant (+1y) — ex: FY2027 pour GOOGL
         currentYear: trend1y ? {
-          epsAvg:       trend1y.earningsEstimate?.avg?.raw ?? null,
-          epsGrowth:    trend1y.earningsEstimate?.growth?.raw != null ? trend1y.earningsEstimate.growth.raw * 100 : null,
-          revAvg:       trend1y.revenueEstimate?.avg?.raw ?? null,
-          revGrowth:    trend1y.revenueEstimate?.growth?.raw != null ? trend1y.revenueEstimate.growth.raw * 100 : null,
-          count:        trend1y.earningsEstimate?.numberOfAnalysts?.raw ?? null,
+          epsAvg:    trend1y.earningsEstimate?.avg?.raw ?? null,
+          epsLow:    trend1y.earningsEstimate?.low?.raw ?? null,
+          epsHigh:   trend1y.earningsEstimate?.high?.raw ?? null,
+          epsCount:  trend1y.earningsEstimate?.numberOfAnalysts?.raw ?? null,
+          epsGrowth: trend1y.earningsEstimate?.growth?.raw != null ? trend1y.earningsEstimate.growth.raw * 100 : null,
+          revAvg:    trend1y.revenueEstimate?.avg?.raw ?? null,
+          revLow:    trend1y.revenueEstimate?.low?.raw ?? null,
+          revHigh:   trend1y.revenueEstimate?.high?.raw ?? null,
+          revGrowth: trend1y.revenueEstimate?.growth?.raw != null ? trend1y.revenueEstimate.growth.raw * 100 : null,
+          count:     trend1y.earningsEstimate?.numberOfAnalysts?.raw ?? null,
         } : null,
       };
 
