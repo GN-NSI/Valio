@@ -101,7 +101,7 @@ module.exports = async (req, res) => {
   if (type === 'fundamentals') {
     try {
       // Cache Supabase → réponse instantanée si données < 24h
-      const CACHE_V = 7; // Incrémenter pour invalider tous les caches
+      const CACHE_V = 8; // Incrémenter pour invalider tous les caches (v8 = + epsGrowth/revGrowth trimestriels)
       const cached = await getCache(symbol);
       const cacheValid = cached
         && cached._v === CACHE_V
@@ -165,6 +165,9 @@ module.exports = async (req, res) => {
           epsLow:       trend0q.earningsEstimate?.low?.raw ?? null,
           epsHigh:      trend0q.earningsEstimate?.high?.raw ?? null,
           epsCount:     trend0q.earningsEstimate?.numberOfAnalysts?.raw ?? null,
+          // Croissance YoY non-GAAP cohérente (estimation vs estimation N-1), fournie par Yahoo
+          epsGrowth:    trend0q.earningsEstimate?.growth?.raw != null ? trend0q.earningsEstimate.growth.raw * 100 : null,
+          revGrowth:    trend0q.revenueEstimate?.growth?.raw != null ? trend0q.revenueEstimate.growth.raw * 100 : null,
           revAvg:       trend0q.revenueEstimate?.avg?.raw ?? null,
           revLow:       trend0q.revenueEstimate?.low?.raw ?? null,
           revHigh:      trend0q.revenueEstimate?.high?.raw ?? null,
@@ -177,6 +180,8 @@ module.exports = async (req, res) => {
           epsLow:       trendP1q.earningsEstimate?.low?.raw ?? null,
           epsHigh:      trendP1q.earningsEstimate?.high?.raw ?? null,
           epsCount:     trendP1q.earningsEstimate?.numberOfAnalysts?.raw ?? null,
+          epsGrowth:    trendP1q.earningsEstimate?.growth?.raw != null ? trendP1q.earningsEstimate.growth.raw * 100 : null,
+          revGrowth:    trendP1q.revenueEstimate?.growth?.raw != null ? trendP1q.revenueEstimate.growth.raw * 100 : null,
           revAvg:       trendP1q.revenueEstimate?.avg?.raw ?? null,
           revLow:       trendP1q.revenueEstimate?.low?.raw ?? null,
           revHigh:      trendP1q.revenueEstimate?.high?.raw ?? null,
