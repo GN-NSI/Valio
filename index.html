@@ -218,6 +218,15 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
   max-width: 100%;
   box-sizing: border-box;
 }
+/* Full width des cards dans matrice et analystes */
+#cdtab-mat .card, #cdtab-analysts .card {
+  width: 100%;
+  box-sizing: border-box;
+}
+/* Éviter le saut de layout lié à la scrollbar verticale */
+#page {
+  scrollbar-gutter: stable;
+}
 /* Grilles à 2 colonnes : si la 2ème colonne est vide, elle ne crée pas d'espace */
 .two-col-grid {
   display: grid;
@@ -3496,14 +3505,20 @@ window.loadCdAnalysts = async function(ticker, price, f, forceReload){
   var recKey = (f && f.recommendationKey) || null;
   // Yahoo retourne "strong_buy" (underscore) — normaliser pour matcher les maps
   var recKeyN = recKey ? recKey.replace(/_/g,'').toLowerCase() : null;
-  var recColors = {strongbuy:'#16a34a',buy:'#22c55e',hold:'#d97706',sell:'#ef4444',strongsell:'#991b1b'};
+  var recColors = {
+    strongbuy:  '#166534',   // vert foncé
+    buy:        '#16a34a',   // vert clair
+    hold:       '#a16207',   // jaune/ambre
+    sell:       '#ea580c',   // orange
+    strongsell: '#991b1b',   // rouge foncé
+  };
   var recLabels = {strongbuy:'ACHAT FORT',buy:'ACHAT',hold:'NEUTRE',sell:'VENTE',strongsell:'VENTE FORTE'};
   var recIcons  = {strongbuy:'▲▲',buy:'▲',hold:'→',sell:'▼',strongsell:'▼▼'};
   var recScores = {strongbuy:5,buy:4,hold:3,sell:2,strongsell:1};
   var recColor  = recKeyN ? (recColors[recKeyN] || '#6b7280') : '#6b7280';
-  var recLabel  = recKeyN ? (recLabels[recKeyN] || recKey) : '—';
-  var recIcon   = recKeyN ? (recIcons[recKeyN]  || '') : '';
-  var recNum    = recKeyN ? (recScores[recKeyN] || 3) : 0;
+  var recLabel  = recKeyN ? (recLabels[recKeyN] || recKey)    : '—';
+  var recIcon   = recKeyN ? (recIcons[recKeyN]  || '')        : '';
+  var recNum    = recKeyN ? (recScores[recKeyN] || 3)         : 0;
   var upside    = (f && f.targetMeanPrice && px) ? (f.targetMeanPrice/px - 1)*100 : null;
 
   // Fourchette securisee : garantir lo < hi
@@ -4260,15 +4275,13 @@ function renderYieldMatrix(ticker, price, f, fin){
   } else { _gcand=_hG!=null?_hG:12; }
   var gC=st.gC!=null?st.gC:Math.min(50,Math.max(2,Math.round(_gcand)));
 
-  // ── MULTIPLE DE SORTIE — intelligent par défaut ───────────────────────────
-  // estimateExitMultiple() tient compte du secteur, des marges, de la taille,
-  // de la croissance EPS et du P/E actuel pour proposer un multiple cohérent.
-  // L'utilisateur peut toujours modifier manuellement (champ "Multiple de sortie").
-  var _rawFPE=f&&(f.forwardPE||f.trailingPE);
-  var _fpeForMatrix=estimateExitMultiple(f, gC);
-  var mCur=st.mC!=null?st.mC:_fpeForMatrix;
-  if(st.g==null||st.m==null){ st={g:gC,m:mCur,eps:eps0,gC:gC,mC:mCur,n:N}; _ymSel[ticker]=st; }
-  st.eps=eps0; st.gC=gC; st.mC=mCur;
+  // ── MULTIPLE DE SORTIE — intelligent, jamais caché automatiquement ──────────
+  // estimateExitMultiple() est toujours rappelé à chaque render.
+  // St.mC n'est persisté QUE si l'utilisateur clique "Appliquer" (st.mManual=true).
+  var _fpeForMatrix = estimateExitMultiple(f, gC);
+  var mCur = (st.mManual && st.mC != null) ? st.mC : _fpeForMatrix;
+  if(st.g==null||st.m==null){ st={g:gC,m:mCur,eps:eps0,gC:gC,n:N,mManual:false}; _ymSel[ticker]=st; }
+  st.eps=eps0; st.gC=gC;  // Ne JAMAIS mettre à jour st.mC ici — uniquement via _ymApply
   var sel=st;
   var gRows=[],mCols=[];
   for(var g=Math.max(2,gC-7);g<=gC+7;g++) gRows.push(g);
@@ -4300,10 +4313,11 @@ function renderYieldMatrix(ticker, price, f, fin){
     '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin-bottom:14px;padding:10px;background:var(--bg2,rgba(255,255,255,.02));border-radius:8px">'+
       '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">EPS de base ('+cSym+')</label><br><input id="ym-eps" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+eps0.toFixed(2)+'"></div>'+
       '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Croissance centrale %</label><br><input id="ym-g" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+gC+'"></div>'+
-      '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Multiple de sortie</label><br><input id="ym-m" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+mCur+'"></div>'+
+      '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Multiple de sortie'+(st.mManual?' <span style="color:var(--accent);font-size:8px">✎ modifié</span>':'')+'</label><br><input id="ym-m" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+mCur+'"></div>'+
       '<button class="btn btn-ghost btn-sm" onclick="window._ymApply(\''+tName+'\')">Appliquer</button>'+
       '<button class="btn btn-ghost btn-sm" onclick="window._ymReset(\''+tName+'\')" title="Revenir au consensus analystes">\u21ba Consensus</button>'+
-      '<span style="font-size:10px;color:var(--muted2)">Croissance = consensus 5 ans Yahoo \u00b7 Multiple plafonn\u00e9 25x \u00b7 Ajuster pour re-rating ou horizon 10 ans</span>'+
+      '<button class="btn btn-ghost btn-sm" onclick="window._ymDetail(\''+tName+'\','+gC+')" title="Voir le détail du calcul du multiple">🔍 Calcul</button>'+
+      '<span style="font-size:10px;color:var(--muted2)">Croissance = consensus 5 ans Yahoo \u00b7 Multiple = estimation intelligente (secteur \u00b7 marges \u00b7 taille \u00b7 croissance)</span>'+
     '</div>'+
     '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:11px;white-space:nowrap" class="mono">'+
     '<tr><th style="padding:5px 8px;color:var(--muted);font-size:9px;text-align:left">CROISS. \\ MULT.</th>'+
@@ -4325,8 +4339,8 @@ window._ymApply=function(ticker){
   var e=v('ym-eps'), g=v('ym-g'), m=v('ym-m');
   if(e>0) st.eps=e;
   if(g!=null) st.gC=Math.round(Math.min(60,Math.max(2,g)));
-  if(m!=null) st.mC=Math.round(Math.min(120,Math.max(5,m)));
-  st.g=st.gC; st.m=st.mC; _ymSel[ticker]=st;
+  if(m!=null){ st.mC=Math.round(Math.min(120,Math.max(5,m))); st.mManual=true; }
+  st.g=st.gC; st.m=st.mC||st.g; _ymSel[ticker]=st;
   window._ymRerender(ticker);
 };
 window._ymReset=function(ticker){ delete _ymSel[ticker]; window._ymRerender(ticker); };
@@ -4337,6 +4351,66 @@ window._ymRerender=function(ticker){
 };
 window._ymPick=function(ticker,g,m){ var st=_ymSel[ticker]||{}; st.g=g; st.m=m; _ymSel[ticker]=st;
   window._ymRerender(ticker);
+};
+
+// Transparence du calcul du multiple de sortie
+window._ymDetail=function(ticker, gC){
+  var f=(S.fundamentals&&S.fundamentals[ticker])||null;
+  if(!f){showToast('Données insuffisantes');return;}
+  var sector=f.sector||'—';
+  var sectorBases={'Technology':27,'Communication Services':22,'Consumer Discretionary':20,'Consumer Staples':18,'Healthcare':21,'Financials':14,'Industrials':18,'Materials':14,'Energy':11,'Utilities':14,'Real Estate':17};
+  var sectorBase=sectorBases[sector]||18;
+  var industry=(f.industry||'').toLowerCase();
+  var isBank=sector==='Financials'&&(industry.includes('bank')||industry.includes('insur'));
+  var isPayment=sector==='Financials'&&(industry.includes('payment')||industry.includes('data processing'));
+  if(isBank)sectorBase=12; else if(isPayment)sectorBase=23;
+  var gPrem=Math.round(Math.max(-4,Math.min(10,(gC-10)/5)));
+  var nm=f.profitMarginPct||0, gm=f.grossMarginPct||0;
+  var qPrem=0;
+  if(!isBank){if(nm>38||gm>78)qPrem=6;else if(nm>25||gm>62)qPrem=4;else if(nm>15||gm>42)qPrem=2;else if(nm<=8&&gm<=25)qPrem=-2;}
+  var mktCapB=f.mktCap?f.mktCap/1e9:50;
+  var szFactor=mktCapB>2000?-3:mktCapB>600?-2:mktCapB>150?-1:mktCapB>30?0:mktCapB>5?1:2;
+  var targetM=Math.max(9,Math.min(45,sectorBase+gPrem+qPrem+szFactor));
+  var curPE=f.forwardPE||f.trailingPE||targetM;
+  var result=estimateExitMultiple(f,gC);
+  function dRow(label,val,note){
+    var color=val>0?'#22c55e':val<0?'#ef4444':'var(--muted)';
+    return '<tr style="border-bottom:1px solid var(--border2)">'+
+      '<td style="padding:8px">'+label+'</td>'+
+      '<td style="padding:8px;text-align:right;font-weight:700;color:'+color+'">'+(val>0?'+':'')+val+'x</td>'+
+      '<td style="padding:8px;font-size:11px;color:var(--muted)">'+note+'</td></tr>';
+  }
+  var capFmt=mktCapB>1000?(mktCapB/1000).toFixed(1)+'T':Math.round(mktCapB)+'Md';
+  var blendNote=curPE>50?'très cher → normalise fortement (80% cible)':curPE>38?'cher → blend 30/70':curPE<targetM-4?'décoté → re-rating potentiel (blend 50/50)':'fourchette normale (blend 35/65)';
+  showModal(
+    '<div class="modal-hd"><h2>🔍 Détail — Multiple de sortie estimé</h2><button class="modal-close" onclick="closeModal()">✕</button></div>'+
+    '<table style="width:100%;border-collapse:collapse;font-size:13px">'+
+    '<thead><tr style="border-bottom:2px solid var(--border)">'+
+      '<th style="padding:8px;text-align:left;font-size:10px;color:var(--muted)">COMPOSANTE</th>'+
+      '<th style="padding:8px;text-align:right;font-size:10px;color:var(--muted)">IMPACT</th>'+
+      '<th style="padding:8px;text-align:left;font-size:10px;color:var(--muted)">RAISONNEMENT</th>'+
+    '</tr></thead><tbody>'+
+    dRow('Base sectorielle',sectorBase,(sector)+(isBank?' · banque (sous-coté structurellement)':isPayment?' · réseau paiement (MOAT exceptionnel)':''))+
+    dRow('Prime croissance EPS',gPrem,'Consensus '+gC+'%/an · base 10% → chaque 5% au-dessus = +1x')+
+    dRow('Prime qualité (MOAT)',qPrem,'Marge nette '+nm.toFixed(0)+'% · Marge brute '+gm.toFixed(0)+'% — proxy pricing power')+
+    dRow('Facteur taille',szFactor,'Cap. bours. '+capFmt+' $ — les mega-caps croissent plus lentement')+
+    '</tbody><tfoot>'+
+    '<tr style="background:rgba(99,75,228,.12);border-top:2px solid var(--blue)">'+
+      '<td colspan="2" style="padding:10px 8px;font-weight:800;font-size:15px;color:var(--blue)">Cible calculée : '+targetM+'x</td>'+
+      '<td style="padding:10px 8px;font-size:11px;color:var(--muted)">avant ancrage P/E actuel</td>'+
+    '</tr>'+
+    '<tr style="border-bottom:1px solid var(--border2)">'+
+      '<td style="padding:8px">P/E actuel fwd ('+( f.forwardPE?'calculé':'trailing')+')</td>'+
+      '<td style="padding:8px;text-align:right;font-weight:700">'+curPE.toFixed(1)+'x</td>'+
+      '<td style="padding:8px;font-size:11px;color:var(--muted)">'+blendNote+'</td>'+
+    '</tr>'+
+    '<tr style="background:rgba(99,75,228,.08)">'+
+      '<td colspan="2" style="padding:12px 8px;font-size:18px;font-weight:800;color:#26C5DE">Résultat final : '+result+'x</td>'+
+      '<td style="padding:12px 8px;font-size:11px;color:var(--muted)">Modifiable via le champ · ↺ Consensus pour recalculer</td>'+
+    '</tr>'+
+    '</tfoot></table>'+
+    '<div style="font-size:10px;color:var(--muted);margin:12px 0 0;padding:0 8px">La cible est le multiple auquel la boîte devrait raisonnablement se négocier à maturité · Le blend avec le P/E actuel atténue les extrêmes (compressing multiples vs re-rating potentiel).</div>'
+  );
 };
 
 function cdValChart(id, years, vals, currentRatio, label) {
