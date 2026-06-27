@@ -212,6 +212,12 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
   max-width: 100%;
   box-sizing: border-box;
 }
+/* Fix espace noir page compagnie */
+#cd-content, #cd-content > div, #cdtab-ensemble, #cdtab-ratios, #cdtab-fin, #cdtab-mat, #cdtab-moat, #cdtab-analysts, #cdtab-sector {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
 /* Grilles à 2 colonnes : si la 2ème colonne est vide, elle ne crée pas d'espace */
 .two-col-grid {
   display: grid;
@@ -3009,14 +3015,16 @@ async function openEarningsEdit(ticker, name, entryId) {
   var periodOpts=['Q1','Q2','Q3','Q4','FY'].map(function(p){return '<option value="'+p+'"'+(p===defPer?' selected':'')+'>'+p+'</option>';}).join('');
   var curOpts=['USD','EUR','TWD','KRW'].map(function(c){return '<option value="'+c+'"'+(c===defCur?' selected':'')+'>'+c+'</option>';}).join('');
 
-  // Build segment rows
-  var defSegs=(existing&&existing.segments)||TICKER_SEGMENTS[ticker]||[];
-  var segRows=defSegs.map(function(s){
-    var n=typeof s==='string'?s:s.name;
-    var v=typeof s==='string'?'':s.value||'';
-    return '<div class="seg-row" style="display:flex;gap:8px;margin-bottom:6px">'+
-      '<input class="form-input seg-name" value="'+n+'" placeholder="Segment" style="flex:2">'+
-      '<input class="form-input seg-val" type="number" step="0.1" value="'+v+'" placeholder="Md" style="flex:1;text-align:right">'+
+  // Build geo segment rows
+  var defGeos=(existing&&existing.geo_segments)||[];
+  var geoRows=defGeos.map(function(s){
+    var n=typeof s==='string'?s:(s.name||'');
+    var v=typeof s==='object'?(s.value!=null?s.value:''):'';
+    var g=typeof s==='object'?(s.growth_pct!=null?s.growth_pct:''):'';
+    return '<div class="geo-row" style="display:flex;gap:6px;margin-bottom:6px">'+
+      '<input class="form-input geo-name" value="'+n+'" placeholder="Région" style="flex:2">'+
+      '<input class="form-input geo-val" type="number" step="0.1" value="'+v+'" placeholder="Md" style="flex:1;text-align:right" title="CA (Md)">'+
+      '<input class="form-input geo-growth" type="number" step="0.1" value="'+g+'" placeholder="%" style="flex:1;text-align:right" title="Croissance YoY %">'+
       '<button onclick="this.parentNode.remove()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0 4px">×</button>'+
     '</div>';
   }).join('');
@@ -3038,35 +3046,63 @@ async function openEarningsEdit(ticker, name, entryId) {
       '<div class="form-group" style="flex:1"><label class="form-label">Devise</label><select id="em-currency" class="form-input">'+curOpts+'</select></div>'+
     '</div>'+
 
+    // ── Segments CA ──
     '<div class="stats-section-title" style="margin:0 0 8px">📊 Segments CA (Md)</div>'+
     '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Priorité sur Yahoo Finance · laisser vide si non disponible</div>'+
     '<div id="seg-container">'+segRows+'</div>'+
     '<button onclick="addEarningsSegment()" class="btn btn-ghost btn-sm" style="margin-bottom:14px">+ Segment</button>'+
 
-    '<div class="stats-section-title" style="margin:10px 0 6px">🔧 Correctifs <span style="font-weight:400;color:var(--muted);font-size:10px">— vide = Yahoo Finance · non-GAAP OK</span></div>'+
+    // ── Correctifs financiers ──
+    '<div class="stats-section-title" style="margin:10px 0 6px">🔧 Résultats financiers <span style="font-weight:400;color:var(--muted);font-size:10px">— vide = Yahoo Finance · non-GAAP OK</span></div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">'+
       fld('rev','CA total (Md)',e2.revenue)+
-      fld('gm-pct','Marge brute (%)',e2.gross_margin_pct,0.1)+''+
-      fld('gp','Marge brute (Md) <span style="font-size:9px;color:var(--muted2)">ou calc. depuis %</span>',e2.gross_profit)+
+      fld('gm-pct','Marge brute (%)',e2.gross_margin_pct,0.1)+
+      fld('gp','Marge brute (Md)',e2.gross_profit)+
       fld('oi','Résultat opé. (Md)',e2.operating_income)+
+      fld('om-pct','Marge opé. (%) <span style="font-size:9px;color:var(--muted2)">calculée si vide</span>',e2.operating_margin_pct,0.1)+
       fld('ni','Résultat net (Md)',e2.net_income)+
       fld('nm-pct','Marge nette (%)',e2.net_margin_pct,0.1)+
-      fld('eps','EPS dilué',e2.eps_diluted,0.01)+fld('ocf','OCF (Md)',e2.ocf)+
-      fld('capex','Capex (Md)',e2.capex)+fld('fcf','FCF (Md)',e2.fcf)+
-      fld('equity','Capitaux propres (Md) <span style="font-size:9px;color:var(--muted2)">pour ROE</span>',e2.equity)+
-      fld('tdebt','Dette totale (Md) <span style="font-size:9px;color:var(--muted2)">pour ROIC</span>',e2.total_debt)+
+      fld('eps','EPS dilué',e2.eps_diluted,0.01)+
+      fld('ocf','OCF (Md)',e2.ocf)+
+      fld('capex','Capex réel (Md)',e2.capex)+
+      fld('fcf','FCF (Md)',e2.fcf)+
+      fld('equity','Capitaux propres (Md)',e2.equity)+
+      fld('tdebt','Dette totale (Md)',e2.total_debt)+
     '</div>'+
 
-    '<div class="stats-section-title" style="margin:10px 0 6px">👥 Métriques utilisateurs (optionnel)</div>'+
-    '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Pour les plateformes : Reddit, Meta, Snap, Pinterest…</div>'+
+    // ── Répartition géographique ──
+    '<div class="stats-section-title" style="margin:10px 0 6px">🗺️ Répartition géographique <span style="font-weight:400;color:var(--muted);font-size:10px">— optionnel</span></div>'+
+    '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">'+
+      '<span style="color:var(--muted2)">Région</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'+
+      '<span style="color:var(--muted2)">CA (Md)</span>&nbsp;&nbsp;&nbsp;'+
+      '<span style="color:var(--muted2)">Crois. YoY (%)</span>'+
+    '</div>'+
+    '<div id="geo-container">'+geoRows+'</div>'+
+    '<button onclick="addEarningsGeo()" class="btn btn-ghost btn-sm" style="margin-bottom:14px">+ Région</button>'+
+
+    // ── Métriques publicitaires & ARPP ──
+    '<div class="stats-section-title" style="margin:10px 0 6px">📣 Métriques publicitaires & ARPP <span style="font-weight:400;color:var(--muted);font-size:10px">— Meta, Reddit, Snap, Pinterest…</span></div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">'+
-      fld('dau-mau','Utilisateurs actifs (M)',e2.dau_mau,0.1)+''+
+      fld('arpp','ARPP — Revenu / Personne ($/mois)',e2.arpp,0.01)+
+      fld('avg-price-ad-yoy','Prix moyen par pub YoY (%)',e2.avg_price_per_ad_yoy_pct,0.1)+
+      fld('ad-impressions-yoy','Impressions pub YoY (%)',e2.ad_impressions_yoy_pct,0.1)+
+    '</div>'+
+
+    // ── Métriques utilisateurs ──
+    '<div class="stats-section-title" style="margin:10px 0 6px">👥 Métriques utilisateurs <span style="font-weight:400;color:var(--muted);font-size:10px">— optionnel</span></div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">'+
+      fld('dau-mau','Utilisateurs actifs (M)',e2.dau_mau,0.1)+
       fld('users-growth','Croissance users (%)',e2.users_growth_pct,0.1)+
     '</div>'+
-    '<div class="stats-section-title" style="margin:10px 0 6px">🔭 Guidance (optionnel)</div>'+
+
+    // ── Guidance ──
+    '<div class="stats-section-title" style="margin:10px 0 6px">🔭 Guidance <span style="font-weight:400;color:var(--muted);font-size:10px">— optionnel</span></div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'+
-      fld('grev-lo','CA guidé min (Md)',e2.guidance_rev_low)+fld('grev-hi','CA guidé max (Md)',e2.guidance_rev_high)+
+      fld('grev-lo','CA guidé min (Md)',e2.guidance_rev_low)+
+      fld('grev-hi','CA guidé max (Md)',e2.guidance_rev_high)+
       fld('geps','EPS guidé',e2.guidance_eps,0.01)+
+      fld('gcapex-lo','CAPEX guidé min (Md) <span style="font-size:9px;color:var(--accent)">hyperscalers</span>',e2.guidance_capex_low)+
+      fld('gcapex-hi','CAPEX guidé max (Md)',e2.guidance_capex_high)+
     '</div>'+
     '<div class="form-group" style="margin-bottom:4px"><label class="form-label">Notes</label>'+
     '<input id="em-gnotes" class="form-input" value="'+(e2.guidance_notes||'')+'" placeholder="ex: forte demande Data Center Q2…"></div>'+
@@ -3075,7 +3111,7 @@ async function openEarningsEdit(ticker, name, entryId) {
     '<div class="modal-footer" style="flex-wrap:wrap;gap:8px">'+
     '<button class="btn btn-ghost" onclick="openEarningsForm(\''+ticker+'\',\''+name+'\')">← Retour</button>'+
     '<button id="em-autofill-btn" style="padding:6px 14px;font-size:12px;font-weight:600;border:1px solid var(--accent);border-radius:8px;background:var(--accent)22;color:var(--accent);cursor:pointer" onclick="autoFillEarnings(\''+ticker+'\',\''+name+'\')">✨ Auto-remplir (non-GAAP)</button>'+
-    '<button class="btn btn-primary" onclick="saveEarningsEntry(\''+ticker+'\',\''+name+'\','+(entryId?'\''+entryId+'\'':'null')+')">&#x1f4be; Enregistrer</button>'+
+    '<button class="btn btn-primary" onclick="saveEarningsEntry(\''+ticker+'\',\''+name+'\','+(entryId?'\''+entryId+'\'':'null')+')">💾 Enregistrer</button>'+
     '</div>'
   );
 }
@@ -3085,6 +3121,14 @@ function addEarningsSegment() {
   var row = document.createElement('div');
   row.className = 'seg-row'; row.style.cssText='display:flex;gap:8px;margin-bottom:6px';
   row.innerHTML='<input class="form-input seg-name" placeholder="Segment" style="flex:2"><input class="form-input seg-val" type="number" step="0.1" placeholder="Md" style="flex:1;text-align:right"><button onclick="this.parentNode.remove()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0 4px">×</button>';
+  c.appendChild(row);
+}
+
+function addEarningsGeo() {
+  var c = document.getElementById('geo-container');
+  var row = document.createElement('div');
+  row.className = 'geo-row'; row.style.cssText='display:flex;gap:6px;margin-bottom:6px';
+  row.innerHTML='<input class="form-input geo-name" placeholder="Région" style="flex:2"><input class="form-input geo-val" type="number" step="0.1" placeholder="Md" style="flex:1;text-align:right" title="CA (Md)"><input class="form-input geo-growth" type="number" step="0.1" placeholder="%" style="flex:1;text-align:right" title="Croissance YoY %"><button onclick="this.parentNode.remove()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0 4px">×</button>';
   c.appendChild(row);
 }
 
@@ -3155,20 +3199,36 @@ async function saveEarningsEntry(ticker, name, entryId) {
     var v=parseFloat(row.querySelector('.seg-val').value);
     if(n&&!isNaN(v)&&v>0) segs.push({name:n,value:v});
   });
+  var geos=[];
+  document.querySelectorAll('.geo-row').forEach(function(row){
+    var n=row.querySelector('.geo-name').value.trim();
+    var v=parseFloat(row.querySelector('.geo-val').value);
+    var g=parseFloat(row.querySelector('.geo-growth').value);
+    if(n&&!isNaN(v)&&v>0) geos.push({name:n,value:v,growth_pct:isNaN(g)?null:g});
+  });
   function fv(id){var v=parseFloat(document.getElementById('em-'+id)?.value);return isNaN(v)?null:v;}
   var u=getUser(); if(!u) return;
   var rev_val=fv('rev'), gm_pct=fv('gm-pct'), gp_val=fv('gp');
-  // Si % marge saisi mais pas la valeur absolue → calculer
+  var oi_val=fv('oi'), om_pct=fv('om-pct');
+  // Calcul automatique des marges si pas saisies
   if(gp_val==null && gm_pct!=null && rev_val!=null) gp_val=Math.round(rev_val*gm_pct/10)/10;
+  if(om_pct==null && oi_val!=null && rev_val!=null && rev_val>0) om_pct=Math.round(oi_val/rev_val*1000)/10;
+  if(oi_val==null && om_pct!=null && rev_val!=null) oi_val=Math.round(rev_val*om_pct/10)/10;
   var data={
     user_id:u.id, ticker, period, currency:cur,
     segments:segs.length?segs:null,
+    geo_segments:geos.length?geos:null,
     revenue:rev_val, gross_profit:gp_val, gross_margin_pct:gm_pct,
-    operating_income:fv('oi'), net_income:fv('ni'), net_margin_pct:fv('nm-pct'),
+    operating_income:oi_val, operating_margin_pct:om_pct,
+    net_income:fv('ni'), net_margin_pct:fv('nm-pct'),
     eps_diluted:fv('eps'), ocf:fv('ocf'), capex:fv('capex'), fcf:fv('fcf'),
     equity:fv('equity'), total_debt:fv('tdebt'),
     dau_mau:fv('dau-mau'), users_growth_pct:fv('users-growth'),
+    arpp:fv('arpp'),
+    avg_price_per_ad_yoy_pct:fv('avg-price-ad-yoy'),
+    ad_impressions_yoy_pct:fv('ad-impressions-yoy'),
     guidance_rev_low:fv('grev-lo'), guidance_rev_high:fv('grev-hi'), guidance_eps:fv('geps'),
+    guidance_capex_low:fv('gcapex-lo'), guidance_capex_high:fv('gcapex-hi'),
     guidance_notes:document.getElementById('em-gnotes').value.trim()||null,
     updated_at:new Date().toISOString(),
   };
@@ -4062,7 +4122,18 @@ function renderYieldMatrix(ticker, price, f, fin){
   var _aG5y=(f&&f.epsGrowthFwd5Y!=null&&f.epsGrowthFwd5Y>1&&f.epsGrowthFwd5Y<80)?f.epsGrowthFwd5Y:null;
   var _aGThisYear=null;
   var _tyObj=(f&&f.analystEstimates)?f.analystEstimates.thisYear:null;
-  if(_tyObj&&_tyObj.epsGrowth!=null&&_tyObj.epsGrowth>0&&_tyObj.epsGrowth<200) _aGThisYear=_tyObj.epsGrowth;
+  if(_tyObj){
+    // Priorité 1 : champ growth Yahoo (non-GAAP vs non-GAAP propre)
+    if(_tyObj.epsGrowth!=null&&_tyObj.epsGrowth>0&&_tyObj.epsGrowth<200){
+      _aGThisYear=_tyObj.epsGrowth;
+    // Priorité 2 : calcul manuel thisYear.epsAvg / dernier EPS ANNUEL GAAP
+    // Ex GOOGL: $14.22 / $10.81 = +31.5% — propre car on compare full-year à full-year
+    // Bien meilleur que thisYear.epsAvg / eps0(TTM) qui mélange des trimestres récents plus forts
+    } else if(_tyObj.epsAvg!=null&&_tyObj.epsAvg>0&&_iL>=0&&_eps[_iL]>0){
+      var _ig2=(_tyObj.epsAvg/_eps[_iL]-1)*100;
+      if(_ig2>0&&_ig2<150) _aGThisYear=_ig2;
+    }
+  }
   var _aGImpl=null;
   var _fwdEps=(f&&f.analystEstimates&&f.analystEstimates.currentYear)?f.analystEstimates.currentYear.epsAvg:null;
   if(_fwdEps&&_fwdEps>0&&eps0>0){ var _ig=(_fwdEps/eps0-1)*100; if(_ig>0&&_ig<150) _aGImpl=_ig; }
