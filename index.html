@@ -2062,7 +2062,7 @@ async function renderCompanyDetail(ticker, name) {
 
   // Get fundamentals (use cache if available)
   var f = S.fundamentals[ticker];
-  if (!f) {
+  if (!f || f._v == null || f._v < 9) {  // v9 gate : thisYear (0y) nécessaire pour la matrice
     try {
       var r = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=fundamentals', {signal:AbortSignal.timeout(15000)});
       var d = await r.json();
@@ -3015,6 +3015,18 @@ async function openEarningsEdit(ticker, name, entryId) {
   var periodOpts=['Q1','Q2','Q3','Q4','FY'].map(function(p){return '<option value="'+p+'"'+(p===defPer?' selected':'')+'>'+p+'</option>';}).join('');
   var curOpts=['USD','EUR','TWD','KRW'].map(function(c){return '<option value="'+c+'"'+(c===defCur?' selected':'')+'>'+c+'</option>';}).join('');
 
+  // Build segment rows
+  var defSegs=(existing&&existing.segments)||TICKER_SEGMENTS[ticker]||[];
+  var segRows=defSegs.map(function(s){
+    var n=typeof s==='string'?s:s.name;
+    var v=typeof s==='string'?'':s.value||'';
+    return '<div class="seg-row" style="display:flex;gap:8px;margin-bottom:6px">'+
+      '<input class="form-input seg-name" value="'+n+'" placeholder="Segment" style="flex:2">'+
+      '<input class="form-input seg-val" type="number" step="0.1" value="'+v+'" placeholder="Md" style="flex:1;text-align:right">'+
+      '<button onclick="this.parentNode.remove()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0 4px">×</button>'+
+    '</div>';
+  }).join('');
+
   // Build geo segment rows
   var defGeos=(existing&&existing.geo_segments)||[];
   var geoRows=defGeos.map(function(s){
@@ -3482,14 +3494,16 @@ window.loadCdAnalysts = async function(ticker, price, f, forceReload){
   var fmtP = function(v){ return v != null ? cur+fN(v) : '\u2014'; };
 
   var recKey = (f && f.recommendationKey) || null;
+  // Yahoo retourne "strong_buy" (underscore) — normaliser pour matcher les maps
+  var recKeyN = recKey ? recKey.replace(/_/g,'').toLowerCase() : null;
   var recColors = {strongbuy:'#16a34a',buy:'#22c55e',hold:'#d97706',sell:'#ef4444',strongsell:'#991b1b'};
-  var recLabels = {strongbuy:'Achat fort',buy:'Achat',hold:'Neutre',sell:'Vente',strongsell:'Vente forte'};
-  var recIcons  = {strongbuy:'\u25b2\u25b2',buy:'\u25b2',hold:'\u25b6',sell:'\u25bc',strongsell:'\u25bc\u25bc'};
+  var recLabels = {strongbuy:'ACHAT FORT',buy:'ACHAT',hold:'NEUTRE',sell:'VENTE',strongsell:'VENTE FORTE'};
+  var recIcons  = {strongbuy:'▲▲',buy:'▲',hold:'→',sell:'▼',strongsell:'▼▼'};
   var recScores = {strongbuy:5,buy:4,hold:3,sell:2,strongsell:1};
-  var recColor  = recKey ? (recColors[recKey] || '#6b7280') : '#6b7280';
-  var recLabel  = recKey ? (recLabels[recKey] || recKey) : '\u2014';
-  var recIcon   = recKey ? (recIcons[recKey]  || '') : '';
-  var recNum    = recKey ? (recScores[recKey] || 3) : 0;
+  var recColor  = recKeyN ? (recColors[recKeyN] || '#6b7280') : '#6b7280';
+  var recLabel  = recKeyN ? (recLabels[recKeyN] || recKey) : '—';
+  var recIcon   = recKeyN ? (recIcons[recKeyN]  || '') : '';
+  var recNum    = recKeyN ? (recScores[recKeyN] || 3) : 0;
   var upside    = (f && f.targetMeanPrice && px) ? (f.targetMeanPrice/px - 1)*100 : null;
 
   // Fourchette securisee : garantir lo < hi
@@ -3498,69 +3512,80 @@ window.loadCdAnalysts = async function(ticker, price, f, forceReload){
 
   var barHtml = '';
   if(lo != null && hi != null && px != null && hi > lo) {
-    var range = hi - lo;
-    var pxPct = Math.max(2, Math.min(98, (px-lo)/range*100));
-    var mnPct = mn != null ? Math.max(2, Math.min(98, (mn-lo)/range*100)) : null;
+    // Étendre la plage pour inclure le prix actuel même s'il est hors objectifs
+    // 15% de marge à gauche depuis le min(px, lo), 5% à droite du hi
+    var barMin = Math.min(px, lo) - (hi - lo) * 0.18;
+    var barMax = hi + (hi - lo) * 0.05;
+    var barRng = barMax - barMin;
+    var pxPct = Math.max(1.5, Math.min(97, (px - barMin) / barRng * 100));
+    var loPct = Math.max(0.5, Math.min(99, (lo - barMin) / barRng * 100));
+    var hiPct = Math.max(0.5, Math.min(99.5, (hi - barMin) / barRng * 100));
+    var mnPct = mn != null ? Math.max(0.5, Math.min(99.5, (mn - barMin) / barRng * 100)) : null;
 
-    // Calcul des repères : graduation automatique selon la plage
-    var rawStep = range / 5;
-    // Arrondir au multiple de 10 le plus proche
+    // Repères sur la barre (dans la plage réelle lo→hi)
+    var range = hi - lo;
+    var rawStep = range / 4;
     var magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
     var niceMults = [1,2,5,10];
     var step = magnitude;
     for(var _s=0;_s<niceMults.length;_s++){
       if(magnitude*niceMults[_s] >= rawStep){ step=magnitude*niceMults[_s]; break; }
     }
-    // Générer les repères
     var tickStart = Math.ceil(lo/step)*step;
     var ticks = [];
     for(var tv=tickStart; tv<=hi; tv+=step){
-      var tp = (tv-lo)/range*100;
-      if(tp > 3 && tp < 97) ticks.push({v:tv, pct:tp});
+      var tp = (tv - barMin) / barRng * 100;
+      if(tp > 4 && tp < 96) ticks.push({v:tv, pct:tp});
     }
-    // Toujours inclure la cible moyenne comme repère si présente
     if(mn != null) {
-      var mpct = (mn-lo)/range*100;
-      if(mpct > 3 && mpct < 97) ticks.push({v:mn, pct:mpct, isMn:true});
+      var mpct2 = (mn - barMin) / barRng * 100;
+      if(mpct2 > 4 && mpct2 < 96) ticks.push({v:mn, pct:mpct2, isMn:true});
     }
     ticks.sort(function(a,b){return a.pct-b.pct;});
 
     var ticksHtml = ticks.map(function(t){
-      var isMn = t.isMn;
-      return '<div style="position:absolute;left:calc('+t.pct.toFixed(1)+'% - '+(isMn?'1px':'0.5px')+');top:0;bottom:0;'+
-        'width:'+(isMn?'2px':'1px')+';background:'+(isMn?'white':'rgba(255,255,255,0.4)')+';pointer-events:none"></div>';
+      return '<div style="position:absolute;left:calc('+t.pct.toFixed(1)+'% - '+(t.isMn?'1px':'0.5px')+');top:0;bottom:0;'+
+        'width:'+(t.isMn?'2px':'1px')+';background:'+(t.isMn?'white':'rgba(255,255,255,0.35)')+';pointer-events:none"></div>';
     }).join('');
 
-    var labelsHtml = ticks.filter(function(t){ return t.isMn || ticks.length <= 6; }).map(function(t){
+    var labelsHtml = ticks.map(function(t){
       return '<div style="position:absolute;left:'+t.pct.toFixed(1)+'%;transform:translateX(-50%);font-size:9px;'+
-        'color:'+(t.isMn?'white':'rgba(255,255,255,.6)')+';font-weight:'+(t.isMn?'700':'400')+';white-space:nowrap">'+
+        'color:'+(t.isMn?'white':'rgba(255,255,255,.55)')+';font-weight:'+(t.isMn?'700':'400')+';white-space:nowrap">'+
         cur+fN(Math.round(t.v))+(t.isMn?' ★':'')+'</div>';
     }).join('');
 
+    // Label "objectif bas" et "objectif haut" positionnés dynamiquement sur la barre
+    var loLabelPct = loPct.toFixed(1);
+    var hiLabelPct = hiPct.toFixed(1);
+
     barHtml = '<div style="margin-top:12px">' +
-      // Labels haut
-      '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">' +
-        '<span style="color:#ef4444;font-weight:700">'+fmtP(lo)+'<br><span style="font-size:9px;font-weight:400">objectif bas</span></span>' +
-        '<span style="text-align:center;color:var(--muted);font-size:10px">cours actuel<br><b style="color:var(--text);font-size:12px">'+fmtP(px)+'</b></span>' +
-        '<span style="text-align:right;color:#16a34a;font-weight:700">'+fmtP(hi)+'<br><span style="font-size:9px;font-weight:400">objectif haut</span></span>' +
+      // Ligne repères : objectif bas / haut
+      '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:6px">' +
+        '<span style="color:#ef4444;font-weight:700">'+fmtP(lo)+'<br><span style="font-size:9px;font-weight:400;color:var(--muted)">objectif bas</span></span>' +
+        '<span style="text-align:right;color:#16a34a;font-weight:700">'+fmtP(hi)+'<br><span style="font-size:9px;font-weight:400;color:var(--muted)">objectif haut</span></span>' +
       '</div>' +
-      // Barre principale avec repères
-      '<div style="position:relative;height:20px">' +
-        // Graduation
-        '<div style="position:relative;height:12px;background:linear-gradient(90deg,#ef4444,#d97706 40%,#16a34a);border-radius:6px;overflow:hidden">' +
-          ticksHtml +
-        '</div>' +
+      // Barre principale
+      '<div style="position:relative;height:26px">' +
+        '<div style="position:relative;height:14px;margin-top:4px;background:rgba(255,255,255,.08);border-radius:7px;overflow:visible">' +
+          // Zone colorée uniquement entre lo et hi
+          '<div style="position:absolute;left:'+loPct.toFixed(1)+'%;width:'+(hiPct-loPct).toFixed(1)+'%;height:100%;'+
+            'background:linear-gradient(90deg,#ef4444,#d97706 40%,#16a34a);border-radius:5px;overflow:hidden">'+
+            ticksHtml +
+          '</div>'+
+        '</div>'+
         // Curseur cours actuel
-        '<div style="position:absolute;top:-2px;left:calc('+pxPct.toFixed(1)+'% - 9px);width:18px;height:16px;'+
-          'background:white;border:2px solid rgba(0,0,0,0.5);border-radius:4px;box-shadow:0 2px 6px rgba(0,0,0,.5);'+
-          'display:flex;align-items:center;justify-content:center">' +
-          '<div style="width:2px;height:8px;background:#334;border-radius:1px"></div>' +
-        '</div>' +
+        '<div style="position:absolute;top:0;left:calc('+pxPct.toFixed(1)+'% - 10px);width:20px;height:22px;'+
+          'background:white;border:2px solid rgba(0,0,0,0.4);border-radius:5px;box-shadow:0 2px 8px rgba(0,0,0,.5);'+
+          'display:flex;align-items:center;justify-content:center" title="Cours actuel : '+fmtP(px)+'">' +
+          '<div style="width:2px;height:10px;background:#334;border-radius:1px"></div>' +
+        '</div>'+
+        // Label cours actuel sous le curseur
+        '<div style="position:absolute;top:24px;left:calc('+pxPct.toFixed(1)+'% - 28px);width:56px;text-align:center;font-size:9px;font-weight:700;color:var(--text);white-space:nowrap">'+fmtP(px)+'</div>'+
         // Labels sous la barre
-        '<div style="position:relative;height:16px;margin-top:2px">' + labelsHtml + '</div>' +
+        '<div style="position:relative;height:14px;margin-top:16px">'+labelsHtml+'</div>'+
       '</div>' +
       // Résumé cible moy
-      (mn != null ? '<div style="font-size:12px;margin-top:10px;padding:8px 12px;background:rgba(255,255,255,.05);border-radius:6px;display:flex;justify-content:space-between;align-items:center">' +
+      (mn != null ? '<div style="font-size:12px;margin-top:18px;padding:8px 12px;background:rgba(255,255,255,.05);border-radius:6px;display:flex;justify-content:space-between;align-items:center">' +
         '<span style="color:var(--muted)">Cible moyenne analystes</span>' +
         '<span><b style="font-size:14px">'+fmtP(mn)+'</b>' +
           (upside != null ? ' <span style="color:'+(upside>=0?'#22c55e':'#ef4444')+';font-weight:700;font-size:13px">'+(upside>=0?'+':'')+upside.toFixed(1)+'%</span>' : '') +
@@ -4097,7 +4122,93 @@ window.showCdTab=function(t,noScroll){
   },80);
 };
 
-// ═══ MATRICE DE RENDEMENT (5 ou 10 ans) ═════════════════════════════════
+// ═══ MULTIPLE DE SORTIE INTELLIGENT ══════════════════════════════════════
+// Estime un multiple de sortie cohérent sur 5-10 ans selon :
+//   secteur historique · croissance EPS · marges · taille · levier AI/MOAT
+// → Point de départ modifiable par l'utilisateur
+function estimateExitMultiple(f, gC) {
+  if(!f) return 22;
+
+  // ── 1. Base sectorielle (fwd P/E moyen historique par secteur GICS) ──────
+  var sectorBases = {
+    'Technology':             27,
+    'Communication Services': 22,
+    'Consumer Discretionary': 20,
+    'Consumer Staples':       18,
+    'Healthcare':             21,
+    'Financials':             14,   // ajusté ci-dessous selon sous-secteur
+    'Industrials':            18,
+    'Materials':              14,
+    'Energy':                 11,
+    'Utilities':              14,
+    'Real Estate':            17,
+  };
+  var sector = f.sector || '';
+  var industry = (f.industry || '').toLowerCase();
+  var base = sectorBases[sector] || 18;
+
+  // ── Sous-secteur Financials (banques vs réseaux de paiement) ─────────────
+  var isBank = sector==='Financials' && (industry.includes('bank')||industry.includes('insur'));
+  var isPayment = sector==='Financials' && (industry.includes('payment')||industry.includes('data processing')||industry.includes('financial exchange'));
+  if(isBank) base = 12;
+  else if(isPayment) base = 23;    // Visa/Mastercard : MOAT exceptionnel, marges ~50%+
+
+  // ── 2. Prime de croissance EPS (par tranche de 5% au-dessus de 10%) ──────
+  // Base = 10%/an · chaque 5% supplémentaire → +1x
+  var gPrem = Math.round(Math.max(-4, Math.min(10, (gC - 10) / 5)));
+
+  // ── 3. Prime de qualité (marges → pricing power & MOAT) ─────────────────
+  var nm = f.profitMarginPct || 0;   // marge nette
+  var gm = f.grossMarginPct  || 0;   // marge brute
+  var qPrem = 0;
+  if(!isBank) {  // les marges financières ne sont pas comparables
+    if(nm > 38 || gm > 78)       qPrem = 6;  // SAAS pur, réseaux paiement, semi → MOAT fort
+    else if(nm > 25 || gm > 62)  qPrem = 4;  // Plateformes, pharma, logiciels
+    else if(nm > 15 || gm > 42)  qPrem = 2;  // Bonne marge opérationnelle
+    else if(nm > 8  || gm > 25)  qPrem = 0;  // Marge correcte → base sectorielle
+    else                          qPrem = -2; // Marge faible → décote
+  }
+
+  // ── 4. Facteur taille (les mega-caps ont plus de mal à croître) ──────────
+  var mktCapB = f.mktCap ? f.mktCap / 1e9 : 50;
+  var sizeFactor = 0;
+  if(mktCapB > 2000)      sizeFactor = -3;  // Mega cap : $2T+ (AAPL, MSFT, NVDA)
+  else if(mktCapB > 600)  sizeFactor = -2;  // Très grande cap : $600B-$2T
+  else if(mktCapB > 150)  sizeFactor = -1;  // Grande cap : $150B-$600B
+  else if(mktCapB > 30)   sizeFactor =  0;  // Cap standard : $30B-$150B
+  else if(mktCapB > 5)    sizeFactor =  1;  // Mid cap : plus d'espace pour croître
+  else                    sizeFactor =  2;  // Small cap
+
+  // ── 5. Calcul du multiple cible ─────────────────────────────────────────
+  var targetM = base + gPrem + qPrem + sizeFactor;
+  targetM = Math.max(9, Math.min(45, targetM));
+
+  // ── 6. Ancrage au P/E actuel (régression vers la moyenne) ───────────────
+  // Si le P/E actuel est très loin du target, on normalise progressivement
+  // → Évite d'utiliser 60x (AMD) ou 8x (valeur cyclique en creux) comme sortie
+  var curPE = f.forwardPE || f.trailingPE || targetM;
+  var result;
+  if(curPE > 55) {
+    // Extrêmement cher : normalise fortement (ex: AMD 65x → target ~28x)
+    result = Math.round(0.2 * curPE + 0.8 * targetM);
+    result = Math.min(result, targetM + 6);  // Cap : ne pas dépasser target+6
+  } else if(curPE > 38) {
+    // Cher mais justifiable pour certains : blend 30/70
+    result = Math.round(0.3 * curPE + 0.7 * targetM);
+  } else if(curPE < 11 && targetM > 15) {
+    // Très décoté (discount de marché) : upside re-rating potentiel
+    result = Math.round(0.35 * curPE + 0.65 * targetM);
+  } else if(curPE < targetM - 4) {
+    // Modérément décoté : blend 50/50 (capture le potentiel de re-rating)
+    result = Math.round(0.5 * curPE + 0.5 * targetM);
+  } else {
+    // Dans la fourchette raisonnable : blend 35/65 (ancré sur le target)
+    result = Math.round(0.35 * curPE + 0.65 * targetM);
+  }
+  return Math.max(9, Math.min(45, result));
+}
+
+
 // Rendement annualisé = ((EPS0 × (1+g)^N × multiple) / prix)^(1/N) − 1
 // Prix juste = valeur future actualisée à 10 %/an
 var _ymSel={};
@@ -4149,10 +4260,12 @@ function renderYieldMatrix(ticker, price, f, fin){
   } else { _gcand=_hG!=null?_hG:12; }
   var gC=st.gC!=null?st.gC:Math.min(50,Math.max(2,Math.round(_gcand)));
 
-  // Multiple : plafonné à 25x (normalisé long terme)
-  // min(fwd P/E actuel, 25x) — conservateur pour boîtes chères, garde le marché pour les autres
+  // ── MULTIPLE DE SORTIE — intelligent par défaut ───────────────────────────
+  // estimateExitMultiple() tient compte du secteur, des marges, de la taille,
+  // de la croissance EPS et du P/E actuel pour proposer un multiple cohérent.
+  // L'utilisateur peut toujours modifier manuellement (champ "Multiple de sortie").
   var _rawFPE=f&&(f.forwardPE||f.trailingPE);
-  var _fpeForMatrix=_rawFPE?Math.min(Math.max(15,Math.round(_rawFPE)),25):22;
+  var _fpeForMatrix=estimateExitMultiple(f, gC);
   var mCur=st.mC!=null?st.mC:_fpeForMatrix;
   if(st.g==null||st.m==null){ st={g:gC,m:mCur,eps:eps0,gC:gC,mC:mCur,n:N}; _ymSel[ticker]=st; }
   st.eps=eps0; st.gC=gC; st.mC=mCur;
