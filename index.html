@@ -263,11 +263,11 @@ html, body { max-width: 100%; overflow-x: hidden; }
         <!-- Screener retiré: accès via clic sur entreprise dans Ratios -->
         <div class="nav-item" id="nav-watchlist" onclick="navigate('watchlist')"><span class="nav-icon">🎯</span><span>Cibles d'achat</span></div>
         <div class="nav-item" id="nav-journal" onclick="navigate('journal')"><span class="nav-icon">📓</span><span>Journal</span></div>
+        <div class="nav-item" id="nav-compare" onclick="navigate('compare')"><span class="nav-icon">📊</span><span>Comparer</span></div>
         <div class="nav-section">Social</div>
         <div class="nav-item" id="nav-amis" onclick="navigate('amis')"><span class="nav-icon">👥</span><span>Amis</span></div>
         <div class="nav-item" id="nav-benchmark" onclick="navigate('benchmark')"><span class="nav-icon">📊</span><span>Benchmark</span></div>
         <div class="nav-item" id="nav-leaderboard" onclick="navigate('leaderboard')"><span class="nav-icon">🏆</span><span>Classement</span></div>
-        <div class="nav-item" id="nav-compare" onclick="navigate('compare')"><span class="nav-icon">📊</span><span>Comparer</span></div>
       <div class="nav-section-label" style="font-size:10px;color:var(--muted);padding:12px 16px 4px;letter-spacing:.08em;font-weight:600">SUIVI</div>
       <div class="nav-item" id="nav-deposits" onclick="navigate('deposits')"><span class="nav-icon">💸</span><span>Dépôts & Solde</span></div>
       <div class="nav-item" id="nav-liquidity" onclick="navigate('liquidity')"><span class="nav-icon">💰</span><span>Liquidités</span></div>
@@ -6865,7 +6865,7 @@ function renderCompare() {
   // Options métriques
   var metricOpts='',lastGroup='';
   CMP_METRICS.forEach(function(m){
-    if(m.group!==lastGroup){if(lastGroup)metricOpts+='</optgroup>';metricOpts+='<optgroup label="'+m.group+'>';lastGroup=m.group;}
+    if(m.group!==lastGroup){if(lastGroup)metricOpts+='</optgroup>';metricOpts+='<optgroup label="'+m.group+'">';lastGroup=m.group;}
     metricOpts+='<option value="'+m.id+'"'+(m.id===_cmpState.metric?' selected':'')+'>'+m.label+'</option>';
   });
   if(lastGroup)metricOpts+='</optgroup>';
@@ -6890,7 +6890,7 @@ function renderCompare() {
   var pfChips=pfTickers.slice(0,10).map(function(t){
     var already=_cmpState.tickers.find(function(x){return x.ticker===t.ticker;});
     var safeName=(t.name||t.ticker).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-    return '<button onclick="_cmpAdd(\''+t.ticker+'\',\''+safeName+'\')" style="padding:4px 12px;font-size:11px;font-weight:600;border:1px solid var(--border);border-radius:12px;cursor:pointer;background:'+(already?'rgba(99,75,228,.2)':'var(--bg2)')+';color:'+(already?'var(--blue)':'var(--muted)');transition:all .1s" title="'+t.name+'">'+t.ticker+'</button>';
+    return '<button onclick="_cmpAdd(\''+t.ticker+'\',\''+safeName+'\')" style="padding:4px 12px;font-size:11px;font-weight:600;border:1px solid var(--border);border-radius:12px;cursor:pointer;background:'+(already?'rgba(99,75,228,.2)':'var(--bg2)')+';color:'+(already?'var(--blue)':'var(--muted)')+';transition:all .1s" title="'+t.name+'">'+t.ticker+'</button>';
   }).join('');
 
   pg.innerHTML=
