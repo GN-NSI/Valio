@@ -210,6 +210,7 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 /* Fix global : supprimer les espaces noirs à droite sur toutes les pages */
 #page > div, .page-content, .friend-portfolio-wrap, .deposits-wrap {
   max-width: 100%;
+  width: 100%;
   box-sizing: border-box;
 }
 /* Fix espace noir page compagnie */
@@ -6578,51 +6579,100 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// COMPARE — Comparaison multi-stocks sur métriques financières & ratios
+// COMPARE — Comparaison multi-stocks (v2 : données manuelles + ratios)
 // ═══════════════════════════════════════════════════════════════════════════
 var _cmpState = { tickers: [], metric: 'revenue', range: '5Y' };
-var _cmpDataCache = {};  // {ticker: finData}
-var _cmpPECache   = {};  // {ticker: [{t,v}]}
+var _cmpDataCache = {};
+var _cmpPECache   = {};
+var _cmpPRatioCache = {};
 var _cmpChartObj  = null;
 
-var CMP_COLORS = ['#634BE4','#22c55e','#f59e0b','#06b6d4','#a855f7','#ef4444'];
+// Violet · Cyan · Vert · Orange · Purple · Rouge
+var CMP_COLORS = ['#634BE4','#06b6d4','#22c55e','#f59e0b','#a855f7','#ef4444'];
 
 var CMP_METRICS = [
-  // ── Finances (données annuelles Yahoo) ──
-  {id:'revenue',          label:'CA (Md)',               unit:'Md',  chartType:'bar',  field:'revenue',        group:'Finances'},
-  {id:'netIncome',        label:'Résultat net (Md)',      unit:'Md',  chartType:'bar',  field:'netIncome',      group:'Finances'},
-  {id:'eps',              label:'EPS dilué',              unit:'',    chartType:'bar',  field:'eps',            group:'Finances'},
-  {id:'freeCF',           label:'Free Cash Flow (Md)',    unit:'Md',  chartType:'bar',  field:'freeCF',         group:'Finances'},
-  {id:'operatingCF',      label:'Cash Flow opé. (Md)',    unit:'Md',  chartType:'bar',  field:'operatingCF',    group:'Finances'},
-  {id:'grossProfit',      label:'Marge brute (Md)',       unit:'Md',  chartType:'bar',  field:'grossProfit',    group:'Finances'},
-  {id:'operatingIncome',  label:'Résultat opé. (Md)',     unit:'Md',  chartType:'bar',  field:'operatingIncome',group:'Finances'},
+  // ── Finances ──
+  {id:'revenue',         label:'CA (Md)',                unit:'Md', chartType:'bar',  field:'revenue',         group:'Finances'},
+  {id:'netIncome',       label:'Résultat net (Md)',      unit:'Md', chartType:'bar',  field:'netIncome',       group:'Finances'},
+  {id:'eps',             label:'EPS dilué',              unit:'$',  chartType:'bar',  field:'eps',             group:'Finances'},
+  {id:'freeCF',          label:'Free Cash Flow (Md)',    unit:'Md', chartType:'bar',  field:'freeCF',          group:'Finances'},
+  {id:'operatingCF',     label:'Cash Flow opé. (Md)',    unit:'Md', chartType:'bar',  field:'operatingCF',     group:'Finances'},
+  {id:'grossProfit',     label:'Profit brut (Md)',       unit:'Md', chartType:'bar',  field:'grossProfit',     group:'Finances'},
+  {id:'operatingIncome', label:'Résultat opé. (Md)',     unit:'Md', chartType:'bar',  field:'operatingIncome', group:'Finances'},
+  // ── Croissance ──
+  {id:'revenueGrowth',   label:'Croissance CA (%)',      unit:'%',  chartType:'line', field:'revenueGrowth',   group:'Croissance'},
+  {id:'epsGrowth',       label:'Croissance EPS (%)',     unit:'%',  chartType:'line', field:'epsGrowth',       group:'Croissance'},
+  {id:'netIncomeGrowth', label:'Croissance Résultat (%)',unit:'%',  chartType:'line', field:'netIncomeGrowth', group:'Croissance'},
   // ── Marges ──
-  {id:'grossMargin',      label:'Marge brute (%)',        unit:'%',   chartType:'line', field:'grossMargin',    group:'Marges'},
-  {id:'operatingMargin',  label:'Marge opérationnelle (%)',unit:'%',  chartType:'line', field:'operatingMargin',group:'Marges'},
-  {id:'netMargin',        label:'Marge nette (%)',        unit:'%',   chartType:'line', field:'netMargin',      group:'Marges'},
-  // ── Ratios (historique calculé) ──
-  {id:'pe',               label:'P/E (trailing)',         unit:'x',   chartType:'line', isPE:true,              group:'Ratios'},
+  {id:'grossMargin',     label:'Marge brute (%)',        unit:'%',  chartType:'line', field:'grossMargin',     group:'Marges'},
+  {id:'operatingMargin', label:'Marge opérationnelle (%)',unit:'%', chartType:'line', field:'operatingMargin', group:'Marges'},
+  {id:'netMargin',       label:'Marge nette (%)',        unit:'%',  chartType:'line', field:'netMargin',       group:'Marges'},
+  // ── Rentabilité ──
+  {id:'roe',             label:'ROE (%)',                unit:'%',  chartType:'line', field:'roe',             group:'Rentabilité'},
+  {id:'roic',            label:'ROIC (%)',               unit:'%',  chartType:'line', field:'roic',            group:'Rentabilité'},
+  // ── Ratios ──
+  {id:'pe',              label:'P/E (trailing)',         unit:'x',  chartType:'line', isPE:true,               group:'Ratios'},
+  {id:'pFcf',            label:'P/FCF',                 unit:'x',  chartType:'line', isPFCF:true,             group:'Ratios'},
+  {id:'pOcf',            label:'P/OCF',                 unit:'x',  chartType:'line', isPOCF:true,             group:'Ratios'},
 ];
 
-// ── Fetch financials (avec marges calculées) ─────────────────────────────
+// ── Fetch financials + merge données manuelles Supabase ───────────────────
 async function _cmpFetch(ticker) {
   if (_cmpDataCache[ticker]) return _cmpDataCache[ticker];
   try {
     var r = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=financials',{signal:AbortSignal.timeout(12000)});
     var d = await r.json();
-    if(d && !d.error) {
-      // Calcul des marges
-      d.grossMargin      = (d.grossProfit||[]).map(function(v,i){ return d.revenue&&d.revenue[i]>0?Math.round(v/d.revenue[i]*1000)/10:null; });
-      d.operatingMargin  = (d.operatingIncome||[]).map(function(v,i){ return d.revenue&&d.revenue[i]>0?Math.round(v/d.revenue[i]*1000)/10:null; });
-      d.netMargin        = (d.netIncome||[]).map(function(v,i){ return d.revenue&&d.revenue[i]>0?Math.round(v/d.revenue[i]*1000)/10:null; });
-      _cmpDataCache[ticker] = d;
-      return d;
+    if(!d || d.error) return null;
+
+    // Merge données manuelles (non-GAAP, plus précises)
+    var u = getUser();
+    if(u && d.years) {
+      try {
+        var manRows = await dbGet('earnings_manual',
+          'ticker=eq.'+encodeURIComponent(ticker)+'&user_id=eq.'+u.id+
+          '&select=period,revenue,gross_profit,operating_income,net_income,eps_diluted,ocf,fcf');
+        if(manRows && manRows.length) {
+          d.years.forEach(function(year, i) {
+            var manRow = manRows.find(function(m){
+              return m.period===year || m.period===year.replace('FY','') || 'FY'+m.period===year;
+            });
+            if(!manRow) return;
+            if(manRow.eps_diluted!=null) d.eps[i]=manRow.eps_diluted;
+            if(manRow.revenue!=null)     d.revenue[i]=manRow.revenue;
+            if(manRow.net_income!=null)  d.netIncome[i]=manRow.net_income;
+            if(manRow.gross_profit!=null)d.grossProfit[i]=manRow.gross_profit;
+            if(manRow.operating_income!=null)d.operatingIncome[i]=manRow.operating_income;
+            if(manRow.ocf!=null)         d.operatingCF[i]=manRow.ocf;
+            if(manRow.fcf!=null)         d.freeCF[i]=manRow.fcf;
+          });
+        }
+      } catch(e2) {}
     }
-  } catch(e){}
-  return null;
+
+    // Calcul des métriques dérivées
+    function yoyPct(arr){ return arr.map(function(v,i){ if(i===0||arr[i-1]==null||arr[i-1]===0||v==null)return null; return Math.round((v/arr[i-1]-1)*1000)/10; }); }
+    d.grossMargin      = (d.grossProfit||[]).map(function(v,i){var r=d.revenue&&d.revenue[i];return(v!=null&&r>0)?Math.round(v/r*1000)/10:null;});
+    d.operatingMargin  = (d.operatingIncome||[]).map(function(v,i){var r=d.revenue&&d.revenue[i];return(v!=null&&r>0)?Math.round(v/r*1000)/10:null;});
+    d.netMargin        = (d.netIncome||[]).map(function(v,i){var r=d.revenue&&d.revenue[i];return(v!=null&&r>0)?Math.round(v/r*1000)/10:null;});
+    d.revenueGrowth    = yoyPct(d.revenue||[]);
+    d.epsGrowth        = yoyPct(d.eps||[]);
+    d.netIncomeGrowth  = yoyPct(d.netIncome||[]);
+    d.roe  = (d.netIncome||[]).map(function(v,i){var eq=d.equity&&d.equity[i];return(v!=null&&eq!=null&&eq>0)?Math.round(v/eq*1000)/10:null;});
+    d.roic = (d.operatingIncome||[]).map(function(v,i){
+      var eq=d.equity&&d.equity[i],td=d.totalDebt&&d.totalDebt[i]||0;
+      var ic=(eq!=null?eq:0)+td; if(ic<=0||v==null)return null;
+      return Math.round(v*0.80/ic*1000)/10;  // NOPAT ~80% opIncome / (equity+dette)
+    });
+    // Par action (pour P/FCF et P/OCF) = val_Md * eps / netIncome_Md
+    d.fcfPerShare = (d.freeCF||[]).map(function(v,i){var ni=d.netIncome&&d.netIncome[i],ep=d.eps&&d.eps[i];return(v!=null&&ni!=null&&ep!=null&&ni!==0)?v*ep/ni:null;});
+    d.ocfPerShare = (d.operatingCF||[]).map(function(v,i){var ni=d.netIncome&&d.netIncome[i],ep=d.eps&&d.eps[i];return(v!=null&&ni!=null&&ep!=null&&ni!==0)?v*ep/ni:null;});
+
+    _cmpDataCache[ticker] = d;
+    return d;
+  } catch(e){ return null; }
 }
 
-// ── Fetch P/E historique (prix + EPS knots) ──────────────────────────────
+// ── Fetch P/E historique ──────────────────────────────────────────────────
 async function _cmpFetchPE(ticker) {
   if (_cmpPECache[ticker]) return _cmpPECache[ticker];
   try {
@@ -6636,268 +6686,248 @@ async function _cmpFetchPE(ticker) {
   } catch(e){ return []; }
 }
 
-// ── Aligner les données annuelles sur un axe commun ───────────────────────
+// ── Fetch P/FCF ou P/OCF historique ──────────────────────────────────────
+async function _cmpFetchPRatio(ticker, perShareField) {
+  var ck = ticker+'_'+perShareField;
+  if(_cmpPRatioCache[ck]) return _cmpPRatioCache[ck];
+  try {
+    var range = _cmpState.range==='1Y'?'1y':_cmpState.range==='3Y'?'3y':'5y';
+    var fin = await _cmpFetch(ticker);
+    if(!fin||!fin.years||!fin[perShareField]) return [];
+    var hist = await fetchPriceHistory(ticker, range);
+    if(!hist||hist.length<10) return [];
+    // Construire des knots annuels
+    var knots = [];
+    fin.years.forEach(function(year, i) {
+      var v = fin[perShareField][i]; if(v==null||v<=0) return;
+      var yr = parseInt(year.replace('FY',''));
+      knots.push({t: new Date(yr+'-12-31').getTime()/1000, v: v});
+    });
+    if(knots.length<1) return [];
+    knots.sort(function(a,b){return a.t-b.t;});
+    // Calcul du ratio pour chaque point de prix
+    var result = [];
+    hist.forEach(function(p){
+      var best=null;
+      for(var i=knots.length-1;i>=0;i--){ if(knots[i].t<=p.t){best=knots[i];break;} }
+      if(!best||best.v<=0) return;
+      var ratio=p.c/best.v;
+      if(ratio>0&&ratio<500) result.push({t:p.t,v:Math.round(ratio*10)/10});
+    });
+    _cmpPRatioCache[ck]=result;
+    return result;
+  } catch(e){ return []; }
+}
+
+// ── Aligner données annuelles ─────────────────────────────────────────────
 function _cmpAlignAnnual(metric) {
-  // Construire l'union des années triées
   var allYears = {};
-  _cmpState.tickers.forEach(function(t) {
-    var d = _cmpDataCache[t.ticker];
-    if(!d||!d.years) return;
-    d.years.forEach(function(y){ allYears[y]=1; });
-  });
-  var labels = Object.keys(allYears).sort();
-  // Filtrage selon range
-  var now = new Date().getFullYear();
-  var minY = _cmpState.range==='MAX'?0:now-parseInt(_cmpState.range)-1;
-  if(_cmpState.range!=='MAX') labels = labels.filter(function(y){ return parseInt(y.replace('FY',''))>=minY; });
-
-  var datasets = _cmpState.tickers.map(function(t,i){
-    var d = _cmpDataCache[t.ticker];
-    var color = CMP_COLORS[i%CMP_COLORS.length];
-    var vals = labels.map(function(y){
-      if(!d||!d.years) return null;
-      var idx = d.years.indexOf(y);
-      if(idx<0) return null;
-      var arr = d[metric.field];
-      return (arr&&arr[idx]!=null)?arr[idx]:null;
-    });
-    return {
-      label: t.name||t.ticker,
-      data: vals,
-      backgroundColor: metric.chartType==='bar'?color+'bb':undefined,
-      borderColor: color,
-      borderWidth: 2,
-      pointRadius: metric.chartType==='line'?3:0,
-      fill: false,
-      tension: 0.3,
-    };
-  });
-  return {labels, datasets};
-}
-
-// ── Aligner les séries P/E (timestamps) ──────────────────────────────────
-function _cmpAlignPE() {
-  // Construire une union de tous les timestamps (semaine par semaine)
-  var allTs = {};
   _cmpState.tickers.forEach(function(t){
-    var ts = _cmpPECache[t.ticker]||[];
-    ts.forEach(function(p){ allTs[p.t]=1; });
+    var d=_cmpDataCache[t.ticker]; if(!d||!d.years)return;
+    d.years.forEach(function(y){allYears[y]=1;});
   });
-  var sortedTs = Object.keys(allTs).map(Number).sort(function(a,b){return a-b;});
-  // Filtrage
-  var cutoff = 0;
-  var now = Date.now()/1000;
-  if(_cmpState.range==='1Y') cutoff = now - 365*86400;
-  else if(_cmpState.range==='3Y') cutoff = now - 3*365*86400;
-  else if(_cmpState.range==='5Y') cutoff = now - 5*365*86400;
-  if(cutoff>0) sortedTs = sortedTs.filter(function(t){ return t>=cutoff; });
-  // Sous-échantillonner si trop dense (max 300 points)
-  var step = Math.max(1, Math.floor(sortedTs.length/300));
-  sortedTs = sortedTs.filter(function(_,i){ return i%step===0; });
-
-  var labels = sortedTs.map(function(t){
-    var d=new Date(t*1000);
-    return d.toLocaleDateString('fr-FR',{month:'short',year:'2-digit'});
-  });
-
-  var datasets = _cmpState.tickers.map(function(t,i){
-    var ts = _cmpPECache[t.ticker]||[];
-    // Map: ts[t] -> valeur
-    var tsMap = {};
-    ts.forEach(function(p){ tsMap[p.t]=p.v; });
-    var color = CMP_COLORS[i%CMP_COLORS.length];
-    var vals = sortedTs.map(function(t){
-      // Chercher la valeur la plus proche
-      if(tsMap[t]!=null) return Math.round(tsMap[t]*10)/10;
-      // Interpolation : chercher le point le plus proche
-      var best=null, bestD=Infinity;
-      ts.forEach(function(p){ var d=Math.abs(p.t-t); if(d<bestD&&d<7*86400){bestD=d;best=p.v;} });
-      return best!=null?Math.round(best*10)/10:null;
+  var labels=Object.keys(allYears).sort();
+  var now=new Date().getFullYear();
+  if(_cmpState.range!=='MAX'){ var minY=now-parseInt(_cmpState.range)-1; labels=labels.filter(function(y){return parseInt(y.replace('FY',''))>=minY;}); }
+  var datasets=_cmpState.tickers.map(function(t,i){
+    var d=_cmpDataCache[t.ticker], color=CMP_COLORS[i%CMP_COLORS.length];
+    var vals=labels.map(function(y){
+      if(!d||!d.years)return null;
+      var idx=d.years.indexOf(y); if(idx<0)return null;
+      var arr=d[metric.field]; return(arr&&arr[idx]!=null)?arr[idx]:null;
     });
-    return { label:t.name||t.ticker, data:vals, borderColor:color, borderWidth:2, pointRadius:0, fill:false, tension:0.3 };
+    return{label:t.name||t.ticker,data:vals,backgroundColor:metric.chartType==='bar'?color+'bb':undefined,borderColor:color,borderWidth:2,pointRadius:metric.chartType==='line'?3:0,fill:false,tension:0.3};
   });
-  return {labels, datasets};
+  return{labels,datasets};
 }
 
-// ── Rendu du chart Chart.js ───────────────────────────────────────────────
+// ── Aligner séries temporelles P/E, P/FCF, P/OCF ─────────────────────────
+function _cmpAlignTimeSeries(cache, cacheKeyFn) {
+  var allTs={};
+  _cmpState.tickers.forEach(function(t){
+    var key=cacheKeyFn(t.ticker);
+    var ts=cache[key]||[]; ts.forEach(function(p){allTs[p.t]=1;});
+  });
+  var sortedTs=Object.keys(allTs).map(Number).sort(function(a,b){return a-b;});
+  var cutoff=0,now=Date.now()/1000;
+  if(_cmpState.range==='1Y')cutoff=now-365*86400;
+  else if(_cmpState.range==='3Y')cutoff=now-3*365*86400;
+  else if(_cmpState.range==='5Y')cutoff=now-5*365*86400;
+  if(cutoff>0)sortedTs=sortedTs.filter(function(t){return t>=cutoff;});
+  var step=Math.max(1,Math.floor(sortedTs.length/300));
+  sortedTs=sortedTs.filter(function(_,i){return i%step===0;});
+  var labels=sortedTs.map(function(t){var d=new Date(t*1000);return d.toLocaleDateString('fr-FR',{month:'short',year:'2-digit'});});
+  var datasets=_cmpState.tickers.map(function(t,i){
+    var key=cacheKeyFn(t.ticker), ts=cache[key]||[], color=CMP_COLORS[i%CMP_COLORS.length];
+    var tsMap={}; ts.forEach(function(p){tsMap[p.t]=p.v;});
+    var vals=sortedTs.map(function(t){
+      if(tsMap[t]!=null)return tsMap[t];
+      var best=null,bestD=Infinity;
+      ts.forEach(function(p){var d=Math.abs(p.t-t);if(d<bestD&&d<7*86400){bestD=d;best=p.v;}});
+      return best;
+    });
+    return{label:t.name||t.ticker,data:vals,borderColor:color,borderWidth:2,pointRadius:0,fill:false,tension:0.3};
+  });
+  return{labels,datasets};
+}
+
+// ── Rendu du chart ────────────────────────────────────────────────────────
 async function _cmpRenderChart() {
-  var cv = document.getElementById('cmp-chart'); if(!cv) return;
-  if(_cmpChartObj){ try{_cmpChartObj.destroy();}catch(e){} _cmpChartObj=null; }
-  var metric = CMP_METRICS.find(function(m){ return m.id===_cmpState.metric; });
-  if(!metric||!_cmpState.tickers.length){
-    var ctx=cv.getContext('2d'); ctx.clearRect(0,0,cv.width,cv.height);
-    return;
-  }
-  // Afficher spinner
-  var wrap = document.getElementById('cmp-chart-wrap');
-  if(wrap) wrap.style.opacity='0.4';
+  var cv=document.getElementById('cmp-chart'); if(!cv)return;
+  if(_cmpChartObj){try{_cmpChartObj.destroy();}catch(e){}_cmpChartObj=null;}
+  var metric=CMP_METRICS.find(function(m){return m.id===_cmpState.metric;});
+  if(!metric||!_cmpState.tickers.length)return;
+  var wrap=document.getElementById('cmp-chart-wrap'); if(wrap)wrap.style.opacity='0.4';
 
-  var chartData, chartType;
+  var chartData, chartType='line';
   if(metric.isPE){
-    // Charger les PE pour tous les tickers pas encore cachés
-    await Promise.all(_cmpState.tickers.map(function(t){ return _cmpFetchPE(t.ticker); }));
-    chartData = _cmpAlignPE();
-    chartType = 'line';
+    await Promise.all(_cmpState.tickers.map(function(t){return _cmpFetchPE(t.ticker);}));
+    chartData=_cmpAlignTimeSeries(_cmpPECache,function(tk){return tk;});
+  } else if(metric.isPFCF){
+    await Promise.all(_cmpState.tickers.map(function(t){return _cmpFetch(t.ticker).then(function(){return _cmpFetchPRatio(t.ticker,'fcfPerShare');});}));
+    chartData=_cmpAlignTimeSeries(_cmpPRatioCache,function(tk){return tk+'_fcfPerShare';});
+  } else if(metric.isPOCF){
+    await Promise.all(_cmpState.tickers.map(function(t){return _cmpFetch(t.ticker).then(function(){return _cmpFetchPRatio(t.ticker,'ocfPerShare');});}));
+    chartData=_cmpAlignTimeSeries(_cmpPRatioCache,function(tk){return tk+'_ocfPerShare';});
   } else {
-    await Promise.all(_cmpState.tickers.map(function(t){ return _cmpFetch(t.ticker); }));
-    chartData = _cmpAlignAnnual(metric);
-    chartType = metric.chartType || 'bar';
+    await Promise.all(_cmpState.tickers.map(function(t){return _cmpFetch(t.ticker);}));
+    chartData=_cmpAlignAnnual(metric);
+    chartType=metric.chartType||'bar';
   }
-  if(wrap) wrap.style.opacity='1';
+  if(wrap)wrap.style.opacity='1';
 
-  var yLabel = metric.unit==='%' ? '%' : metric.unit==='x' ? 'x' : (metric.unit||'');
-  _cmpChartObj = new Chart(cv, {
-    type: chartType,
-    data: chartData,
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      interaction: {mode:'index', intersect:false},
-      plugins: {
-        legend: {position:'top', labels:{color:'var(--text)',font:{size:12},padding:16}},
-        tooltip: {callbacks:{label:function(ctx){
-          var v=ctx.parsed.y; if(v==null) return null;
-          return ctx.dataset.label+': '+v+(metric.unit==='%'?'%':metric.unit==='x'?'x':(metric.unit==='Md'?' Md':''));
-        }}}
-      },
-      scales: {
-        x: {ticks:{color:'#6b7280',font:{size:10},maxRotation:45}, grid:{color:'rgba(255,255,255,.05)'}},
-        y: {ticks:{color:'#6b7280',font:{size:11},callback:function(v){return v+(yLabel==='%'?'%':yLabel==='x'?'x':'');}}, grid:{color:'rgba(255,255,255,.08)'}}
-      }
+  var yUnit=metric.unit||'';
+  _cmpChartObj=new Chart(cv,{type:chartType,data:chartData,options:{
+    responsive:true,maintainAspectRatio:false,
+    interaction:{mode:'index',intersect:false},
+    plugins:{
+      legend:{position:'top',labels:{color:'var(--text)',font:{size:12},padding:16}},
+      tooltip:{callbacks:{label:function(ctx){var v=ctx.parsed.y;if(v==null)return null;return ctx.dataset.label+': '+v+(yUnit==='%'?'%':yUnit==='x'?'x':yUnit==='Md'?' Md':yUnit==='$'?'$':'');}}}
+    },
+    scales:{
+      x:{ticks:{color:'#6b7280',font:{size:10},maxRotation:45},grid:{color:'rgba(255,255,255,.05)'}},
+      y:{ticks:{color:'#6b7280',font:{size:11},callback:function(v){return v+(yUnit==='%'?'%':yUnit==='x'?'x':'');}},grid:{color:'rgba(255,255,255,.08)'}}
     }
-  });
+  }});
 }
 
-// ── Ajouter / retirer un ticker ───────────────────────────────────────────
+// ── Ajouter / retirer / changer ───────────────────────────────────────────
 async function _cmpAdd(ticker, name) {
-  ticker = ticker.toUpperCase().trim();
-  if(!ticker) return;
-  if(_cmpState.tickers.length>=6){ showToast('Maximum 6 tickers'); return; }
+  ticker=ticker.toUpperCase().trim(); if(!ticker)return;
+  if(_cmpState.tickers.length>=6){showToast('Maximum 6 tickers');return;}
   if(_cmpState.tickers.find(function(t){return t.ticker===ticker;})){showToast(ticker+' déjà ajouté');return;}
-  _cmpState.tickers.push({ticker:ticker, name:name||ticker});
-  // Prefetch data, puis render chart (le .then s'exécute après renderCompare via microtask)
-  if(_cmpState.metric==='pe') _cmpFetchPE(ticker).then(_cmpRenderChart);
-  else _cmpFetch(ticker).then(_cmpRenderChart);
-  renderCompare(); // Recrée le DOM (incluant le nouveau canvas) — SYNCHRONE
+  _cmpState.tickers.push({ticker:ticker,name:name||ticker});
+  _cmpFetch(ticker).then(_cmpRenderChart);
+  renderCompare();
 }
 function _cmpRemove(ticker) {
-  _cmpState.tickers = _cmpState.tickers.filter(function(t){return t.ticker!==ticker;});
-  renderCompare(); // Recrée le DOM avec le nouveau canvas AVANT de rendre le chart
-  if(_cmpState.tickers.length>0) setTimeout(_cmpRenderChart, 80);
+  _cmpState.tickers=_cmpState.tickers.filter(function(t){return t.ticker!==ticker;});
+  renderCompare();
+  if(_cmpState.tickers.length>0)setTimeout(_cmpRenderChart,100);
 }
 function _cmpSetMetric(id) {
-  _cmpState.metric = id;
-  // Invalider le cache PE si on change vers PE (portée différente)
-  _cmpPECache = {};
+  _cmpState.metric=id;
+  _cmpPECache={}; _cmpPRatioCache={};
   _cmpRenderChart();
-  // Mettre à jour le select visuellement
-  var sel = document.getElementById('cmp-metric-select');
-  if(sel) sel.value = id;
 }
 function _cmpSetRange(r) {
-  _cmpState.range = r;
-  _cmpPECache = {};  // PE change avec la range
+  _cmpState.range=r;
+  _cmpPECache={}; _cmpPRatioCache={};
   _cmpRenderChart();
   document.querySelectorAll('.cmp-range-btn').forEach(function(b){
-    b.style.background = b.dataset.range===r?'#634BE4':'rgba(255,255,255,.06)';
-    b.style.color = b.dataset.range===r?'white':'var(--muted)';
+    b.style.background=b.dataset.range===r?'#634BE4':'rgba(255,255,255,.06)';
+    b.style.color=b.dataset.range===r?'white':'var(--muted)';
   });
 }
 
-// ── Rendu de la page Comparer ─────────────────────────────────────────────
+// ── Page Comparer ─────────────────────────────────────────────────────────
 function renderCompare() {
-  var pg = document.getElementById('page'); if(!pg) return;
+  var pg=document.getElementById('page'); if(!pg)return;
 
-  // Suggestions portefeuille depuis les transactions (S.portfolio n'existe pas)
-  var pfTickers = [];
-  if(S.transactions && S.transactions.length) {
-    var seen = {};
-    S.transactions.forEach(function(tx){
-      if(tx.ticker && !seen[tx.ticker]){
-        seen[tx.ticker]=1;
-        var name = (S.prices[tx.ticker] && S.prices[tx.ticker].shortName) || tx.ticker;
-        pfTickers.push({ticker:tx.ticker, name:name});
-      }
-    });
-  }
+  // Portefeuille trié par pondération (quantité × prix, positions actuelles uniquement)
+  var holdings={};
+  (S.transactions||[]).forEach(function(tx){
+    var tk=tx.ticker; if(!tk)return;
+    var qty=parseFloat(tx.quantity||0)||0;
+    var type=(tx.transaction_type||'').toLowerCase();
+    if(type==='buy')holdings[tk]=(holdings[tk]||0)+qty;
+    else if(type==='sell')holdings[tk]=(holdings[tk]||0)-qty;
+  });
+  var pfTickers=Object.keys(holdings)
+    .filter(function(tk){return holdings[tk]>0.001;})
+    .map(function(tk){
+      var price=(S.prices[tk]&&S.prices[tk].price)||0;
+      var name=(S.prices[tk]&&S.prices[tk].shortName)||tk;
+      return{ticker:tk,name:name,value:holdings[tk]*price};
+    })
+    .sort(function(a,b){return b.value-a.value;});
 
-  // Options métriques groupées
-  var metricOpts = '';
-  var lastGroup = '';
+  // Options métriques
+  var metricOpts='',lastGroup='';
   CMP_METRICS.forEach(function(m){
-    if(m.group!==lastGroup){ if(lastGroup) metricOpts+='</optgroup>'; metricOpts+='<optgroup label="'+m.group+'">'; lastGroup=m.group; }
+    if(m.group!==lastGroup){if(lastGroup)metricOpts+='</optgroup>';metricOpts+='<optgroup label="'+m.group+'>';lastGroup=m.group;}
     metricOpts+='<option value="'+m.id+'"'+(m.id===_cmpState.metric?' selected':'')+'>'+m.label+'</option>';
   });
-  if(lastGroup) metricOpts+='</optgroup>';
+  if(lastGroup)metricOpts+='</optgroup>';
 
-  // Chips des tickers sélectionnés
-  var chips = _cmpState.tickers.map(function(t,i){
+  // Chips sélectionnés
+  var chips=_cmpState.tickers.map(function(t,i){
     var c=CMP_COLORS[i%CMP_COLORS.length];
-    return '<div style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;border:1.5px solid '+c+';background:'+c+'22;font-size:12px;font-weight:600;white-space:nowrap">' +
+    return '<div style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;border:1.5px solid '+c+';background:'+c+'22;font-size:12px;font-weight:600;white-space:nowrap">'+
       '<span style="width:8px;height:8px;border-radius:50%;background:'+c+';flex-shrink:0"></span>'+
       '<span>'+t.ticker+'</span>'+
-      '<span onclick="_cmpRemove(\''+t.ticker+'\')" style="cursor:pointer;color:var(--muted);font-size:18px;line-height:1;margin-left:4px;flex-shrink:0">×</span>'+
+      '<span onclick="_cmpRemove(\''+t.ticker+'\')" style="cursor:pointer;color:var(--muted);font-size:18px;line-height:1;margin-left:4px">×</span>'+
     '</div>';
   }).join('');
 
-  // Boutons de range
-  var ranges = ['1Y','3Y','5Y','MAX'];
-  var rangeBtns = ranges.map(function(r){
-    var active=r===_cmpState.range;
-    return '<button class="cmp-range-btn" data-range="'+r+'" onclick="_cmpSetRange(\''+r+'\')" style="padding:5px 14px;font-size:11px;font-weight:700;border:none;border-radius:6px;cursor:pointer;background:'+(active?'#634BE4':'rgba(255,255,255,.06)')+';color:'+(active?'white':'var(--muted)')+'">'+r+'</button>';
+  // Range buttons
+  var rangeBtns=['1Y','3Y','5Y','MAX'].map(function(r){
+    var a=r===_cmpState.range;
+    return '<button class="cmp-range-btn" data-range="'+r+'" onclick="_cmpSetRange(\''+r+'\')" style="padding:5px 14px;font-size:11px;font-weight:700;border:none;border-radius:6px;cursor:pointer;background:'+(a?'#634BE4':'rgba(255,255,255,.06)')+';color:'+(a?'white':'var(--muted)')+'">'+r+'</button>';
   }).join('');
 
-  // Suggestions portefeuille (max 10 chips)
-  var pfChips = pfTickers.slice(0,10).map(function(t){
-    var already = _cmpState.tickers.find(function(x){return x.ticker===t.ticker;});
-    var safeName = (t.name||t.ticker).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-    return '<button onclick="_cmpAdd(\''+t.ticker+'\',\''+safeName+'\')" style="padding:4px 12px;font-size:11px;font-weight:600;border:1px solid var(--border);border-radius:12px;cursor:pointer;background:'+(already?'rgba(99,75,228,.2)':'var(--bg2)')+';color:'+(already?'var(--blue)':'var(--muted)')+';transition:all .1s" title="'+t.name+'">'+t.ticker+'</button>';
+  // Suggestions portefeuille
+  var pfChips=pfTickers.slice(0,10).map(function(t){
+    var already=_cmpState.tickers.find(function(x){return x.ticker===t.ticker;});
+    var safeName=(t.name||t.ticker).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    return '<button onclick="_cmpAdd(\''+t.ticker+'\',\''+safeName+'\')" style="padding:4px 12px;font-size:11px;font-weight:600;border:1px solid var(--border);border-radius:12px;cursor:pointer;background:'+(already?'rgba(99,75,228,.2)':'var(--bg2)')+';color:'+(already?'var(--blue)':'var(--muted)');transition:all .1s" title="'+t.name+'">'+t.ticker+'</button>';
   }).join('');
 
-  pg.innerHTML =
-    '<div style="width:100%;box-sizing:border-box">' +
-    '<h2 style="font-size:18px;font-weight:700;margin:0 0 16px">📊 Comparer des entreprises</h2>'+
-
-    // ── Barre de contrôles ──
-    '<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px;width:100%;box-sizing:border-box">' +
-
-      // Ligne 1 : chips sélectionnés + champ de recherche
-      '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:'+(pfChips?'10px':'12px')+'">' +
-        chips +
+  pg.innerHTML=
+    '<div style="width:100%;box-sizing:border-box">'+
+    '<h2 style="font-size:18px;font-weight:700;margin:0 0 14px">📊 Comparer des entreprises</h2>'+
+    '<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px;width:100%;box-sizing:border-box">'+
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:'+(pfChips?'10px':'12px')+'">'+
+        chips+
         (_cmpState.tickers.length<6?
           '<div style="display:flex;gap:6px;align-items:center">'+
             '<input id="cmp-search" class="form-input" placeholder="Ticker (ex: NVDA, ASML…)" style="width:180px;padding:5px 10px;font-size:12px" onkeydown="if(event.key===\'Enter\'){var v=this.value.trim();if(v){_cmpAdd(v);this.value=\'\';}}" autofocus>'+
-            '<button onclick="var v=document.getElementById(\'cmp-search\').value.trim();if(v){_cmpAdd(v);document.getElementById(\'cmp-search\').value=\'\'}" style="padding:5px 14px;font-size:12px;font-weight:600;border:none;border-radius:8px;cursor:pointer;background:#634BE4;color:white;white-space:nowrap">+ Ajouter</button>'+
-          '</div>' :
+            '<button onclick="var v=document.getElementById(\'cmp-search\').value.trim();if(v){_cmpAdd(v);document.getElementById(\'cmp-search\').value=\'\'}" style="padding:5px 14px;font-size:12px;font-weight:600;border:none;border-radius:8px;cursor:pointer;background:#634BE4;color:white">+ Ajouter</button>'+
+          '</div>':
           '<span style="font-size:11px;color:var(--muted)">Max 6 titres</span>')+
       '</div>'+
-
-      // Ligne 2 : suggestions portefeuille
-      (pfChips?'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px"><span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Portefeuille :</span>'+pfChips+'</div>':'') +
-
-      // Ligne 3 : métriques + range
-      '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">'+
+      (pfChips?'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px"><span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Portefeuille :</span>'+pfChips+'</div>':'')+
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
         '<select id="cmp-metric-select" class="form-input" style="padding:6px 10px;font-size:12px;min-width:200px;width:auto" onchange="_cmpSetMetric(this.value)">'+metricOpts+'</select>'+
         '<div style="display:flex;gap:4px">'+rangeBtns+'</div>'+
-        (_cmpState.tickers.length>0?'<span style="font-size:10px;color:var(--muted);margin-left:8px">'+_cmpState.tickers.length+' titre'+(+_cmpState.tickers.length>1?'s':'')+' sélectionné'+(+_cmpState.tickers.length>1?'s':'')+'</span>':'')+ 
+        (_cmpState.tickers.length>0?'<span style="font-size:10px;color:var(--muted)">'+_cmpState.tickers.length+' titre'+(_cmpState.tickers.length>1?'s':'')+' sélectionné'+(_cmpState.tickers.length>1?'s':'')+'</span>':'')+
       '</div>'+
     '</div>'+
-
-    // ── Chart ──
     '<div id="cmp-chart-wrap" class="card" style="height:460px;position:relative;padding:16px;width:100%;box-sizing:border-box;transition:opacity .2s">'+
       (_cmpState.tickers.length===0?
-        '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted)"><div style="font-size:48px;margin-bottom:12px">📈</div><div style="font-size:15px;font-weight:600;color:var(--text)">Ajoute des entreprises pour comparer</div><div style="font-size:12px;margin-top:6px">Utilise la recherche ou clique sur une suggestion de ton portefeuille</div></div>' :
+        '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted)"><div style="font-size:48px;margin-bottom:12px">📈</div><div style="font-size:15px;font-weight:600;color:var(--text)">Ajoute des entreprises pour comparer</div><div style="font-size:12px;margin-top:6px">Utilise la barre de recherche ou clique sur ton portefeuille</div></div>':
         '<canvas id="cmp-chart" style="width:100%;height:100%"></canvas>')+
     '</div>'+
     '</div>';
 
-  // Render chart after DOM is ready
-  if(_cmpState.tickers.length>0) setTimeout(_cmpRenderChart, 100);
+  if(_cmpState.tickers.length>0)setTimeout(_cmpRenderChart,100);
 }
 
 window._cmpAdd    = _cmpAdd;
 window._cmpRemove = _cmpRemove;
 window._cmpSetMetric = _cmpSetMetric;
 window._cmpSetRange  = _cmpSetRange;
+
 
 </script>
 </body>
