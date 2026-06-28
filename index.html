@@ -266,6 +266,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
         <div class="nav-item" id="nav-amis" onclick="navigate('amis')"><span class="nav-icon">👥</span><span>Amis</span></div>
         <div class="nav-item" id="nav-benchmark" onclick="navigate('benchmark')"><span class="nav-icon">📊</span><span>Benchmark</span></div>
         <div class="nav-item" id="nav-leaderboard" onclick="navigate('leaderboard')"><span class="nav-icon">🏆</span><span>Classement</span></div>
+        <div class="nav-item" id="nav-compare" onclick="navigate('compare')"><span class="nav-icon">📊</span><span>Comparer</span></div>
       <div class="nav-section-label" style="font-size:10px;color:var(--muted);padding:12px 16px 4px;letter-spacing:.08em;font-weight:600">SUIVI</div>
       <div class="nav-item" id="nav-deposits" onclick="navigate('deposits')"><span class="nav-icon">💸</span><span>Dépôts & Solde</span></div>
       <div class="nav-item" id="nav-liquidity" onclick="navigate('liquidity')"><span class="nav-icon">💰</span><span>Liquidités</span></div>
@@ -737,7 +738,7 @@ function navigate(page){
   S.page=page;
   document.querySelectorAll('.nav-item:not(.disabled)').forEach(e=>e.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes',ratios:'Screener',watchlist:'Cibles d\u0027achat',screener:'Screener',amis:'Amis',benchmark:'Benchmark',leaderboard:'Classement',journal:'Journal'}[page]||page;
+  document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes',ratios:'Screener',watchlist:'Cibles d\u0027achat',screener:'Screener',amis:'Amis',benchmark:'Benchmark',leaderboard:'Classement',journal:'Journal',compare:'Comparer'}[page]||page;
   const pfDiv=document.getElementById('page-portfolio');
   const pgDiv=document.getElementById('page');
   if(page==='portfolio'){
@@ -757,6 +758,7 @@ function navigate(page){
     else if(page==='journal')renderJournal();
     else if(page==='deposits')renderDeposits();
     else if(page==='liquidity')renderLiquidity();
+    else if(page==='compare')renderCompare();
   }
 }
 
@@ -2607,6 +2609,8 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
 
   // Segments du trimestre/année le plus récent
   var latestWithSegments = manualData.find(function(m){return m.segments&&m.segments.length;});
+  // Géographie du trimestre/année le plus récent
+  var latestWithGeo = manualData.find(function(m){return m.geo_segments&&m.geo_segments.length;});
 
   var isUsd = !(price && price.currency === 'EUR');
   var sym = isUsd ? '$' : '€';
@@ -2753,7 +2757,7 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
       '<div class="card"><div style="font-size:11px;color:var(--muted);margin-bottom:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Résultat '+fin.years[ly]+'</div><div id="cdchart-waterfall"></div></div>' +
       '<div class="card"><div id="fin-title-cf" style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Cash Flow (Md'+sym+')</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-cf"></canvas></div></div>' +
     '</div>' +
-    (latestWithSegments ? _buildSegmentCard(latestWithSegments, manualData) : '') +
+    (latestWithSegments || latestWithGeo ? _buildBreakdownCard(latestWithSegments, manualData, latestWithGeo) : '') +
     (function(){
       // Afficher métriques utilisateurs si disponibles dans les données manuelles
       var umEntries=(manualData||[]).filter(function(m){return m.dau_mau!=null||m.users_growth_pct!=null;});
@@ -2784,63 +2788,124 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
     if(ana&&host&&ana.parentElement!==host){ ana.style.display=''; host.appendChild(ana); }
   },80);
 
-  function _buildSegmentCard(latest, allManual){
-    // YoY : cherche exactement le même trimestre/exercice un an avant
+  function _buildBreakdownCard(latestSeg, allManual, latestGeo) {
+    var hasSeg = !!(latestSeg && latestSeg.segments && latestSeg.segments.length);
+    var hasGeo = !!(latestGeo && latestGeo.geo_segments && latestGeo.geo_segments.length);
+    if(!hasSeg && !hasGeo) return '';
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
     function prevYearPeriod(period){
-      // "2026-Q1" → "2025-Q1" | "FY2025" → "FY2024"
-      var qm=period.match(/^(\d{4})-(Q[1-4])$/);
-      if(qm) return (parseInt(qm[1])-1)+'-'+qm[2];
-      var fm=period.match(/^FY(\d{4})$/);
-      if(fm) return 'FY'+(parseInt(fm[1])-1);
+      var qm=period.match(/^(\d{4})-(Q[1-4])$/); if(qm) return (parseInt(qm[1])-1)+'-'+qm[2];
+      var fm=period.match(/^FY(\d{4})$/);         if(fm)  return 'FY'+(parseInt(fm[1])-1);
       return null;
     }
-    var targetPrev=prevYearPeriod(latest.period);
-    var prevM=null;
-    if(targetPrev){
-      prevM=(allManual||[]).find(function(m){return m.segments&&m.segments.length&&m.period===targetPrev;});
-    }
-    // Fallback: si pas de même trimestre N-1, cherche l'année fiscale précédente
-    if(!prevM){
-      var qm2=latest.period.match(/^(\d{4})-(Q[1-4])$/);
-      if(qm2){
-        var altFY='FY'+(parseInt(qm2[1])-1);
-        prevM=(allManual||[]).find(function(m){return m.segments&&m.segments.length&&m.period===altFY;});
-      }
-    }
-    var compLabel=prevM?prevM.period:'—';
-    var growthHtml='';
-    if(prevM){
-      var curSegs=latest.segments; var total=curSegs.reduce(function(s,g){return s+g.value;},0);
-      var rows=curSegs.map(function(seg){
-        var prev=prevM.segments.find(function(p){return p.name.toLowerCase()===seg.name.toLowerCase();});
-        var pct=total>0?(seg.value/total*100).toFixed(1)+'%':'—';
-        var growth=(prev&&prev.value>0)?((seg.value-prev.value)/prev.value*100):null;
-        var gCol=growth==null?'var(--muted)':growth>=30?'var(--green)':growth>0?'var(--yellow)':'var(--red)';
+    var PALETTE=['#634BE4','#22c55e','#f59e0b','#06b6d4','#a855f7','#ef4444','#f97316','#84cc16','#ec4899','#14b8a6'];
+
+    // ── Table de croissance pour données avec period N vs N-1 ────────────────
+    function buildSegTable(items, prevItems, colLabel){
+      var total=items.reduce(function(s,g){return s+(g.value||0);},0);
+      var rows=items.map(function(item){
+        var prev=prevItems&&prevItems.find(function(p){return p.name.toLowerCase()===item.name.toLowerCase();});
+        var pct=total>0?((item.value||0)/total*100).toFixed(1)+'%':'—';
+        var growth=(prev&&prev.value>0)?((item.value-prev.value)/prev.value*100):null;
+        var gCol=growth==null?'var(--muted)':growth>=20?'#22c55e':growth>0?'#f59e0b':'#ef4444';
         var gLbl=growth==null?'—':(growth>=0?'+':'')+growth.toFixed(1)+'%';
         var badge=growth!=null&&growth>=30?' 🚀':growth!=null&&growth<0?' 📉':'';
         return '<tr style="border-bottom:1px solid var(--border2)">'+
-          '<td style="padding:7px 6px;font-size:12px;font-weight:600">'+seg.name+badge+'</td>'+
-          '<td style="padding:7px 6px;text-align:right;font-size:12px" class="mono">'+seg.value+'Md</td>'+
+          '<td style="padding:7px 6px;font-size:12px;font-weight:600">'+item.name+badge+'</td>'+
+          '<td style="padding:7px 6px;text-align:right;font-size:12px" class="mono">'+item.value+'Md</td>'+
           '<td style="padding:7px 6px;text-align:right;font-size:11px;color:var(--muted)">'+pct+'</td>'+
-          '<td style="padding:7px 6px;text-align:right;font-size:12px;font-weight:700;color:'+gCol+'">'+gLbl+'</td>'+
-          '</tr>';
+          '<td style="padding:7px 6px;text-align:right;font-size:12px;font-weight:700;color:'+gCol+'">'+gLbl+'</td></tr>';
       }).join('');
-      growthHtml='<div style="margin-top:10px"><div style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-bottom:6px">Croissance YoY vs '+compLabel+'</div>'+
-        '<table style="width:100%;border-collapse:collapse">'+
-        '<thead><tr><th style="padding:5px 6px;text-align:left;font-size:10px;color:var(--muted)">Segment</th>'+
-        '<th style="padding:5px 6px;text-align:right;font-size:10px;color:var(--muted)">CA</th>'+
-        '<th style="padding:5px 6px;text-align:right;font-size:10px;color:var(--muted)">Part</th>'+
-        '<th style="padding:5px 6px;text-align:right;font-size:10px;color:var(--muted)">YoY</th></tr></thead>'+
-        '<tbody>'+rows+'</tbody></table></div>';
+      return '<table style="width:100%;border-collapse:collapse">'+
+        '<thead><tr style="border-bottom:1px solid var(--border)">'+
+          '<th style="padding:5px 6px;text-align:left;font-size:10px;color:var(--muted)">'+colLabel+'</th>'+
+          '<th style="padding:5px 6px;text-align:right;font-size:10px;color:var(--muted)">CA</th>'+
+          '<th style="padding:5px 6px;text-align:right;font-size:10px;color:var(--muted)">PART</th>'+
+          '<th style="padding:5px 6px;text-align:right;font-size:10px;color:var(--muted)">YOY</th></tr></thead>'+
+        '<tbody>'+rows+'</tbody></table>';
     }
-    return '<div class="card" style="margin-bottom:16px">'+
-      '<div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Répartition CA · '+latest.period+' <span style="color:var(--green);font-size:10px">● Données manuelles</span></div>'+
+
+    // ── Table géographique (growth_pct saisi directement par l'utilisateur) ──
+    function buildGeoTable(geoItems){
+      var total=geoItems.reduce(function(s,g){return s+(g.value||0);},0);
+      var rows=geoItems.map(function(g){
+        var pct=total>0?((g.value||0)/total*100).toFixed(1)+'%':'—';
+        var growth=g.growth_pct!=null?parseFloat(g.growth_pct):null;
+        var gCol=growth==null?'var(--muted)':growth>=20?'#22c55e':growth>0?'#f59e0b':'#ef4444';
+        var gLbl=growth==null?'—':(growth>=0?'+':'')+growth.toFixed(1)+'%';
+        var badge=growth!=null&&growth>=30?' 🚀':growth!=null&&growth<0?' 📉':'';
+        return '<tr style="border-bottom:1px solid var(--border2)">'+
+          '<td style="padding:7px 6px;font-size:12px;font-weight:600">'+g.name+badge+'</td>'+
+          '<td style="padding:7px 6px;text-align:right;font-size:12px" class="mono">'+g.value+'Md</td>'+
+          '<td style="padding:7px 6px;text-align:right;font-size:11px;color:var(--muted)">'+pct+'</td>'+
+          '<td style="padding:7px 6px;text-align:right;font-size:12px;font-weight:700;color:'+gCol+'">'+gLbl+'</td></tr>';
+      }).join('');
+      return '<table style="width:100%;border-collapse:collapse">'+
+        '<thead><tr style="border-bottom:1px solid var(--border)">'+
+          '<th style="padding:5px 6px;text-align:left;font-size:10px;color:var(--muted)">RÉGION</th>'+
+          '<th style="padding:5px 6px;text-align:right;font-size:10px;color:var(--muted)">CA</th>'+
+          '<th style="padding:5px 6px;text-align:right;font-size:10px;color:var(--muted)">PART</th>'+
+          '<th style="padding:5px 6px;text-align:right;font-size:10px;color:var(--muted)">YOY</th></tr></thead>'+
+        '<tbody>'+rows+'</tbody></table>';
+    }
+
+    // ── Données segments ──────────────────────────────────────────────────────
+    var segPeriod=hasSeg?latestSeg.period:'—';
+    var prevSegPeriod=hasSeg?prevYearPeriod(segPeriod):null;
+    var prevSegM=null;
+    if(prevSegPeriod){
+      prevSegM=(allManual||[]).find(function(m){return m.segments&&m.segments.length&&m.period===prevSegPeriod;});
+      // fallback FY si pas de même trim
+      if(!prevSegM){
+        var qm2=segPeriod.match(/^(\d{4})-(Q[1-4])$/);
+        if(qm2){ var altFY='FY'+(parseInt(qm2[1])-1); prevSegM=(allManual||[]).find(function(m){return m.segments&&m.segments.length&&m.period===altFY;}); }
+      }
+    }
+
+    // ── HTML ─────────────────────────────────────────────────────────────────
+    var showBoth=hasSeg&&hasGeo;
+    // Contenu segments
+    var segContent = hasSeg ? (
+      '<div id="bkd-panel-seg">'+
+        '<div style="font-size:10px;color:var(--muted);margin-bottom:8px">'+(prevSegM?'Croissance YoY vs '+prevSegM.period:'Répartition · pas de période N-1')+'</div>'+
+        buildSegTable(latestSeg.segments, prevSegM?prevSegM.segments:null,'SEGMENT')+
+      '</div>'
+    ) : '';
+
+    // Contenu géographie
+    var geoPeriod=hasGeo?latestGeo.period:'—';
+    var geoContent = hasGeo ? (
+      '<div id="bkd-panel-geo" style="display:'+(showBoth?'none':'block')+'">'+
+        '<div style="font-size:10px;color:var(--muted);margin-bottom:8px">Répartition géographique · '+geoPeriod+' <span style="font-size:9px;opacity:.7">(% YoY saisi manuellement)</span></div>'+
+        buildGeoTable(latestGeo.geo_segments)+
+      '</div>'
+    ) : '';
+
+    // Toggle
+    var toggleHtml = showBoth ?
+      '<div style="display:inline-flex;gap:2px;background:rgba(255,255,255,.06);border-radius:8px;padding:3px">'+
+        '<button id="bkd-btn-seg" onclick="window._bkdSwitch(\'seg\')" style="padding:4px 12px;font-size:11px;font-weight:700;border:none;border-radius:6px;cursor:pointer;background:#634BE4;color:white">Segments</button>'+
+        '<button id="bkd-btn-geo" onclick="window._bkdSwitch(\'geo\')" style="padding:4px 12px;font-size:11px;font-weight:700;border:none;border-radius:6px;cursor:pointer;background:transparent;color:var(--muted)">Géographie</button>'+
+      '</div>' : '';
+
+    var headerPeriod = hasSeg ? segPeriod : geoPeriod;
+
+    return '<div class="card" style="margin-bottom:16px" id="bkd-card">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'+
+        '<div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em">'+
+          'Répartition CA · '+headerPeriod+' <span style="color:var(--green);font-size:10px">● Données manuelles</span>'+
+        '</div>'+
+        toggleHtml+
+      '</div>'+
       '<div style="display:grid;grid-template-columns:240px 1fr;gap:20px;align-items:start">'+
         '<div style="position:relative;height:220px"><canvas id="cdchart-segments"></canvas></div>'+
-        '<div>'+growthHtml+'</div>'+
+        '<div id="bkd-table-wrap">'+segContent+geoContent+'</div>'+
       '</div>'+
     '</div>';
   }
+  // Alias pour la compatibilité de l'appel existant
+  function _buildSegmentCard(latest, allManual){ return _buildBreakdownCard(latest, allManual, latestWithGeo); }
 
   // ── Séries temporelles de ratios (granularité hebdo, 3 ans) ──
   // TTM à chaque date à partir des FY (Yahoo+manuel) et des trimestres saisis
@@ -2907,13 +2972,40 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
       else cdValChart('cdchart-pocf', fin.years, pocfVals, curPOCF,          'P/OCF');
       try{ window._cdLastFin=fin; window._cdLastNativePrice=curPrice; renderYieldMatrix(ticker, curPrice, f, fin); }catch(e){ var ym=document.getElementById('cd-yield-matrix'); if(ym) ym.innerHTML='<div style="color:var(--muted);font-size:12px">Données insuffisantes (EPS manquant).</div>'; }
       // Segments pie (données manuelles)
-      if(latestWithSegments && document.getElementById('cdchart-segments')) {
-        var segs = latestWithSegments.segments;
-        var segC = document.getElementById('cdchart-segments');
-        var segKey = '_cdc_cdchart-segments';
-        if(window[segKey]){try{window[segKey].destroy();}catch(e){}}
-        window[segKey] = new Chart(segC, {type:'doughnut', data:{labels:segs.map(function(s){return s.name;}), datasets:[{data:segs.map(function(s){return s.value;}), backgroundColor:['#634BE4','#22c55e','#f59e0b','#06b6d4','#a855f7','#ef4444','#f97316','#84cc16'], borderColor:'rgba(0,0,0,.1)', borderWidth:1, hoverOffset:6}]}, options:{cutout:'55%', responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right',labels:{color:'#6b7280',font:{size:11},padding:12}}, tooltip:{callbacks:{label:function(ctx){var tot=ctx.dataset.data.reduce(function(s,v){return s+v;},0);return ctx.label+': '+ctx.raw.toFixed(1)+'Md ('+((ctx.raw/tot*100).toFixed(1))+'%)';}}}}}});
-      }
+      // Breakdown card chart (segments ou géographie selon vue active)
+      var _bkdRenderChart = function(view) {
+        var cv=document.getElementById('cdchart-segments'); if(!cv) return;
+        var segKey='_cdc_cdchart-segments';
+        if(window[segKey]){try{window[segKey].destroy();}catch(e){} window[segKey]=null;}
+        var items=[], labels=[];
+        var PALETTE=['#634BE4','#22c55e','#f59e0b','#06b6d4','#a855f7','#ef4444','#f97316','#84cc16','#ec4899','#14b8a6'];
+        if(view==='geo' && latestWithGeo && latestWithGeo.geo_segments){
+          items=latestWithGeo.geo_segments.map(function(g){return {name:g.name,value:g.value||0};});
+        } else if(latestWithSegments && latestWithSegments.segments){
+          items=latestWithSegments.segments.map(function(s){return {name:s.name,value:s.value||0};});
+        }
+        if(!items.length) return;
+        labels=items.map(function(i){return i.name;});
+        var data=items.map(function(i){return i.value;});
+        var colors=items.map(function(_,idx){return PALETTE[idx%PALETTE.length];});
+        window[segKey]=new Chart(cv,{type:'doughnut',data:{labels:labels,datasets:[{data:data,backgroundColor:colors,borderColor:'rgba(0,0,0,.1)',borderWidth:1,hoverOffset:6}]},options:{cutout:'55%',responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#6b7280',font:{size:11},padding:12}},tooltip:{callbacks:{label:function(ctx){var tot=ctx.dataset.data.reduce(function(s,v){return s+v;},0);return ctx.label+': '+ctx.raw.toFixed(1)+'Md ('+(tot>0?(ctx.raw/tot*100).toFixed(1):0)+'%)';}}}}}}); 
+      };
+      _bkdRenderChart('seg');
+
+      // Fonction globale de switch vue
+      window._bkdSwitch = function(view) {
+        var panelSeg=document.getElementById('bkd-panel-seg');
+        var panelGeo=document.getElementById('bkd-panel-geo');
+        var btnSeg=document.getElementById('bkd-btn-seg');
+        var btnGeo=document.getElementById('bkd-btn-geo');
+        var activeStyle='background:#634BE4;color:white;';
+        var inactiveStyle='background:transparent;color:var(--muted);';
+        if(panelSeg){ panelSeg.style.display=view==='seg'?'block':'none'; }
+        if(panelGeo){ panelGeo.style.display=view==='geo'?'block':'none'; }
+        if(btnSeg){ btnSeg.style.cssText=view==='seg'?activeStyle:inactiveStyle; }
+        if(btnGeo){ btnGeo.style.cssText=view==='geo'?activeStyle:inactiveStyle; }
+        _bkdRenderChart(view);
+      };
     } catch(chartErr) {
       console.error('[Valio] Chart rendering error:', chartErr);
     }
@@ -4234,6 +4326,8 @@ function renderYieldMatrix(ticker, price, f, fin){
 
   // Horizon 5 ou 10 ans
   var N=(st.n===10)?10:5;
+  // Rendement cible (%/an) — 4ème paramètre éditable, défaut 10%
+  var rC = (st.r != null && st.r > 0) ? st.r : 10;
   var titleEl=document.getElementById('cd-matrix-title');
   if(titleEl) titleEl.textContent='\uD83C\uDFAF Matrice de rendement \u2014 '+N+' ans';
 
@@ -4291,7 +4385,7 @@ function renderYieldMatrix(ticker, price, f, fin){
   function annRet(g,m){ return (Math.pow((eps0*Math.pow(1+g/100,N)*m)/price,1/N)-1)*100; }
   function cellColor(r){ return r<8?'#ef4444':r<12?'#f59e0b':'#22c55e'; }
   var selRet=annRet(sel.g,sel.m);
-  var fair=eps0*Math.pow(1+sel.g/100,N)*sel.m/Math.pow(1.10,N);
+  var fair=eps0*Math.pow(1+sel.g/100,N)*sel.m/Math.pow(1+rC/100,N);
   var marge=(1-price/fair)*100;
   var cSym=(S.prices[ticker]&&S.prices[ticker].currency==='EUR')?'\u20ac':'$';
   var tName=ticker.replace(/'/g,"\\'");
@@ -4305,7 +4399,7 @@ function renderYieldMatrix(ticker, price, f, fin){
     '<div style="display:flex;align-items:center;gap:6px;margin-bottom:14px">'+
       togBtn('5 ans',5)+togBtn('10 ans',10)+
       '<div style="margin-left:16px;display:flex;gap:26px;flex-wrap:wrap">'+
-        '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Prix juste (10 %/an)</div><div style="font-size:20px;font-weight:800;color:#634BE4" class="mono">'+fair.toFixed(2)+' '+cSym+'</div></div>'+
+        '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Prix d\'entr\u00e9e ('+rC+'%/an)</div><div style="font-size:20px;font-weight:800;color:#634BE4" class="mono">'+fair.toFixed(2)+' '+cSym+'</div></div>'+
         '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Rendement estim\u00e9</div><div style="font-size:20px;font-weight:800;color:'+cellColor(selRet)+'" class="mono">'+selRet.toFixed(2)+' %/an</div></div>'+
         '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Marge de s\u00e9curit\u00e9</div><div style="font-size:20px;font-weight:800;color:'+(marge>=0?'#22c55e':'#f59e0b')+'" class="mono">'+(marge>=0?'+':'')+marge.toFixed(2)+' %</div></div>'+
       '</div>'+
@@ -4314,6 +4408,7 @@ function renderYieldMatrix(ticker, price, f, fin){
       '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">EPS de base ('+cSym+')</label><br><input id="ym-eps" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+eps0.toFixed(2)+'"></div>'+
       '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Croissance centrale %</label><br><input id="ym-g" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+gC+'"></div>'+
       '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Multiple de sortie'+(st.mManual?' <span style="color:var(--accent);font-size:8px">✎ modifié</span>':'')+'</label><br><input id="ym-m" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+mCur+'"></div>'+
+      '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Rendement cible %/an</label><br><input id="ym-r" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+rC+'"></div>'+
       '<button class="btn btn-ghost btn-sm" onclick="window._ymApply(\''+tName+'\')">Appliquer</button>'+
       '<button class="btn btn-ghost btn-sm" onclick="window._ymReset(\''+tName+'\')" title="Revenir au consensus analystes">\u21ba Consensus</button>'+
       '<button class="btn btn-ghost btn-sm" onclick="window._ymDetail(\''+tName+'\','+gC+')" title="Voir le détail du calcul du multiple">🔍 Calcul</button>'+
@@ -4336,10 +4431,11 @@ window._ymSetN=function(ticker,n){ var st=_ymSel[ticker]||{}; st.n=n; _ymSel[tic
 window._ymApply=function(ticker){
   function v(id){ var x=parseFloat((document.getElementById(id).value||'').replace(',','.')); return isFinite(x)?x:null; }
   var st=_ymSel[ticker]||{};
-  var e=v('ym-eps'), g=v('ym-g'), m=v('ym-m');
+  var e=v('ym-eps'), g=v('ym-g'), m=v('ym-m'), r=v('ym-r');
   if(e>0) st.eps=e;
   if(g!=null) st.gC=Math.round(Math.min(60,Math.max(2,g)));
   if(m!=null){ st.mC=Math.round(Math.min(120,Math.max(5,m))); st.mManual=true; }
+  if(r!=null) st.r=Math.min(50,Math.max(1,r));
   st.g=st.gC; st.m=st.mC||st.g; _ymSel[ticker]=st;
   window._ymRerender(ticker);
 };
@@ -6480,6 +6576,324 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('/sw.js').catch(function(){});
   });
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPARE — Comparaison multi-stocks sur métriques financières & ratios
+// ═══════════════════════════════════════════════════════════════════════════
+var _cmpState = { tickers: [], metric: 'revenue', range: '5Y' };
+var _cmpDataCache = {};  // {ticker: finData}
+var _cmpPECache   = {};  // {ticker: [{t,v}]}
+var _cmpChartObj  = null;
+
+var CMP_COLORS = ['#634BE4','#22c55e','#f59e0b','#06b6d4','#a855f7','#ef4444'];
+
+var CMP_METRICS = [
+  // ── Finances (données annuelles Yahoo) ──
+  {id:'revenue',          label:'CA (Md)',               unit:'Md',  chartType:'bar',  field:'revenue',        group:'Finances'},
+  {id:'netIncome',        label:'Résultat net (Md)',      unit:'Md',  chartType:'bar',  field:'netIncome',      group:'Finances'},
+  {id:'eps',              label:'EPS dilué',              unit:'',    chartType:'bar',  field:'eps',            group:'Finances'},
+  {id:'freeCF',           label:'Free Cash Flow (Md)',    unit:'Md',  chartType:'bar',  field:'freeCF',         group:'Finances'},
+  {id:'operatingCF',      label:'Cash Flow opé. (Md)',    unit:'Md',  chartType:'bar',  field:'operatingCF',    group:'Finances'},
+  {id:'grossProfit',      label:'Marge brute (Md)',       unit:'Md',  chartType:'bar',  field:'grossProfit',    group:'Finances'},
+  {id:'operatingIncome',  label:'Résultat opé. (Md)',     unit:'Md',  chartType:'bar',  field:'operatingIncome',group:'Finances'},
+  // ── Marges ──
+  {id:'grossMargin',      label:'Marge brute (%)',        unit:'%',   chartType:'line', field:'grossMargin',    group:'Marges'},
+  {id:'operatingMargin',  label:'Marge opérationnelle (%)',unit:'%',  chartType:'line', field:'operatingMargin',group:'Marges'},
+  {id:'netMargin',        label:'Marge nette (%)',        unit:'%',   chartType:'line', field:'netMargin',      group:'Marges'},
+  // ── Ratios (historique calculé) ──
+  {id:'pe',               label:'P/E (trailing)',         unit:'x',   chartType:'line', isPE:true,              group:'Ratios'},
+];
+
+// ── Fetch financials (avec marges calculées) ─────────────────────────────
+async function _cmpFetch(ticker) {
+  if (_cmpDataCache[ticker]) return _cmpDataCache[ticker];
+  try {
+    var r = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=financials',{signal:AbortSignal.timeout(12000)});
+    var d = await r.json();
+    if(d && !d.error) {
+      // Calcul des marges
+      d.grossMargin      = (d.grossProfit||[]).map(function(v,i){ return d.revenue&&d.revenue[i]>0?Math.round(v/d.revenue[i]*1000)/10:null; });
+      d.operatingMargin  = (d.operatingIncome||[]).map(function(v,i){ return d.revenue&&d.revenue[i]>0?Math.round(v/d.revenue[i]*1000)/10:null; });
+      d.netMargin        = (d.netIncome||[]).map(function(v,i){ return d.revenue&&d.revenue[i]>0?Math.round(v/d.revenue[i]*1000)/10:null; });
+      _cmpDataCache[ticker] = d;
+      return d;
+    }
+  } catch(e){}
+  return null;
+}
+
+// ── Fetch P/E historique (prix + EPS knots) ──────────────────────────────
+async function _cmpFetchPE(ticker) {
+  if (_cmpPECache[ticker]) return _cmpPECache[ticker];
+  try {
+    var range = _cmpState.range==='1Y'?'1y':_cmpState.range==='3Y'?'3y':'5y';
+    var [hist, fin] = await Promise.all([fetchPriceHistory(ticker, range), _cmpFetch(ticker)]);
+    if(!hist||!fin||hist.length<10) return [];
+    var knots = _ttmKnots(fin, [], 'eps_diluted', 'eps', null, null);
+    var peTS  = _ratioTimeSeries(hist, knots, function(px,ttm){ return ttm>0?px/ttm:null; }, true);
+    _cmpPECache[ticker] = peTS;
+    return peTS;
+  } catch(e){ return []; }
+}
+
+// ── Aligner les données annuelles sur un axe commun ───────────────────────
+function _cmpAlignAnnual(metric) {
+  // Construire l'union des années triées
+  var allYears = {};
+  _cmpState.tickers.forEach(function(t) {
+    var d = _cmpDataCache[t.ticker];
+    if(!d||!d.years) return;
+    d.years.forEach(function(y){ allYears[y]=1; });
+  });
+  var labels = Object.keys(allYears).sort();
+  // Filtrage selon range
+  var now = new Date().getFullYear();
+  var minY = _cmpState.range==='MAX'?0:now-parseInt(_cmpState.range)-1;
+  if(_cmpState.range!=='MAX') labels = labels.filter(function(y){ return parseInt(y.replace('FY',''))>=minY; });
+
+  var datasets = _cmpState.tickers.map(function(t,i){
+    var d = _cmpDataCache[t.ticker];
+    var color = CMP_COLORS[i%CMP_COLORS.length];
+    var vals = labels.map(function(y){
+      if(!d||!d.years) return null;
+      var idx = d.years.indexOf(y);
+      if(idx<0) return null;
+      var arr = d[metric.field];
+      return (arr&&arr[idx]!=null)?arr[idx]:null;
+    });
+    return {
+      label: t.name||t.ticker,
+      data: vals,
+      backgroundColor: metric.chartType==='bar'?color+'bb':undefined,
+      borderColor: color,
+      borderWidth: 2,
+      pointRadius: metric.chartType==='line'?3:0,
+      fill: false,
+      tension: 0.3,
+    };
+  });
+  return {labels, datasets};
+}
+
+// ── Aligner les séries P/E (timestamps) ──────────────────────────────────
+function _cmpAlignPE() {
+  // Construire une union de tous les timestamps (semaine par semaine)
+  var allTs = {};
+  _cmpState.tickers.forEach(function(t){
+    var ts = _cmpPECache[t.ticker]||[];
+    ts.forEach(function(p){ allTs[p.t]=1; });
+  });
+  var sortedTs = Object.keys(allTs).map(Number).sort(function(a,b){return a-b;});
+  // Filtrage
+  var cutoff = 0;
+  var now = Date.now()/1000;
+  if(_cmpState.range==='1Y') cutoff = now - 365*86400;
+  else if(_cmpState.range==='3Y') cutoff = now - 3*365*86400;
+  else if(_cmpState.range==='5Y') cutoff = now - 5*365*86400;
+  if(cutoff>0) sortedTs = sortedTs.filter(function(t){ return t>=cutoff; });
+  // Sous-échantillonner si trop dense (max 300 points)
+  var step = Math.max(1, Math.floor(sortedTs.length/300));
+  sortedTs = sortedTs.filter(function(_,i){ return i%step===0; });
+
+  var labels = sortedTs.map(function(t){
+    var d=new Date(t*1000);
+    return d.toLocaleDateString('fr-FR',{month:'short',year:'2-digit'});
+  });
+
+  var datasets = _cmpState.tickers.map(function(t,i){
+    var ts = _cmpPECache[t.ticker]||[];
+    // Map: ts[t] -> valeur
+    var tsMap = {};
+    ts.forEach(function(p){ tsMap[p.t]=p.v; });
+    var color = CMP_COLORS[i%CMP_COLORS.length];
+    var vals = sortedTs.map(function(t){
+      // Chercher la valeur la plus proche
+      if(tsMap[t]!=null) return Math.round(tsMap[t]*10)/10;
+      // Interpolation : chercher le point le plus proche
+      var best=null, bestD=Infinity;
+      ts.forEach(function(p){ var d=Math.abs(p.t-t); if(d<bestD&&d<7*86400){bestD=d;best=p.v;} });
+      return best!=null?Math.round(best*10)/10:null;
+    });
+    return { label:t.name||t.ticker, data:vals, borderColor:color, borderWidth:2, pointRadius:0, fill:false, tension:0.3 };
+  });
+  return {labels, datasets};
+}
+
+// ── Rendu du chart Chart.js ───────────────────────────────────────────────
+async function _cmpRenderChart() {
+  var cv = document.getElementById('cmp-chart'); if(!cv) return;
+  if(_cmpChartObj){ try{_cmpChartObj.destroy();}catch(e){} _cmpChartObj=null; }
+  var metric = CMP_METRICS.find(function(m){ return m.id===_cmpState.metric; });
+  if(!metric||!_cmpState.tickers.length){
+    var ctx=cv.getContext('2d'); ctx.clearRect(0,0,cv.width,cv.height);
+    return;
+  }
+  // Afficher spinner
+  var wrap = document.getElementById('cmp-chart-wrap');
+  if(wrap) wrap.style.opacity='0.4';
+
+  var chartData, chartType;
+  if(metric.isPE){
+    // Charger les PE pour tous les tickers pas encore cachés
+    await Promise.all(_cmpState.tickers.map(function(t){ return _cmpFetchPE(t.ticker); }));
+    chartData = _cmpAlignPE();
+    chartType = 'line';
+  } else {
+    await Promise.all(_cmpState.tickers.map(function(t){ return _cmpFetch(t.ticker); }));
+    chartData = _cmpAlignAnnual(metric);
+    chartType = metric.chartType || 'bar';
+  }
+  if(wrap) wrap.style.opacity='1';
+
+  var yLabel = metric.unit==='%' ? '%' : metric.unit==='x' ? 'x' : (metric.unit||'');
+  _cmpChartObj = new Chart(cv, {
+    type: chartType,
+    data: chartData,
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: {mode:'index', intersect:false},
+      plugins: {
+        legend: {position:'top', labels:{color:'var(--text)',font:{size:12},padding:16}},
+        tooltip: {callbacks:{label:function(ctx){
+          var v=ctx.parsed.y; if(v==null) return null;
+          return ctx.dataset.label+': '+v+(metric.unit==='%'?'%':metric.unit==='x'?'x':(metric.unit==='Md'?' Md':''));
+        }}}
+      },
+      scales: {
+        x: {ticks:{color:'#6b7280',font:{size:10},maxRotation:45}, grid:{color:'rgba(255,255,255,.05)'}},
+        y: {ticks:{color:'#6b7280',font:{size:11},callback:function(v){return v+(yLabel==='%'?'%':yLabel==='x'?'x':'');}}, grid:{color:'rgba(255,255,255,.08)'}}
+      }
+    }
+  });
+}
+
+// ── Ajouter / retirer un ticker ───────────────────────────────────────────
+async function _cmpAdd(ticker, name) {
+  ticker = ticker.toUpperCase().trim();
+  if(!ticker) return;
+  if(_cmpState.tickers.length>=6){ showToast('Maximum 6 tickers'); return; }
+  if(_cmpState.tickers.find(function(t){return t.ticker===ticker;})){showToast(ticker+' déjà ajouté');return;}
+  _cmpState.tickers.push({ticker:ticker, name:name||ticker});
+  // Prefetch
+  if(_cmpState.metric==='pe') _cmpFetchPE(ticker).then(_cmpRenderChart);
+  else _cmpFetch(ticker).then(_cmpRenderChart);
+  _cmpRenderPage();
+}
+function _cmpRemove(ticker) {
+  _cmpState.tickers = _cmpState.tickers.filter(function(t){return t.ticker!==ticker;});
+  _cmpRenderChart();
+  _cmpRenderPage();
+}
+function _cmpSetMetric(id) {
+  _cmpState.metric = id;
+  // Invalider le cache PE si on change vers PE (portée différente)
+  _cmpPECache = {};
+  _cmpRenderChart();
+  // Mettre à jour le select visuellement
+  var sel = document.getElementById('cmp-metric-select');
+  if(sel) sel.value = id;
+}
+function _cmpSetRange(r) {
+  _cmpState.range = r;
+  _cmpPECache = {};  // PE change avec la range
+  _cmpRenderChart();
+  document.querySelectorAll('.cmp-range-btn').forEach(function(b){
+    b.style.background = b.dataset.range===r?'#634BE4':'rgba(255,255,255,.06)';
+    b.style.color = b.dataset.range===r?'white':'var(--muted)';
+  });
+}
+
+// ── Rendu de la page Comparer ─────────────────────────────────────────────
+function renderCompare() {
+  var pg = document.getElementById('page'); if(!pg) return;
+
+  // Suggestions portefeuille
+  var pfTickers = [];
+  if(S.portfolio && S.portfolio.length) {
+    var seen = {};
+    S.portfolio.forEach(function(h){
+      if(h.ticker && !seen[h.ticker]){ seen[h.ticker]=1; pfTickers.push({ticker:h.ticker, name:h.name||h.ticker}); }
+    });
+  }
+
+  // Options métriques groupées
+  var metricOpts = '';
+  var lastGroup = '';
+  CMP_METRICS.forEach(function(m){
+    if(m.group!==lastGroup){ if(lastGroup) metricOpts+='</optgroup>'; metricOpts+='<optgroup label="'+m.group+'">'; lastGroup=m.group; }
+    metricOpts+='<option value="'+m.id+'"'+(m.id===_cmpState.metric?' selected':'')+'>'+m.label+'</option>';
+  });
+  if(lastGroup) metricOpts+='</optgroup>';
+
+  // Chips des tickers sélectionnés
+  var chips = _cmpState.tickers.map(function(t,i){
+    var c=CMP_COLORS[i%CMP_COLORS.length];
+    return '<div style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;border:1.5px solid '+c+';background:'+c+'22;font-size:12px;font-weight:600">' +
+      '<span style="width:8px;height:8px;border-radius:50%;background:'+c+'"></span>'+
+      '<span>'+t.ticker+'</span>'+
+      '<span onclick="_cmpRemove(\''+t.ticker+'\')" style="cursor:pointer;color:var(--muted);font-size:16px;line-height:1;margin-left:2px">×</span>'+
+    '</div>';
+  }).join('');
+
+  // Boutons de range
+  var ranges = ['1Y','3Y','5Y','MAX'];
+  var rangeBtns = ranges.map(function(r){
+    var active=r===_cmpState.range;
+    return '<button class="cmp-range-btn" data-range="'+r+'" onclick="_cmpSetRange(\''+r+'\')" style="padding:5px 12px;font-size:11px;font-weight:700;border:none;border-radius:6px;cursor:pointer;background:'+(active?'#634BE4':'rgba(255,255,255,.06)')+';color:'+(active?'white':'var(--muted)')+'">'+r+'</button>';
+  }).join('');
+
+  // Suggestions portefeuille (max 8 chips)
+  var pfChips = pfTickers.slice(0,8).map(function(t){
+    var already = _cmpState.tickers.find(function(x){return x.ticker===t.ticker;});
+    return '<button onclick="_cmpAdd(\''+t.ticker+'\',\''+t.name+'\')" style="padding:4px 10px;font-size:11px;font-weight:600;border:1px solid var(--border);border-radius:12px;cursor:pointer;background:'+(already?'rgba(99,75,228,.2)':'var(--bg2)')+';color:'+(already?'var(--blue)':'var(--muted)')+'" title="'+t.name+'">'+t.ticker+'</button>';
+  }).join('');
+
+  pg.innerHTML =
+    '<div style="max-width:1200px">' +
+    '<h2 style="font-size:18px;font-weight:700;margin:0 0 20px">📊 Comparer des entreprises</h2>'+
+
+    // ── Barre de contrôles ──
+    '<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px">' +
+
+      // Recherche
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">'+
+          chips +
+          (_cmpState.tickers.length<6?
+            '<div style="display:flex;gap:6px">'+
+              '<input id="cmp-search" class="form-input" placeholder="Ticker (ex: NVDA, ASML…)" style="width:160px;padding:5px 10px;font-size:12px" onkeydown="if(event.key===\'Enter\'){var v=this.value.trim();if(v)_cmpAdd(v);this.value=\'\';}">'+
+              '<button onclick="var v=document.getElementById(\'cmp-search\').value.trim();if(v){_cmpAdd(v);document.getElementById(\'cmp-search\').value=\'\'}" style="padding:5px 12px;font-size:12px;font-weight:600;border:none;border-radius:8px;cursor:pointer;background:#634BE4;color:white">+ Ajouter</button>'+
+            '</div>' : '<span style="font-size:11px;color:var(--muted)">Max 6 titres</span>')+
+        '</div>'+
+      '</div>'+
+
+      // Portefeuille suggestions
+      (pfChips?'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px"><span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Portefeuille :</span>'+pfChips+'</div>':'') +
+
+      // Métriques + range
+      '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">'+
+        '<select id="cmp-metric-select" class="form-input" style="padding:6px 10px;font-size:12px;width:auto" onchange="_cmpSetMetric(this.value)">'+metricOpts+'</select>'+
+        '<div style="display:flex;gap:4px">'+rangeBtns+'</div>'+
+      '</div>'+
+    '</div>'+
+
+    // ── Chart ──
+    '<div id="cmp-chart-wrap" class="card" style="height:420px;position:relative;padding:16px;transition:opacity .2s">'+
+      (_cmpState.tickers.length===0?
+        '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted)"><div style="font-size:48px;margin-bottom:12px">📈</div><div style="font-size:15px;font-weight:600">Ajoute des entreprises pour comparer</div><div style="font-size:12px;margin-top:6px">Utilise la recherche ou clique sur ton portefeuille</div></div>' :
+        '<canvas id="cmp-chart" style="width:100%;height:100%"></canvas>')+
+    '</div>'+
+    '</div>';
+
+  // Render chart after DOM settle
+  if(_cmpState.tickers.length>0) setTimeout(_cmpRenderChart, 80);
+}
+
+window._cmpAdd    = _cmpAdd;
+window._cmpRemove = _cmpRemove;
+window._cmpSetMetric = _cmpSetMetric;
+window._cmpSetRange  = _cmpSetRange;
+
 </script>
 </body>
 </html>
