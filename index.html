@@ -6620,11 +6620,19 @@ var CMP_METRICS = [
 async function _cmpFetch(ticker) {
   if (_cmpDataCache[ticker]) return _cmpDataCache[ticker];
   try {
-    var r = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=financials',{signal:AbortSignal.timeout(12000)});
-    var d = await r.json();
-    if(!d || d.error) return null;
+    // Fetch financials + fundamentals en parallèle
+    var [finRes, fundRes] = await Promise.all([
+      fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=financials',{signal:AbortSignal.timeout(12000)}),
+      fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=fundamentals',{signal:AbortSignal.timeout(8000)})
+    ]);
+    var d = await finRes.json();
+    var fund = null; try{ fund=await fundRes.json(); }catch(e2){}
+    if(!d||d.error) return null;
 
-    // Merge données manuelles (non-GAAP, plus précises)
+    // Shares outstanding pour EPS fallback (MSFT et autres sans dilutedEps dans Yahoo)
+    var shares = fund && (fund.sharesOutstanding || null);
+
+    // Merge données manuelles Supabase (non-GAAP, prioritaires)
     var u = getUser();
     if(u && d.years) {
       try {
@@ -6632,44 +6640,66 @@ async function _cmpFetch(ticker) {
           'ticker=eq.'+encodeURIComponent(ticker)+'&user_id=eq.'+u.id+
           '&select=period,revenue,gross_profit,operating_income,net_income,eps_diluted,ocf,fcf');
         if(manRows && manRows.length) {
-          d.years.forEach(function(year, i) {
-            var manRow = manRows.find(function(m){
-              return m.period===year || m.period===year.replace('FY','') || 'FY'+m.period===year;
-            });
-            if(!manRow) return;
-            if(manRow.eps_diluted!=null) d.eps[i]=manRow.eps_diluted;
-            if(manRow.revenue!=null)     d.revenue[i]=manRow.revenue;
-            if(manRow.net_income!=null)  d.netIncome[i]=manRow.net_income;
-            if(manRow.gross_profit!=null)d.grossProfit[i]=manRow.gross_profit;
-            if(manRow.operating_income!=null)d.operatingIncome[i]=manRow.operating_income;
-            if(manRow.ocf!=null)         d.operatingCF[i]=manRow.ocf;
-            if(manRow.fcf!=null)         d.freeCF[i]=manRow.fcf;
+          d.years.forEach(function(year,i){
+            var mr=manRows.find(function(m){return m.period===year||m.period===year.replace('FY','')||'FY'+m.period===year;});
+            if(!mr)return;
+            if(mr.eps_diluted!=null)d.eps[i]=mr.eps_diluted;
+            if(mr.revenue!=null)d.revenue[i]=mr.revenue;
+            if(mr.net_income!=null)d.netIncome[i]=mr.net_income;
+            if(mr.gross_profit!=null)d.grossProfit[i]=mr.gross_profit;
+            if(mr.operating_income!=null)d.operatingIncome[i]=mr.operating_income;
+            if(mr.ocf!=null)d.operatingCF[i]=mr.ocf;
+            if(mr.fcf!=null)d.freeCF[i]=mr.fcf;
           });
         }
-      } catch(e2) {}
+      } catch(e2){}
     }
 
-    // Calcul des métriques dérivées
-    function yoyPct(arr){ return arr.map(function(v,i){ if(i===0||arr[i-1]==null||arr[i-1]===0||v==null)return null; return Math.round((v/arr[i-1]-1)*1000)/10; }); }
-    d.grossMargin      = (d.grossProfit||[]).map(function(v,i){var r=d.revenue&&d.revenue[i];return(v!=null&&r>0)?Math.round(v/r*1000)/10:null;});
-    d.operatingMargin  = (d.operatingIncome||[]).map(function(v,i){var r=d.revenue&&d.revenue[i];return(v!=null&&r>0)?Math.round(v/r*1000)/10:null;});
-    d.netMargin        = (d.netIncome||[]).map(function(v,i){var r=d.revenue&&d.revenue[i];return(v!=null&&r>0)?Math.round(v/r*1000)/10:null;});
-    d.revenueGrowth    = yoyPct(d.revenue||[]);
-    d.epsGrowth        = yoyPct(d.eps||[]);
-    d.netIncomeGrowth  = yoyPct(d.netIncome||[]);
-    d.roe  = (d.netIncome||[]).map(function(v,i){var eq=d.equity&&d.equity[i];return(v!=null&&eq!=null&&eq>0)?Math.round(v/eq*1000)/10:null;});
-    d.roic = (d.operatingIncome||[]).map(function(v,i){
+    // EPS fallback : netIncome / sharesOutstanding si dilutedEps null
+    if(shares && shares>0){
+      d.eps=(d.eps||[]).map(function(v,i){
+        if(v!=null)return v;
+        var ni=d.netIncome&&d.netIncome[i];
+        return ni!=null?Math.round(ni*1e9/shares*100)/100:null;
+      });
+    }
+
+    // Métriques dérivées
+    function yoyPct(arr){return arr.map(function(v,i){if(i===0||arr[i-1]==null||arr[i-1]===0||v==null)return null;return Math.round((v/arr[i-1]-1)*1000)/10;});}
+    d.grossMargin    =(d.grossProfit||[]).map(function(v,i){var r=d.revenue&&d.revenue[i];return(v!=null&&r>0)?Math.round(v/r*1000)/10:null;});
+    d.operatingMargin=(d.operatingIncome||[]).map(function(v,i){var r=d.revenue&&d.revenue[i];return(v!=null&&r>0)?Math.round(v/r*1000)/10:null;});
+    d.netMargin      =(d.netIncome||[]).map(function(v,i){var r=d.revenue&&d.revenue[i];return(v!=null&&r>0)?Math.round(v/r*1000)/10:null;});
+    d.revenueGrowth  =yoyPct(d.revenue||[]);
+    d.epsGrowth      =yoyPct(d.eps||[]);
+    d.netIncomeGrowth=yoyPct(d.netIncome||[]);
+
+    // ROE historique (netIncome/equity), fallback fundamentals si bilan absent
+    d.roe=(d.netIncome||[]).map(function(v,i){var eq=d.equity&&d.equity[i];return(v!=null&&eq!=null&&eq>0)?Math.round(v/eq*1000)/10:null;});
+    if(d.roe.every(function(v){return v==null;})&&fund&&fund.returnOnEquity!=null){
+      // Fallback : ROE actuel depuis fundamentals, affiché pour la dernière année
+      var curRoe=Math.round(fund.returnOnEquity*10)/10;
+      var last=d.roe.length-1; if(last>=0)d.roe[last]=curRoe;
+    }
+
+    // ROIC : operatingIncome * 0.80 / (equity + dette), fallback fundamentals
+    d.roic=(d.operatingIncome||[]).map(function(v,i){
       var eq=d.equity&&d.equity[i],td=d.totalDebt&&d.totalDebt[i]||0;
       var ic=(eq!=null?eq:0)+td; if(ic<=0||v==null)return null;
-      return Math.round(v*0.80/ic*1000)/10;  // NOPAT ~80% opIncome / (equity+dette)
+      return Math.round(v*0.80/ic*1000)/10;
     });
-    // Par action (pour P/FCF et P/OCF) = val_Md * eps / netIncome_Md
-    d.fcfPerShare = (d.freeCF||[]).map(function(v,i){var ni=d.netIncome&&d.netIncome[i],ep=d.eps&&d.eps[i];return(v!=null&&ni!=null&&ep!=null&&ni!==0)?v*ep/ni:null;});
-    d.ocfPerShare = (d.operatingCF||[]).map(function(v,i){var ni=d.netIncome&&d.netIncome[i],ep=d.eps&&d.eps[i];return(v!=null&&ni!=null&&ep!=null&&ni!==0)?v*ep/ni:null;});
+    if(d.roic.every(function(v){return v==null;})&&fund&&fund.returnOnAssets!=null){
+      // Approximation ROIC depuis returnOnAssets * levier (imparfait mais indicatif)
+      var curRoic=Math.round(fund.returnOnAssets*10)/10;
+      var last2=d.roic.length-1; if(last2>=0)d.roic[last2]=curRoic;
+    }
 
-    _cmpDataCache[ticker] = d;
+    // Par action (pour P/FCF et P/OCF)
+    d.fcfPerShare=(d.freeCF||[]).map(function(v,i){var ni=d.netIncome&&d.netIncome[i],ep=d.eps&&d.eps[i];return(v!=null&&ni!=null&&ep!=null&&ni!==0)?v*ep/ni:null;});
+    d.ocfPerShare=(d.operatingCF||[]).map(function(v,i){var ni=d.netIncome&&d.netIncome[i],ep=d.eps&&d.eps[i];return(v!=null&&ni!=null&&ep!=null&&ni!==0)?v*ep/ni:null;});
+
+    _cmpDataCache[ticker]=d;
     return d;
-  } catch(e){ return null; }
+  }catch(e){return null;}
 }
 
 // ── Fetch P/E historique ──────────────────────────────────────────────────
@@ -6680,7 +6710,7 @@ async function _cmpFetchPE(ticker) {
     var [hist, fin] = await Promise.all([fetchPriceHistory(ticker, range), _cmpFetch(ticker)]);
     if(!hist||!fin||hist.length<10) return [];
     var knots = _ttmKnots(fin, [], 'eps_diluted', 'eps', null, null);
-    var peTS  = _ratioTimeSeries(hist, knots, function(px,ttm){ return ttm>0?px/ttm:null; }, true);
+    var peTS  = _ratioTimeSeries(hist, knots, function(px,ttm){ return ttm>0?Math.round(px/ttm*10)/10:null; }, true);
     _cmpPECache[ticker] = peTS;
     return peTS;
   } catch(e){ return []; }
@@ -6801,12 +6831,17 @@ async function _cmpRenderChart() {
     responsive:true,maintainAspectRatio:false,
     interaction:{mode:'index',intersect:false},
     plugins:{
-      legend:{position:'top',labels:{color:'var(--text)',font:{size:12},padding:16}},
-      tooltip:{callbacks:{label:function(ctx){var v=ctx.parsed.y;if(v==null)return null;return ctx.dataset.label+': '+v+(yUnit==='%'?'%':yUnit==='x'?'x':yUnit==='Md'?' Md':yUnit==='$'?'$':'');}}}
+      legend:{position:'top',labels:{color:'rgba(255,255,255,.9)',font:{size:12},padding:16,boxWidth:28,boxHeight:12}},
+      tooltip:{callbacks:{label:function(ctx){
+        var v=ctx.parsed.y; if(v==null)return null;
+        // Arrondi intelligent : 1 décimale sauf si très petit (garde 2)
+        var r=Math.abs(v)<1?Math.round(v*100)/100:Math.round(v*10)/10;
+        return ctx.dataset.label+': '+r+(yUnit==='%'?'%':yUnit==='x'?'x':yUnit==='Md'?' Md':yUnit==='$'?' $':'');
+      }}}
     },
     scales:{
       x:{ticks:{color:'#6b7280',font:{size:10},maxRotation:45},grid:{color:'rgba(255,255,255,.05)'}},
-      y:{ticks:{color:'#6b7280',font:{size:11},callback:function(v){return v+(yUnit==='%'?'%':yUnit==='x'?'x':'');}},grid:{color:'rgba(255,255,255,.08)'}}
+      y:{ticks:{color:'#6b7280',font:{size:11},callback:function(v){var r=Math.abs(v)<1?Math.round(v*100)/100:Math.round(v*10)/10;return r+(yUnit==='%'?'%':yUnit==='x'?'x':'');}},grid:{color:'rgba(255,255,255,.08)'}}
     }
   }});
 }
@@ -6844,10 +6879,13 @@ function _cmpSetRange(r) {
 function renderCompare() {
   var pg=document.getElementById('page'); if(!pg)return;
 
-  // Portefeuille trié par pondération (quantité × prix, positions actuelles uniquement)
+  // Portefeuille trié par pondération décroissante, ETF exclus
   var holdings={};
   (S.transactions||[]).forEach(function(tx){
     var tk=tx.ticker; if(!tk)return;
+    // Exclure les ETF (asset_type=etf ou ticker dans la liste connue)
+    var isEtf=(tx.asset_type||'').toLowerCase()==='etf'||isETF({ticker:tk,asset_type:tx.asset_type||''});
+    if(isEtf)return;
     var qty=parseFloat(tx.quantity||0)||0;
     var type=(tx.transaction_type||'').toLowerCase();
     if(type==='buy')holdings[tk]=(holdings[tk]||0)+qty;
@@ -6913,7 +6951,7 @@ function renderCompare() {
         (_cmpState.tickers.length>0?'<span style="font-size:10px;color:var(--muted)">'+_cmpState.tickers.length+' titre'+(_cmpState.tickers.length>1?'s':'')+' sélectionné'+(_cmpState.tickers.length>1?'s':'')+'</span>':'')+
       '</div>'+
     '</div>'+
-    '<div id="cmp-chart-wrap" class="card" style="height:460px;position:relative;padding:16px;width:100%;box-sizing:border-box;transition:opacity .2s">'+
+    '<div id="cmp-chart-wrap" style="height:460px;position:relative;padding:16px;width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--border);border-radius:12px;transition:opacity .2s">'+
       (_cmpState.tickers.length===0?
         '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted)"><div style="font-size:48px;margin-bottom:12px">📈</div><div style="font-size:15px;font-weight:600;color:var(--text)">Ajoute des entreprises pour comparer</div><div style="font-size:12px;margin-top:6px">Utilise la barre de recherche ou clique sur ton portefeuille</div></div>':
         '<canvas id="cmp-chart" style="width:100%;height:100%"></canvas>')+
