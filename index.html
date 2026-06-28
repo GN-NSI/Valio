@@ -6774,15 +6774,15 @@ async function _cmpAdd(ticker, name) {
   if(_cmpState.tickers.length>=6){ showToast('Maximum 6 tickers'); return; }
   if(_cmpState.tickers.find(function(t){return t.ticker===ticker;})){showToast(ticker+' déjà ajouté');return;}
   _cmpState.tickers.push({ticker:ticker, name:name||ticker});
-  // Prefetch
+  // Prefetch data, puis render chart (le .then s'exécute après renderCompare via microtask)
   if(_cmpState.metric==='pe') _cmpFetchPE(ticker).then(_cmpRenderChart);
   else _cmpFetch(ticker).then(_cmpRenderChart);
-  _cmpRenderPage();
+  renderCompare(); // Recrée le DOM (incluant le nouveau canvas) — SYNCHRONE
 }
 function _cmpRemove(ticker) {
   _cmpState.tickers = _cmpState.tickers.filter(function(t){return t.ticker!==ticker;});
-  _cmpRenderChart();
-  _cmpRenderPage();
+  renderCompare(); // Recrée le DOM avec le nouveau canvas AVANT de rendre le chart
+  if(_cmpState.tickers.length>0) setTimeout(_cmpRenderChart, 80);
 }
 function _cmpSetMetric(id) {
   _cmpState.metric = id;
@@ -6845,7 +6845,8 @@ function renderCompare() {
   // Suggestions portefeuille (max 8 chips)
   var pfChips = pfTickers.slice(0,8).map(function(t){
     var already = _cmpState.tickers.find(function(x){return x.ticker===t.ticker;});
-    return '<button onclick="_cmpAdd(\''+t.ticker+'\',\''+t.name+'\')" style="padding:4px 10px;font-size:11px;font-weight:600;border:1px solid var(--border);border-radius:12px;cursor:pointer;background:'+(already?'rgba(99,75,228,.2)':'var(--bg2)')+';color:'+(already?'var(--blue)':'var(--muted)')+'" title="'+t.name+'">'+t.ticker+'</button>';
+    var safeName = (t.name||t.ticker).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    return '<button onclick="_cmpAdd(\''+t.ticker+'\',\''+safeName+'\')" style="padding:4px 10px;font-size:11px;font-weight:600;border:1px solid var(--border);border-radius:12px;cursor:pointer;background:'+(already?'rgba(99,75,228,.2)':'var(--bg2)')+';color:'+(already?'var(--blue)':'var(--muted)')+'" title="'+t.name+'">'+t.ticker+'</button>';
   }).join('');
 
   pg.innerHTML =
