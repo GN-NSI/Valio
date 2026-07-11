@@ -303,6 +303,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
 </div>
 <div id="modal-overlay" class="modal-overlay" onclick="closeModalOutside(event)"><div class="modal" id="modal-content"></div></div>
 
+<script src="/fx.js"></script>
 <script>
 // ═══ COULEURS DE MARQUE ═══
 // Palette diversifiée — évite les couleurs adjacentes trop proches dans le donut trié par valeur
@@ -767,10 +768,11 @@ function navigate(page){
 function computePositions(){
   const map={};
   var _totalRealized=0; // Cumul des PV/MV réalisées (toutes ventes)
+  var _totalSoldCost=0; // Cumul du coût de revient des titres cédés (base du % réalisé)
   [...S.transactions].sort((a,b)=>new Date(a.transaction_date)-new Date(b.transaction_date)).forEach(tx=>{
     const k=tx.ticker;
     if(!map[k])map[k]={ticker:tx.ticker,name:tx.name,asset_type:tx.asset_type,quantity:0,totalCostEur:0,realizedPnlEur:0,totalSoldEur:0,accounts:[],buyCurrencies:[]};
-    const p=map[k];const toE=v=>toEur(v,tx.currency);
+    const p=map[k];const toE=v=>toEurAtTrade(v,tx);
     const an=tx.accounts?.name||'—';if(!p.accounts.includes(an))p.accounts.push(an);
     if(tx.transaction_type==='buy'){
       p.totalCostEur+=tx.quantity*toE(tx.price)+toE(tx.fees||0);
@@ -785,11 +787,13 @@ function computePositions(){
       p.realizedPnlEur+=realized;
       _totalRealized+=realized;
       p.totalSoldEur+=sellPriceEur*tx.quantity;     // Valeur de vente totale
+      _totalSoldCost+=tx.quantity*pru;              // Coût de revient des titres cédés
       p.totalCostEur-=tx.quantity*pru;              // Réduit le coût résiduel
       p.quantity-=tx.quantity;
     }
   });
   S.realizedPnl=_totalRealized; // Exposé globalement pour les KPIs
+  S.soldCostEur=_totalSoldCost; // Base de calcul du % de perf réalisée
   return Object.values(map).filter(p=>p.quantity>0.000001).map(p=>{
     const pruEur=p.totalCostEur/p.quantity;
     const pc=p.buyCurrencies.length===1&&p.buyCurrencies[0]!=='EUR'?p.buyCurrencies[0]:'EUR';
@@ -987,27 +991,45 @@ async function fetchPrices(pos){
 }
 
 function updateKPIs(pos){
-  const ld=pos.filter(p=>p.valueEur!=null);
-  const tv=ld.reduce((s,p)=>s+p.valueEur,0);
-  const tc=pos.reduce((s,p)=>s+p.totalCostEur,0);
-  const pnlLatent=tv-tc;
+  // ── Bases de calcul ────────────────────────────────────────────────────────
+  // Règle : numérateur et dénominateur doivent porter sur le MÊME périmètre.
+  const ld=pos.filter(p=>p.valueEur!=null);          // positions dont le prix est chargé
+  const missing=pos.length-ld.length;                // prix pas encore arrivés
+  const tv=ld.reduce((s,p)=>s+p.valueEur,0);         // valeur de marché (positions valorisées)
+
+  // Coût des positions VALORISÉES uniquement : sinon un prix manquant crée une
+  // fausse moins-value (son coût compterait sans sa valeur).
+  const costLoaded=ld.reduce((s,p)=>s+p.totalCostEur,0);
+  // Coût de TOUTES les positions vivantes (affichage "investi", indépendant des prix).
+  const costLive=pos.reduce((s,p)=>s+p.totalCostEur,0);
+  // Coût de revient des titres déjà cédés (base du % réalisé).
+  const costSold=S.soldCostEur||0;
+
+  // ── Résultats ──────────────────────────────────────────────────────────────
+  const pnlLatent=tv-costLoaded;                     // latent, périmètre cohérent
   const pnlRealized=S.realizedPnl||0;
   const pnlTotal=pnlLatent+pnlRealized;
-  // Coût total investi = coût résiduel + coût des positions soldées (pour le dénominateur de perf)
-  const tcTotal=pos.reduce((s,p)=>s+p.totalCostEur,0); // simplifié : coût positions actuelles
-  const pct=tcTotal>0?(pnlLatent/tcTotal)*100:0;
-  const pctTotal=tcTotal>0?(pnlTotal/tcTotal)*100:0;
+
+  const pctLatent   = costLoaded>0 ? (pnlLatent/costLoaded)*100 : 0;
+  const pctRealized = costSold>0   ? (pnlRealized/costSold)*100 : null;
+  // Perf globale : rapportée à TOUT le capital engagé (positions vivantes + cédées).
+  const capitalEngaged = costLive + costSold;
+  const pctTotal = capitalEngaged>0 ? (pnlTotal/capitalEngaged)*100 : 0;
+
   const sg=v=>v>=0?'+':'';
   const el=document.getElementById('kpi-grid');if(!el)return;
   el.innerHTML=[
-    {l:'Valeur totale',v:fE(tv),s:`sur ${fE(tcTotal)} investis`},
+    {l:'Valeur totale',v:fE(tv),s:`sur ${fE(costLive)} investis${missing?' · '+missing+' prix en attente':''}`},
     {l:'PV latentes',v:`<span class="${pnlLatent>=0?'c-green':'c-red'}">${sg(pnlLatent)}${fE(pnlLatent)}</span>`,
-     s:`<span class="badge ${pnlLatent>=0?'badge-green':'badge-red'}">${sg(pct)}${pct.toFixed(2)}%</span>`},
+     s:`<span class="badge ${pnlLatent>=0?'badge-green':'badge-red'}">${sg(pctLatent)}${pctLatent.toFixed(2)}%</span> sur positions valorisées`},
     {l:'PV réalisées',v:`<span class="${pnlRealized>=0?'c-green':'c-red'}">${sg(pnlRealized)}${fE(Math.abs(pnlRealized))}</span>`,
-     s:`Gains/pertes actés sur ventes <span style="color:var(--cyan);font-size:11px">· voir détail →</span>`,
+     s:(pctRealized!=null
+        ? `<span class="badge ${pnlRealized>=0?'badge-green':'badge-red'}">${sg(pctRealized)}${pctRealized.toFixed(2)}%</span> sur ${fE(costSold)} cédés <span style="color:var(--cyan);font-size:11px">· détail →</span>`
+        : `Aucune vente <span style="color:var(--cyan);font-size:11px">· détail →</span>`),
      onclick:`showRealizedDetail()`},
     {l:'Performance',v:`<span class="${pctTotal>=0?'c-green':'c-red'}" style="font-size:28px">${sg(pctTotal)}${pctTotal.toFixed(2)}%</span>`,
-     s:ld.length<pos.length?`<span style="color:var(--yellow)">⏳ ${pos.length-ld.length} prix en cours…</span>`:'latent + réalisé vs investi actuel'}
+     s:missing?`<span style="color:var(--yellow)">⏳ ${missing} prix en cours…</span>`
+              :`${sg(pnlTotal)}${fE(pnlTotal)} sur ${fE(capitalEngaged)} engagés · hors effet timing`}
   ].map(k=>`<div class="kpi-card${k.onclick?' kpi-clickable':''}" ${k.onclick?`onclick="${k.onclick}" style="cursor:pointer"`:''}><div class="kpi-label">${k.l}</div><div class="kpi-value">${k.v}</div><div class="kpi-sub">${k.s}</div></div>`).join('');
 }
 
@@ -1023,7 +1045,7 @@ function showRealizedDetail(){
     var k=tx.ticker;
     if(!map[k]) map[k]={quantity:0,totalCostEur:0,name:tx.name||tx.ticker};
     var cur=tx.currency||'EUR';
-    function toE(v){ return toEur(v,cur); }
+    function toE(v){ return toEurAtTrade(v,tx); }
 
     if((tx.transaction_type||'').toLowerCase()==='buy'){
       map[k].totalCostEur += tx.quantity*toE(tx.price) + toE(tx.fees||0);
@@ -5151,7 +5173,7 @@ function computePositionsFromData(accounts, transactions){
     var k=tx.ticker; if(!k) return;
     if(!map[k]) map[k]={ticker:k,quantity:0,totalCostEur:0,realizedPnlEur:0,buyCurrencies:[]};
     var m=map[k];
-    var toE=function(v){return toEur(v,tx.currency);};
+    var toE=function(v){return toEurAtTrade(v,tx);};
     var type=(tx.transaction_type||tx.type||'').toLowerCase();
     var q=tx.quantity||0;
     if(type==='buy'){
@@ -6485,11 +6507,11 @@ function openEditTx(id){const tx=S.transactions.find(t=>t.id===id);if(!tx)return
 function onAcctChange(){const id=document.getElementById('m-acct')?.value;const a=S.accounts.find(x=>x.id===id);if(!a)return;const el=document.getElementById('m-currency');if(!el)return;const n=a.name.toLowerCase();if(n.includes('ibkr')||n.includes('interactive')||a.currency==='USD')el.value='USD';else el.value='EUR';}
 function updTotal(){const q=parseFloat(document.getElementById('m-qty')?.value)||0,p=parseFloat(document.getElementById('m-price')?.value)||0,f=parseFloat(document.getElementById('m-fees')?.value)||0,c=document.getElementById('m-currency')?.value||'EUR';const el=document.getElementById('tx-total');if(el&&q>0&&p>0)el.innerHTML=`<strong>Total : ${fN(q*p+f)} ${cS(c)}</strong> · ${fQ(q)} × ${fN(p)} + ${fN(f)} frais`;}
 function readForm(){return{account_id:document.getElementById('m-acct').value,ticker:document.getElementById('m-ticker').value.trim().toUpperCase(),name:document.getElementById('m-aname').value.trim(),asset_type:document.getElementById('m-asset').value,transaction_type:document.getElementById('m-txtype').value,quantity:parseFloat(document.getElementById('m-qty').value),price:parseFloat(document.getElementById('m-price').value),fees:parseFloat(document.getElementById('m-fees').value)||0,currency:document.getElementById('m-currency').value,transaction_date:document.getElementById('m-date').value,notes:document.getElementById('m-notes').value.trim()||null};}
-async function saveTx(){const d=readForm();if(!d.ticker||!d.name||!d.quantity||!d.price||!d.transaction_date)return showToast('❌ Champs obligatoires manquants');try{const ins=await dbPost('transactions',d);const full=await dbGet('transactions','id=eq.'+ins.id+'&select=*,accounts(name,type)');S.transactions.unshift(full?.[0]||ins);closeModal();showToast('✅ Transaction enregistrée');renderAccounts();
+async function saveTx(){const d=readForm();if(!d.ticker||!d.name||!d.quantity||!d.price||!d.transaction_date)return showToast('❌ Champs obligatoires manquants');try{d.fx_to_eur=await captureFxForTransaction(d);const ins=await dbPost('transactions',d);const full=await dbGet('transactions','id=eq.'+ins.id+'&select=*,accounts(name,type)');S.transactions.unshift(full?.[0]||ins);closeModal();showToast('✅ Transaction enregistrée');renderAccounts();
   // Journal de décisions : proposer une note pré-remplie (bouton "Passer" pour ignorer)
   setTimeout(function(){ try{ openJournalModal({ticker:d.ticker,type:(d.transaction_type||'buy'),date:d.transaction_date,price:d.price,currency:d.currency}); }catch(e){} },350);
 }catch(e){showToast('❌ '+e.message);}}
-async function saveEditTx(id){const d=readForm();if(!d.ticker||!d.name||!d.quantity||!d.price||!d.transaction_date)return showToast('❌ Champs obligatoires manquants');try{await dbPatch('transactions','id=eq.'+id,d);const i=S.transactions.findIndex(t=>t.id===id);if(i>=0){const a=S.accounts.find(x=>x.id===d.account_id);S.transactions[i]={...S.transactions[i],...d,accounts:{name:a?.name,type:a?.type}};}closeModal();showToast('✅ Modifié');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
+async function saveEditTx(id){const d=readForm();if(!d.ticker||!d.name||!d.quantity||!d.price||!d.transaction_date)return showToast('❌ Champs obligatoires manquants');try{d.fx_to_eur=await captureFxForTransaction(d);await dbPatch('transactions','id=eq.'+id,d);const i=S.transactions.findIndex(t=>t.id===id);if(i>=0){const a=S.accounts.find(x=>x.id===d.account_id);S.transactions[i]={...S.transactions[i],...d,accounts:{name:a?.name,type:a?.type}};}closeModal();showToast('✅ Modifié');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
 async function deleteTx(id){if(!confirm('Supprimer cette transaction ?'))return;try{await dbDel('transactions','id=eq.'+id);S.transactions=S.transactions.filter(t=>t.id!==id);showToast('✅ Supprimée');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
 
 // ═══ HELPERS ═══
