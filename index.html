@@ -224,9 +224,9 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
   width: 100%;
   box-sizing: border-box;
 }
-/* Éviter le saut de layout lié à la scrollbar verticale */
-#page {
-  scrollbar-gutter: stable;
+/* Éviter les espaces noirs à droite sur toutes les pages — la scrollbar se superpose au lieu de pousser le contenu */
+#page, #page-portfolio {
+  overflow-x: hidden;
 }
 /* Grilles à 2 colonnes : si la 2ème colonne est vide, elle ne crée pas d'espace */
 .two-col-grid {
@@ -3548,12 +3548,14 @@ function cdRatioTimeChart(id,label,series,current,buyTs,sellTs){
   }
   var buys=_mark(buyTs), sells=_mark(sellTs);
   // Ratio médian auquel j'ai acheté (situe mes entrées vs la médiane historique)
-  var buyVals=buys.filter(function(v){return v!=null;}).sort(function(a,b){return a-b;});
-  var buyMed=buyVals.length?buyVals[Math.floor(buyVals.length/2)]:null;
+  var buyVals=buys.filter(function(v){return v!=null;});
+  // ⌀ Mes achats = MOYENNE des ratios auxquels j'ai acheté (pas médiane)
+  // Pour 2 achats à 10x et 22x : ⌀ = 16x, pas 22x (bug de floor(n/2))
+  var buyMean=buyVals.length?Math.round(buyVals.reduce(function(s,v){return s+v;},0)/buyVals.length*10)/10:null;
   if(current!=null&&isFinite(current)&&current>0){ labels=labels.concat(['Actuel']); data=data.concat([Math.round(current*100)/100]); buys=buys.concat([null]); sells=sells.concat([null]); }
   var sortedV=data.slice().sort(function(a,b){return a-b;});
   var median=sortedV.length?sortedV[Math.floor(sortedV.length/2)]:null;
-  // Ligne de stats synthétique sous le graphe (pas de traits : juste les chiffres)
+  // Ligne de stats synthétique sous le graphe
   var _hi=sortedV[sortedV.length-1],_lo=sortedV[0],_cur=data[data.length-1];
   var statsEl=document.getElementById(id+'-stats');
   if(!statsEl){ statsEl=document.createElement('div'); statsEl.id=id+'-stats';
@@ -3564,14 +3566,14 @@ function cdRatioTimeChart(id,label,series,current,buyTs,sellTs){
     '<span style="color:#ef4444">High '+_hi.toFixed(1)+'x</span>'+
     '<span style="color:#26C5DE">Médiane '+(median!=null?median.toFixed(1):'—')+'x</span>'+
     '<span style="color:#22c55e">Low '+_lo.toFixed(1)+'x</span>'+
-    (buyMed!=null?'<span style="color:#a855f7;font-weight:700">⌀ Mes achats '+buyMed.toFixed(1)+'x</span>':'');
+    (buyMean!=null?'<span style="color:#a855f7;font-weight:700">⌀ Mes achats '+buyMean.toFixed(1)+'x</span>':'');
   var datasets=[
     {label:label,data:data,borderColor:'#634BE4',backgroundColor:'rgba(99,75,228,.08)',fill:true,tension:.25,
      pointRadius:data.map(function(_,i){return i===data.length-1?4:0;}),
      pointBackgroundColor:'#634BE4',borderWidth:2},
     {label:'Médiane',data:data.map(function(){return median;}),borderColor:'#26C5DE',borderDash:[6,4],pointRadius:0,borderWidth:1.5,fill:false}
   ];
-  if(buyMed!=null) datasets.push({label:'Médiane achats',data:data.map(function(){return buyMed;}),borderColor:'#f472b6',borderDash:[2,3],pointRadius:0,borderWidth:1.5,fill:false});
+  if(buyMean!=null) datasets.push({label:'Moy. achats',data:data.map(function(){return buyMean;}),borderColor:'#f472b6',borderDash:[2,3],pointRadius:0,borderWidth:1.5,fill:false});
   if(buys.some(function(v){return v!=null;})) datasets.push({label:'Mes achats',data:buys,borderColor:'#22c55e',backgroundColor:'#22c55e',
     showLine:false,pointRadius:5,pointHoverRadius:7,pointStyle:'circle',fill:false});
   if(sells.some(function(v){return v!=null;})) datasets.push({label:'Mes ventes',data:sells,borderColor:'#ef4444',backgroundColor:'#ef4444',
