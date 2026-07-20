@@ -224,10 +224,21 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
   width: 100%;
   box-sizing: border-box;
 }
-/* Éviter les espaces noirs à droite sur toutes les pages — la scrollbar se superpose au lieu de pousser le contenu */
-#page, #page-portfolio {
-  overflow-x: hidden;
-}
+/* ═══ FIX ESPACE NOIR À DROITE — cause : scrollbar Windows prend 17px de layout ═══ */
+/* Scrollbar fin et transparent pour ne pas créer d'espace noir */
+#page::-webkit-scrollbar, #page-portfolio::-webkit-scrollbar { width: 5px; }
+#page::-webkit-scrollbar-track, #page-portfolio::-webkit-scrollbar-track { background: transparent; }
+#page::-webkit-scrollbar-thumb, #page-portfolio::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+#page, #page-portfolio { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; overflow-x: hidden; }
+/* Width 100% sur tous les enfants directs des pages */
+#page > *, #page-portfolio > * { box-sizing: border-box; max-width: 100%; }
+#page > div, #page-portfolio > div { width: 100%; }
+/* Width 100% dans les onglets de la fiche entreprise */
+#cd-content, #cdtab-ensemble > *, #cdtab-ratios > *, #cdtab-fin > *, #cdtab-mat > *, #cdtab-moat > *, #cdtab-analysts > *, #cdtab-sector > * { width: 100%; box-sizing: border-box; }
+/* Grilles internes */
+#cdtab-ratios > div, #cdtab-fin > div, #cdtab-analysts > div, #cdtab-sector > div { width: 100%; }
+/* Cards toujours full-width */
+.card { box-sizing: border-box; }
 /* Grilles à 2 colonnes : si la 2ème colonne est vide, elle ne crée pas d'espace */
 .two-col-grid {
   display: grid;
