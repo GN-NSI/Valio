@@ -224,21 +224,24 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
   width: 100%;
   box-sizing: border-box;
 }
-/* ═══ FIX ESPACE NOIR À DROITE — cause : scrollbar Windows prend 17px de layout ═══ */
-/* Scrollbar fin et transparent pour ne pas créer d'espace noir */
+/* ═══ FIX ESPACE NOIR À DROITE — scrollbar Windows 17px → thin 5px ═══ */
 #page::-webkit-scrollbar, #page-portfolio::-webkit-scrollbar { width: 5px; }
 #page::-webkit-scrollbar-track, #page-portfolio::-webkit-scrollbar-track { background: transparent; }
 #page::-webkit-scrollbar-thumb, #page-portfolio::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
 #page, #page-portfolio { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; overflow-x: hidden; }
-/* Width 100% sur tous les enfants directs des pages */
+/* Tous les enfants directs des pages : full width */
 #page > *, #page-portfolio > * { box-sizing: border-box; max-width: 100%; }
 #page > div, #page-portfolio > div { width: 100%; }
-/* Width 100% dans les onglets de la fiche entreprise */
-#cd-content, #cdtab-ensemble > *, #cdtab-ratios > *, #cdtab-fin > *, #cdtab-mat > *, #cdtab-moat > *, #cdtab-analysts > *, #cdtab-sector > * { width: 100%; box-sizing: border-box; }
-/* Grilles internes */
-#cdtab-ratios > div, #cdtab-fin > div, #cdtab-analysts > div, #cdtab-sector > div { width: 100%; }
-/* Cards toujours full-width */
-.card { box-sizing: border-box; }
+/* Fiche entreprise : tous les onglets et leur contenu direct */
+#cd-content { width: 100%; max-width: 100%; box-sizing: border-box; }
+#cdtab-ensemble, #cdtab-ratios, #cdtab-fin, #cdtab-mat, #cdtab-moat, #cdtab-analysts, #cdtab-sector {
+  width: 100%; max-width: 100%; box-sizing: border-box;
+}
+#cdtab-ensemble > *, #cdtab-ratios > *, #cdtab-fin > *, #cdtab-mat > *, #cdtab-moat > *, #cdtab-analysts > *, #cdtab-sector > * {
+  width: 100%; max-width: 100%; box-sizing: border-box;
+}
+/* Cards, cartes internes */
+.card { box-sizing: border-box; max-width: 100%; }
 /* Grilles à 2 colonnes : si la 2ème colonne est vide, elle ne crée pas d'espace */
 .two-col-grid {
   display: grid;
@@ -540,10 +543,11 @@ function isETF(p){
 }
 function getProfile(ticker){
   const base=S.profiles[ticker]||{};
+  const px=S.prices[ticker]||{};   // Yahoo Finance retourne sector/country dans l'API prix
   const override=META_OVERRIDE[ticker]||{};
-  const country=override.country||TICKER_COUNTRY[ticker]||base.country||null;
-  const sector=override.sector||TICKER_SECTOR[ticker]||base.sector||null;
-  const mktCap=base.mktCap||null;
+  const country=override.country||TICKER_COUNTRY[ticker]||base.country||px.country||null;
+  const sector=override.sector||TICKER_SECTOR[ticker]||base.sector||px.sector||null;
+  const mktCap=base.mktCap||px.mktCap||null;
   return{country,sector,mktCap};
 }
 
@@ -833,7 +837,7 @@ function computeByAccount(){
 }
 
 // ═══ SORT ═══
-const SORT_COLS={value:p=>p.valueEur||0,pnl:p=>p.pnlEur||0,pnlpct:p=>p.pnlPct||0,qty:p=>p.quantity,pru:p=>p.pruEur};
+const SORT_COLS={value:p=>p.valueEur||0,pnl:p=>p.pnlEur||0,pnlpct:p=>p.pnlPct||0,qty:p=>p.quantity,pru:p=>p.pruEur,day:p=>p.dayChgPct||0};
 function sortPos(pos){const fn=SORT_COLS[posSort.col]||(p=>p.valueEur||0);return[...pos].sort((a,b)=>posSort.dir==='desc'?fn(b)-fn(a):fn(a)-fn(b));}
 function renderPosHead(){
   var h=`<tr>
@@ -841,6 +845,7 @@ function renderPosHead(){
     <th ${thCls('qty')} style="text-align:right">Qté ${sortIcon('qty')}</th>
     <th ${thCls('pru')} style="text-align:right">PRU ${sortIcon('pru')}</th>
     <th style="text-align:right">Cours</th>
+    <th ${thCls('day')} style="text-align:right">Var. Jour ${sortIcon('day')}</th>
     <th ${thCls('value')} style="text-align:right">Valeur (€) ${sortIcon('value')}</th>
     <th ${thCls('pnl')} style="text-align:right">P&amp;L (€) ${sortIcon('pnl')}</th>
     <th ${thCls('pnlpct')} style="text-align:right">P&amp;L % ${sortIcon('pnlpct')}</th>
@@ -943,9 +948,13 @@ function posTblRows(pos){
 
     const _cur=(d&&d.currency)||'USD'; const _dispP=d?((_cur==='USD'||_cur==='EUR')?d.price:toEur(d.price,_cur)):null; const _sym=_cur==='USD'?'$':'€';
     const priceHTML=priceLoaded
-      ?`<span class="mono">${d.manual?'✎ ':''}`+_sym+`${fN(_dispP)}</span>`+(!d.manual?`<div style="font-size:11px;color:${chg>=0?'var(--green)':'var(--red)'};margin-top:2px">${chg>=0?'+':''}${chg.toFixed(2)}%</div>`:'')
+      ?`<span class="mono">${d.manual?'✎ ':''}`+_sym+`${fN(_dispP)}</span>`
       :noPrice?`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix</button>`
       :`<div class="shimmer" style="width:55px;height:14px"></div>`;
+
+    const djHTML=priceLoaded&&!d.manual
+      ?(Math.abs(chg)>=0.01?`<span class="mono ${chg>=0?'c-green':'c-red'}">${chg>=0?'+':''}${chg.toFixed(2)}%</span>`:`<span style="color:var(--muted2);font-size:12px">—</span>`)
+      :noPrice?'—':`<div class="shimmer" style="width:45px;height:14px"></div>`;
 
     const valHTML=p.valueEur!=null?`<span class="mono">${fE(p.valueEur)}</span>`:'—';
     const pnlHTML=p.pnlEur!=null?`<span class="mono ${p.pnlEur>=0?'c-green':'c-red'}">${p.pnlEur>=0?'+':''}${fE(p.pnlEur)}</span>`:'—';
@@ -958,6 +967,7 @@ function posTblRows(pos){
       <td class="mono">${fQ(p.quantity)}</td>
       <td class="mono">${fN(p.pruDisplay)} ${cS(p.pruCurrency)}</td>
       <td id="px-${p.ticker}">${priceHTML}</td>
+      <td id="dj-${p.ticker}" style="text-align:right">${djHTML}</td>
       <td class="mono" id="vl-${p.ticker}">${valHTML}</td>
       <td id="pl-${p.ticker}">${pnlHTML}</td>
       <td id="pp-${p.ticker}">${pctHTML}</td>
@@ -985,8 +995,14 @@ async function fetchOneTicker(p){
     if(!d?.price){if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix ✎</button>`;return;}
     const _fc=d.currency||'USD'; const pe=toEur(d.price,_fc); const _fdp=(_fc==='USD'||_fc==='EUR')?d.price:pe; const _fs=_fc==='USD'?'$':'€';
     const ve=pe*p.quantity,pnl=ve-p.totalCostEur,pct=p.totalCostEur>0?(pnl/p.totalCostEur)*100:0,chg=d.changePct??0;
-    p.priceEur=pe;p.valueEur=ve;p.pnlEur=pnl;p.pnlPct=pct;
-    const showChg=Math.abs(chg)>=0.01;if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<span class="mono">`+_fs+`${fN(_fdp)}</span>`+(showChg?`<div style="font-size:11px;color:${chg>=0?'var(--green)':'var(--red)'};margin-top:2px">${chg>=0?'+':''}${chg.toFixed(2)}%</div>`:`<div style="font-size:11px;color:var(--muted2);margin-top:2px">marché fermé</div>`);
+    p.priceEur=pe;p.valueEur=ve;p.pnlEur=pnl;p.pnlPct=pct;p.dayChgPct=chg;
+    // Cellule Prix (cours uniquement, sans variation)
+    if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<span class="mono">${_fs}${fN(_fdp)}</span>`;
+    // Cellule Var. Jour (colonne séparée, triable)
+    const djEl=$('dj-'+p.ticker);
+    if(djEl)djEl.innerHTML=Math.abs(chg)>=0.01
+      ?`<span class="mono ${chg>=0?'c-green':'c-red'}">${chg>=0?'+':''}${chg.toFixed(2)}%</span>`
+      :`<span style="color:var(--muted2);font-size:12px">—</span>`;
     if($('vl-'+p.ticker))$('vl-'+p.ticker).innerHTML=`<span class="mono">${fE(ve)}</span>`;
     if($('pl-'+p.ticker))$('pl-'+p.ticker).innerHTML=`<span class="mono ${pnl>=0?'c-green':'c-red'}">${pnl>=0?'+':''}${fE(pnl)}</span>`;
     if($('pp-'+p.ticker))$('pp-'+p.ticker).innerHTML=`<span class="mono ${pct>=0?'c-green':'c-red'}">${pct>=0?'+':''}${pct.toFixed(2)}%</span>`;
@@ -2773,6 +2789,13 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
     '</div>' +
     '</div>' +
     '<div id="cdtab-fin" style="display:none">' +
+    '<div class="card" style="margin-bottom:14px;width:100%;box-sizing:border-box">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'+
+        '<div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em">📈 EPS dilué vs Cours de bourse</div>'+
+        '<div id="cdchart-eps-price-stats" style="font-size:11px;color:var(--muted);display:flex;gap:14px"></div>'+
+      '</div>'+
+      '<div style="position:relative;height:260px"><canvas id="cdchart-eps-price"></canvas></div>'+
+    '</div>'+
     '<div class="cd-charts-grid"><div style="display:flex;gap:6px;margin-bottom:14px;grid-column:1/-1;align-items:center"><span style="font-size:11px;color:var(--muted)">Vue :</span><button id="fin-btn-annual" onclick="switchFinMode(&quot;annual&quot;,&quot;'+ticker+'&quot;)" style="padding:3px 10px;font-size:11px;border:1px solid var(--accent);border-radius:20px;background:var(--accent)22;color:var(--accent);cursor:pointer">Annuel</button><button id="fin-btn-quarterly" onclick="switchFinMode(&quot;quarterly&quot;,&quot;'+ticker+'&quot;)" style="padding:3px 10px;font-size:11px;border:1px solid var(--border2);border-radius:20px;background:transparent;color:var(--muted);cursor:pointer">Trimestriel</button></div><h3 style="font-size:15px;font-weight:700;margin-bottom:16px">📊 Historique financier</h3>' +
     '<div style="'+grids3+'">' +
       '<div class="card"><div id="fin-title-rev" style="font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Revenus & Bénéfices (Md'+sym+')</div><div style="position:relative;height:'+cH+'"><canvas id="cdchart-rev"></canvas></div></div>' +
@@ -2968,6 +2991,8 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
   // Draw all charts (setTimeout for DOM settle)
   setTimeout(function(){
     try {
+      // ── EPS vs Prix (chart signature en haut du fin tab) ──────────────────
+      cdEpsPriceChart(ticker, fin, chartPts, f, sym);
       cdBarChart('cdchart-rev', fin.years, [
         {label:'CA',       data:fin.revenue,   color:'#634BE4'},
         {label:'Rés. net', data:fin.netIncome, color:'#22c55e'},
@@ -2988,13 +3013,13 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
         {label:'Capex',data:fin.capex,       color:'#ef4444'},
       ], 'fin-title-cf', sym);
       cdWaterfall('cdchart-waterfall', wf, sym);
-      if(peTS.length>=8)   cdRatioTimeChart('cdchart-pe',  'P/E',  peTS,  null,_buyTs,_sellTs);
+      if(peTS.length>=8)   cdRatioTimeChart('cdchart-pe',  'P/E',  peTS,  f&&f.trailingPE, _buyTs,_sellTs);
       else cdValChart('cdchart-pe',   fin.years, peVals,   f&&f.trailingPE, 'P/E');
-      if(pefwdTS.length>=8) cdRatioTimeChart('cdchart-pefwd','Fwd P/E',pefwdTS,null,_buyTs,_sellTs);
+      if(pefwdTS.length>=8) cdRatioTimeChart('cdchart-pefwd','Fwd P/E',pefwdTS, f&&f.forwardPE, _buyTs,_sellTs);
       else if(document.getElementById('cdchart-pefwd')) cdValChart('cdchart-pefwd', fin.years, peVals, f&&f.forwardPE, 'Fwd P/E');
-      if(pfcfTS.length>=8) cdRatioTimeChart('cdchart-pfcf','P/FCF',pfcfTS,null,_buyTs,_sellTs);
+      if(pfcfTS.length>=8) cdRatioTimeChart('cdchart-pfcf','P/FCF',pfcfTS, f&&f.pfcf, _buyTs,_sellTs);
       else cdValChart('cdchart-pfcf', fin.years, pfcfVals, curPFCF,          'P/FCF');
-      if(pocfTS.length>=8) cdRatioTimeChart('cdchart-pocf','P/OCF',pocfTS,null,_buyTs,_sellTs);
+      if(pocfTS.length>=8) cdRatioTimeChart('cdchart-pocf','P/OCF',pocfTS, f&&f.pocf, _buyTs,_sellTs);
       else cdValChart('cdchart-pocf', fin.years, pocfVals, curPOCF,          'P/OCF');
       try{ window._cdLastFin=fin; window._cdLastNativePrice=curPrice; renderYieldMatrix(ticker, curPrice, f, fin); }catch(e){ var ym=document.getElementById('cd-yield-matrix'); if(ym) ym.innerHTML='<div style="color:var(--muted);font-size:12px">Données insuffisantes (EPS manquant).</div>'; }
       // Segments pie (données manuelles)
@@ -3564,10 +3589,11 @@ function cdRatioTimeChart(id,label,series,current,buyTs,sellTs){
   // Pour 2 achats à 10x et 22x : ⌀ = 16x, pas 22x (bug de floor(n/2))
   var buyMean=buyVals.length?Math.round(buyVals.reduce(function(s,v){return s+v;},0)/buyVals.length*10)/10:null;
   if(current!=null&&isFinite(current)&&current>0){ labels=labels.concat(['Actuel']); data=data.concat([Math.round(current*100)/100]); buys=buys.concat([null]); sells=sells.concat([null]); }
-  var sortedV=data.slice().sort(function(a,b){return a-b;});
+  var sortedV=data.slice().filter(function(v){return v!=null&&v>0;}).sort(function(a,b){return a-b;});
   var median=sortedV.length?sortedV[Math.floor(sortedV.length/2)]:null;
-  // Ligne de stats synthétique sous le graphe
-  var _hi=sortedV[sortedV.length-1],_lo=sortedV[0],_cur=data[data.length-1];
+  // Valeur courante : préférer le fondamental Yahoo (current) pour cohérence avec Vue d'ensemble
+  var _cur=(current!=null&&isFinite(current)&&current>0)?Math.round(current*100)/100:data[data.length-1];
+  var _hi=sortedV[sortedV.length-1],_lo=sortedV[0];
   var statsEl=document.getElementById(id+'-stats');
   if(!statsEl){ statsEl=document.createElement('div'); statsEl.id=id+'-stats';
     statsEl.style.cssText='display:flex;gap:14px;flex-wrap:wrap;font-size:11px;margin-top:8px;font-family:var(--mono,monospace)';
@@ -3598,6 +3624,149 @@ function cdRatioTimeChart(id,label,series,current,buyTs,sellTs){
         return c.dataset.label+': '+c.parsed.y+'x';}}}},
     scales:{x:{ticks:{maxTicksLimit:8,font:{size:10},color:'#6b7280'},grid:{color:'rgba(255,255,255,.04)'}},
       y:{position:'right',ticks:{font:{size:10},color:'#6b7280',callback:function(v){return v+'x';}},grid:{color:'rgba(255,255,255,.05)'}}}}});
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// EPS DILUÉ VS COURS DE BOURSE — graphique double axe inspiré de Baggr
+// ══════════════════════════════════════════════════════════════════════════
+function cdEpsPriceChart(ticker, fin, chartPts, f, sym) {
+  var cv = document.getElementById('cdchart-eps-price'); if(!cv) return;
+  if(window['_ch_cdchart-eps-price']){try{window['_ch_cdchart-eps-price'].destroy();}catch(e){}}
+
+  var years = fin.years || [];
+  var epsArr = fin.eps || [];
+  if(!years.length || !epsArr.length) return;
+
+  // Prix à la fin de chaque exercice fiscal (approximation : Dec 31)
+  function priceAtFY(yearStr) {
+    var yr = parseInt(yearStr.replace('FY',''));
+    // MSFT clôture en juin, autres en décembre
+    var isMsft = ticker==='MSFT';
+    var ts = new Date(yr + (isMsft?'-06-30':'-12-31')).getTime()/1000;
+    var best=null, bestD=Infinity;
+    (chartPts||[]).forEach(function(p){var d=Math.abs(p.t-ts);if(d<bestD){bestD=d;best=p.c;}});
+    return best;
+  }
+
+  // EPS TTM depuis fondamentaux (si disponible)
+  var ttmEps = f && f.trailingEps;
+  var curPrice = chartPts&&chartPts.length?chartPts[chartPts.length-1].c:null;
+
+  var labels = years.concat(ttmEps||curPrice?['TTM']:[]);
+  var epsData = epsArr.map(function(v){return v!=null?Math.round(v*100)/100:null;});
+  var priceData = years.map(priceAtFY);
+
+  if(ttmEps||curPrice){
+    epsData = epsData.concat([ttmEps?Math.round(ttmEps*100)/100:null]);
+    priceData = priceData.concat([curPrice]);
+  }
+
+  // Stats : CAGR et performance EPS
+  var validEps = epsData.filter(function(v){return v!=null&&v>0;});
+  var firstEps=validEps[0], lastEps=validEps[validEps.length-1];
+  var n = validEps.length;
+  var totalPerfEps = (firstEps&&lastEps&&firstEps>0)?((lastEps/firstEps-1)*100):null;
+  var cagrEps = (firstEps&&lastEps&&n>1)?(Math.pow(lastEps/firstEps,1/(n-1))-1)*100:null;
+  var firstPrice = priceData.find(function(v){return v!=null&&v>0;});
+  var totalPerfPrice = (firstPrice&&curPrice&&firstPrice>0)?((curPrice/firstPrice-1)*100):null;
+
+  // Stats display
+  var statsEl = document.getElementById('cdchart-eps-price-stats');
+  if(statsEl) statsEl.innerHTML =
+    (cagrEps!=null?'<span style="color:#634BE4;font-weight:700">EPS CAGR '+cagrEps.toFixed(1)+'%/an</span>':'') +
+    (totalPerfEps!=null?'<span style="color:var(--muted)">EPS +'+totalPerfEps.toFixed(0)+'%</span>':'') +
+    (totalPerfPrice!=null?'<span style="color:#f59e0b">Cours +'+(totalPerfPrice>0?totalPerfPrice.toFixed(0):totalPerfPrice.toFixed(0))+'%</span>':'');
+
+  // Plugin pour labels EPS sur les dots + prix courant
+  var epsLabelPlugin = {
+    id: 'epsLabels',
+    afterDatasetsDraw: function(chart) {
+      var ctx = chart.ctx;
+      // Labels EPS au-dessus des dots bleus
+      var epsMeta = chart.getDatasetMeta(0);
+      if(!epsMeta.hidden) {
+        epsMeta.data.forEach(function(point, i) {
+          var v = chart.data.datasets[0].data[i];
+          if(v==null||v<=0) return;
+          ctx.save();
+          ctx.fillStyle='#c4bff5';
+          ctx.font='bold 9px monospace';
+          ctx.textAlign='center';
+          ctx.fillText(v.toFixed(2), point.x, point.y-9);
+          ctx.restore();
+        });
+      }
+      // Box prix actuel à droite de la dernière valeur prix
+      var priceMeta = chart.getDatasetMeta(1);
+      var pd = chart.data.datasets[1].data;
+      var lastIdx = pd.length-1;
+      var lp = priceMeta.data[lastIdx];
+      if(lp&&pd[lastIdx]) {
+        var p=pd[lastIdx];
+        var txt = p.toFixed(2)+(sym==='$'?' $':' €');
+        ctx.save();
+        ctx.font='bold 10px monospace';
+        var tw=ctx.measureText(txt).width;
+        var bw=tw+14, bh=20, bx=lp.x-bw-4, by=lp.y-bh/2;
+        ctx.fillStyle='#f59e0b';
+        ctx.beginPath();
+        ctx.moveTo(bx+5,by);ctx.lineTo(bx+bw-5,by);ctx.quadraticCurveTo(bx+bw,by,bx+bw,by+5);
+        ctx.lineTo(bx+bw,by+bh-5);ctx.quadraticCurveTo(bx+bw,by+bh,bx+bw-5,by+bh);
+        ctx.lineTo(bx+5,by+bh);ctx.quadraticCurveTo(bx,by+bh,bx,by+bh-5);
+        ctx.lineTo(bx,by+5);ctx.quadraticCurveTo(bx,by,bx+5,by);ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle='#000';
+        ctx.textAlign='center';
+        ctx.textBaseline='middle';
+        ctx.fillText(txt, bx+bw/2, by+bh/2);
+        ctx.restore();
+      }
+    }
+  };
+
+  window['_ch_cdchart-eps-price']=new Chart(cv,{
+    type:'line',
+    data:{
+      labels:labels,
+      datasets:[
+        // EPS (axe gauche, bleu)
+        {label:'EPS dilué ('+sym+')',data:epsData,
+          borderColor:'#634BE4',backgroundColor:'#634BE4',
+          pointBackgroundColor:'#634BE4',pointRadius:5,pointHoverRadius:7,
+          borderWidth:2.5,tension:0.4,yAxisID:'yEps',fill:false},
+        // Prix (axe droit, or)
+        {label:'Cours ('+sym+')',data:priceData,
+          borderColor:'#f59e0b',backgroundColor:'rgba(245,158,11,.06)',
+          pointRadius:0,pointHoverRadius:4,
+          borderWidth:1.5,tension:0.1,yAxisID:'yPrice',fill:false}
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        epsLabels:{},
+        legend:{display:true,position:'top',
+          labels:{boxWidth:12,font:{size:11},color:'rgba(255,255,255,.8)',padding:16}},
+        tooltip:{callbacks:{label:function(ctx){
+          if(ctx.datasetIndex===0) return 'EPS: '+(ctx.parsed.y||0).toFixed(2)+sym;
+          return 'Cours: '+(ctx.parsed.y||0).toFixed(2)+sym;
+        }}}
+      },
+      scales:{
+        x:{ticks:{font:{size:10},color:'#6b7280'},grid:{color:'rgba(255,255,255,.04)'}},
+        yEps:{type:'linear',position:'left',
+          ticks:{font:{size:10},color:'#a0a8d0',callback:function(v){return v.toFixed(1)+sym;}},
+          grid:{color:'rgba(255,255,255,.05)'},
+          title:{display:true,text:'EPS ('+sym+')',color:'#634BE4',font:{size:10}}},
+        yPrice:{type:'linear',position:'right',
+          ticks:{font:{size:10},color:'#f59e0b',callback:function(v){return v.toFixed(0)+sym;}},
+          grid:{drawOnChartArea:false},
+          title:{display:true,text:'Cours ('+sym+')',color:'#f59e0b',font:{size:10}}}
+      }
+    },
+    plugins:[epsLabelPlugin]
+  });
 }
 
 
