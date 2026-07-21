@@ -398,6 +398,7 @@ const TICKER_SECTOR={
   // Financials
   SPGI:'Financials',V:'Financials',MA:'Financials',JPM:'Financials',
   COIN:'Financials',HOOD:'Financials',
+  'ADYEN.AS':'Financials',ADYEN:'Financials',  // Adyen (paiements)
   // Technology / IT
   NVDA:'Information Technology',MSFT:'Information Technology',
   TSM:'Information Technology',TSMC:'Information Technology',
@@ -405,20 +406,28 @@ const TICKER_SECTOR={
   'SMSN.L':'Information Technology','BESI.AS':'Information Technology',
   SIV:'Information Technology','2DG':'Information Technology',
   'SIVE.ST':'Information Technology','005930.KS':'Information Technology',
+  '000660.KS':'Information Technology',  // SK Hynix
   'XFAB.PA':'Information Technology',
   NVTS:'Information Technology',ASML:'Information Technology',
+  NBIS:'Technology',  // Nebius (IA/cloud)
   // Industrials
   VRT:'Industrials',
   // Tech (others)
   UBER:'Consumer Discretionary',LYFT:'Consumer Discretionary',
-  // ETFs
+  // ETFs — NB : les ETFs n'ont pas de secteur, ils apparaissent comme "ETF"
   'ESE.PA':'ETF',ESE:'ETF','PAASI.PA':'ETF',PAASI:'ETF',CW8:'ETF',
+  'PUST.PA':'ETF',PUST:'ETF','EDEN.PA':'ETF','UST.PA':'ETF',
+  'CW8.PA':'ETF','WPEA.PA':'ETF','WPAL.PA':'ETF',
   // Actions françaises
   'GTT.PA':'Industrials','AI.PA':'Materials',
   'OR.PA':'Consumer Staples','MC.PA':'Consumer Discretionary',
   'TTE.PA':'Energy','SAN.PA':'Health Care',
   'BNP.PA':'Financials','ACA.PA':'Financials',
-  'VIE.PA':'Utilities',
+  'VIE.PA':'Utilities','ENGI.PA':'Utilities',
+  'SU.PA':'Industrials','SAP.DE':'Information Technology',
+  'SAF.PA':'Industrials','SIE.DE':'Industrials',
+  'ALO.PA':'Industrials','ATO.PA':'Energy',
+  'STLAP.PA':'Consumer Discretionary',
   // ETFs européens
   'UTI.PA':'ETF','PAEEM.PA':'ETF','EXA1.DE':'ETF',
   'IWDA.AS':'ETF','SWDA.L':'ETF','VWCE.DE':'ETF',
@@ -532,7 +541,7 @@ const TICKER_SUBSECTOR={
 };
 
 // ═══ TICKERS ETF CONNUS (override si asset_type incorrect en DB) ═══
-const ETF_TICKERS=new Set(['ESE.PA','ESE','PAASI.PA','PAASI','CW8','LVO.DE','IWDA','VWCE','UTI.PA','PAEEM.PA','EXA1.DE','IWDA.AS','SWDA.L','VWCE.DE','CW8.PA','PUST.PA','PUST','EDEN.PA','EDEN','CAC.PA','CAC40','STLA.PA']);
+const ETF_TICKERS=new Set(['ESE.PA','ESE','PAASI.PA','PAASI','CW8','LVO.DE','IWDA','VWCE','UTI.PA','PAEEM.PA','EXA1.DE','IWDA.AS','SWDA.L','VWCE.DE','CW8.PA','PUST.PA','PUST','EDEN.PA','EDEN','CAC.PA','CAC40','STLA.PA','UST.PA','UST','WPEA.PA','WPEA','PAEEM','WPAL.PA','LYPS.DE','LCRD.PA']);
 function isETF(p){
   if(!p) return false;
   if(ETF_TICKERS.has(p.ticker)) return true;
@@ -543,6 +552,12 @@ function isETF(p){
   const qt=(S.prices[p.ticker]||{}).quoteType||'';
   if(qt==='ETF'||qt==='MUTUALFUND') return true;
   return false;
+}
+// Vérifie si un ticker est un ETF (sans passer un objet position complet)
+function _isEtfTicker(ticker){
+  if(ETF_TICKERS.has(ticker)) return true;
+  const qt=(S.prices[ticker]||{}).quoteType||'';
+  return qt==='ETF'||qt==='MUTUALFUND';
 }
 // Auto-détection pays depuis le suffixe de bourse du ticker (.PA → FR, .KS → KR, etc.)
 function _autoCountry(ticker){
@@ -556,9 +571,11 @@ function _autoCountry(ticker){
 
 function getProfile(ticker){
   const base=S.profiles[ticker]||{};
-  const px=S.prices[ticker]||{};          // secteur + pays retournés par quote.js désormais
+  const px=S.prices[ticker]||{};
   const override=META_OVERRIDE[ticker]||{};
-  const autoC=_autoCountry(ticker);        // fallback : suffixe de bourse → pays
+  // ETF = ne pas utiliser le suffixe de bourse comme pays d'exposition
+  // PUST.PA est listé à Paris mais exposé au NASDAQ US, pas à la France
+  const autoC=_isEtfTicker(ticker)?null:_autoCountry(ticker);
   const country=override.country||TICKER_COUNTRY[ticker]||base.country||px.country||autoC||null;
   const sector=override.sector||TICKER_SECTOR[ticker]||base.sector||px.sector||null;
   const mktCap=base.mktCap||px.mktCap||null;
@@ -1196,7 +1213,7 @@ function buildChartData(){
 
   if(chartMode==='secteur'){
     const getSubSect=ep=>ep._isEtfSlice?(ep.name+' (expo.)'):(TICKER_SUBSECTOR[ep.ticker]||ep.name);
-    const getSect=ep=>ep._etfKey||(getProfile(ep.ticker).sector||'Non défini');
+    const getSect=ep=>ep._etfKey||(_isEtfTicker(ep.ticker)&&!ep._isEtfSlice?'ETF':(getProfile(ep.ticker).sector||'Non défini'));
     if(drill.length===0){
       // Niveau 1 : secteurs (ETFs ventilés)
       const exp=explodeForMode(pos,'secteur');
@@ -5459,7 +5476,7 @@ function _friendChartData(){
   }
 
   if(mode==='secteur'){
-    var getSect=function(ep){return ep._etfKey||(getProfile(ep.ticker).sector||'Non défini');};
+    var getSect=function(ep){return ep._etfKey||(_isEtfTicker(ep.ticker)&&!ep._isEtfSlice?'ETF':(getProfile(ep.ticker).sector||'Non défini'));};
     var exp=explodeForMode(pos,'secteur');
     if(!drill.length){
       var m={};exp.forEach(function(ep){var k=getSect(ep);m[k]=(m[k]||0)+(ep.valueEur||0);});
