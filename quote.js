@@ -38,7 +38,37 @@ async function yfSummary(symbol, modules) {
   } catch { return null; }
 }
 
-// ── Cache Supabase 24h ──────────────────────────────────────────────────
+// ── Cache mémoire des profils (sector/country/quoteType) — 6h Vercel warm ──
+const _profileMem = {};
+const PROFILE_MEM_TTL = 6 * 60 * 60 * 1000;
+
+async function yfProfile(symbol) {
+  const c = _profileMem[symbol];
+  if (c && Date.now() - c._t < PROFILE_MEM_TTL) return c;
+  try {
+    const yf = await Promise.race([
+      yfSummary(symbol, 'assetProfile,quoteType,summaryDetail'),
+      new Promise(resolve => setTimeout(() => resolve(null), 4000))
+    ]);
+    const ap = yf?.assetProfile || {};
+    const qt = yf?.quoteType    || {};
+    const sd = yf?.summaryDetail || {};
+    const p = {
+      sector:    ap.sector    || null,
+      country:   ap.country   || null,
+      industry:  ap.industry  || null,
+      mktCap:    sd.marketCap?.raw || null,
+      quoteType: qt.quoteType || null, // 'ETF', 'EQUITY', 'MUTUALFUND'…
+      _t: Date.now()
+    };
+    _profileMem[symbol] = p;
+    return p;
+  } catch {
+    return { sector:null, country:null, industry:null, mktCap:null, quoteType:null, _t:Date.now() };
+  }
+}
+
+
 const SUPA_URL = process.env.SUPABASE_URL || 'https://dnmibojfzquicbhtactx.supabase.co';
 const SUPA_SVC = process.env.SUPABASE_SERVICE_KEY;
 const CACHE_TTL = 24 * 60 * 60 * 1000;
@@ -101,7 +131,7 @@ module.exports = async (req, res) => {
   if (type === 'fundamentals') {
     try {
       // Cache Supabase → réponse instantanée si données < 24h
-      const CACHE_V = 6; // Incrémenter pour invalider tous les caches
+      const CACHE_V = 9; // v9 = + thisYear (trend0y = exercice fiscal en cours, ex: FY2026 GOOGL)
       const cached = await getCache(symbol);
       const cacheValid = cached
         && cached._v === CACHE_V
@@ -154,9 +184,25 @@ module.exports = async (req, res) => {
         ? trend1y.revenueEstimate.growth.raw * 100 : null;
 
       // ── ESTIMATIONS ANALYSTES PAR PÉRIODE ─────────────────────────────
-      const trend0q = trends.find(t => t.period === '0q');  // trimestre en cours
+      const trend0y  = trends.find(t => t.period === '0y');   // exercice fiscal EN COURS (ex: FY2026)
+      const trend0q  = trends.find(t => t.period === '0q');  // trimestre en cours
       const trendP1q = trends.find(t => t.period === '+1q'); // trimestre suivant
       const analystEstimates = {
+        // Exercice fiscal EN COURS (0y) — ex: FY2026 pour GOOGL
+        // C'est le signal le plus pertinent pour la matrice : croissance non-GAAP cohérente
+        // (estimation FY en cours vs réel FY précédent). Ex: +31.5% pour GOOGL ($14.22/$10.81)
+        thisYear: trend0y ? {
+          period:    '0y',
+          epsAvg:    trend0y.earningsEstimate?.avg?.raw ?? null,
+          epsLow:    trend0y.earningsEstimate?.low?.raw ?? null,
+          epsHigh:   trend0y.earningsEstimate?.high?.raw ?? null,
+          epsCount:  trend0y.earningsEstimate?.numberOfAnalysts?.raw ?? null,
+          epsGrowth: trend0y.earningsEstimate?.growth?.raw != null ? trend0y.earningsEstimate.growth.raw * 100 : null,
+          revAvg:    trend0y.revenueEstimate?.avg?.raw ?? null,
+          revLow:    trend0y.revenueEstimate?.low?.raw ?? null,
+          revHigh:   trend0y.revenueEstimate?.high?.raw ?? null,
+          revGrowth: trend0y.revenueEstimate?.growth?.raw != null ? trend0y.revenueEstimate.growth.raw * 100 : null,
+        } : null,
         // Trimestre en cours
         currentQtr: trend0q ? {
           period:       trend0q.period,
@@ -165,6 +211,8 @@ module.exports = async (req, res) => {
           epsLow:       trend0q.earningsEstimate?.low?.raw ?? null,
           epsHigh:      trend0q.earningsEstimate?.high?.raw ?? null,
           epsCount:     trend0q.earningsEstimate?.numberOfAnalysts?.raw ?? null,
+          epsGrowth:    trend0q.earningsEstimate?.growth?.raw != null ? trend0q.earningsEstimate.growth.raw * 100 : null,
+          revGrowth:    trend0q.revenueEstimate?.growth?.raw != null ? trend0q.revenueEstimate.growth.raw * 100 : null,
           revAvg:       trend0q.revenueEstimate?.avg?.raw ?? null,
           revLow:       trend0q.revenueEstimate?.low?.raw ?? null,
           revHigh:      trend0q.revenueEstimate?.high?.raw ?? null,
@@ -177,17 +225,24 @@ module.exports = async (req, res) => {
           epsLow:       trendP1q.earningsEstimate?.low?.raw ?? null,
           epsHigh:      trendP1q.earningsEstimate?.high?.raw ?? null,
           epsCount:     trendP1q.earningsEstimate?.numberOfAnalysts?.raw ?? null,
+          epsGrowth:    trendP1q.earningsEstimate?.growth?.raw != null ? trendP1q.earningsEstimate.growth.raw * 100 : null,
+          revGrowth:    trendP1q.revenueEstimate?.growth?.raw != null ? trendP1q.revenueEstimate.growth.raw * 100 : null,
           revAvg:       trendP1q.revenueEstimate?.avg?.raw ?? null,
           revLow:       trendP1q.revenueEstimate?.low?.raw ?? null,
           revHigh:      trendP1q.revenueEstimate?.high?.raw ?? null,
         } : null,
-        // Année en cours
+        // Exercice suivant (+1y) — ex: FY2027 pour GOOGL
         currentYear: trend1y ? {
-          epsAvg:       trend1y.earningsEstimate?.avg?.raw ?? null,
-          epsGrowth:    trend1y.earningsEstimate?.growth?.raw != null ? trend1y.earningsEstimate.growth.raw * 100 : null,
-          revAvg:       trend1y.revenueEstimate?.avg?.raw ?? null,
-          revGrowth:    trend1y.revenueEstimate?.growth?.raw != null ? trend1y.revenueEstimate.growth.raw * 100 : null,
-          count:        trend1y.earningsEstimate?.numberOfAnalysts?.raw ?? null,
+          epsAvg:    trend1y.earningsEstimate?.avg?.raw ?? null,
+          epsLow:    trend1y.earningsEstimate?.low?.raw ?? null,
+          epsHigh:   trend1y.earningsEstimate?.high?.raw ?? null,
+          epsCount:  trend1y.earningsEstimate?.numberOfAnalysts?.raw ?? null,
+          epsGrowth: trend1y.earningsEstimate?.growth?.raw != null ? trend1y.earningsEstimate.growth.raw * 100 : null,
+          revAvg:    trend1y.revenueEstimate?.avg?.raw ?? null,
+          revLow:    trend1y.revenueEstimate?.low?.raw ?? null,
+          revHigh:   trend1y.revenueEstimate?.high?.raw ?? null,
+          revGrowth: trend1y.revenueEstimate?.growth?.raw != null ? trend1y.revenueEstimate.growth.raw * 100 : null,
+          count:     trend1y.earningsEstimate?.numberOfAnalysts?.raw ?? null,
         } : null,
       };
 
@@ -207,7 +262,20 @@ module.exports = async (req, res) => {
       const result = {
         symbol, _v: CACHE_V,
         trailingPE:      raw(sd.trailingPE),
-        forwardPE:       raw(sd.forwardPE),
+        // Forward PE NTM calculé manuellement : cours / EPS forward consensus
+        // sd.forwardPE de Yahoo utilise l'EPS GAAP fiscal (fausse la valeur pour NVDA etc.)
+        // On préfère : cours / avg(earningsTrend année en cours) si disponible
+        forwardPE: (function(){
+          // EPS forward = moyenne analystes année en cours (earningsTrend '0y' ou '1y')
+          var epsFwd = trend1y && trend1y.earningsEstimate && trend1y.earningsEstimate.avg
+            ? trend1y.earningsEstimate.avg.raw : null;
+          if(epsFwd && epsFwd > 0) {
+            var px = raw(sd.regularMarketPrice) || raw(sd.previousClose);
+            if(px && px > 0) return Math.round((px / epsFwd) * 10) / 10;
+          }
+          // Fallback sur sd.forwardPE si earningsTrend indispo
+          return raw(sd.forwardPE);
+        })(),
         pegRatio:        raw(ks.pegRatio),
         pfcf, pocf,
         profitMarginPct:    pct(fd.profitMargins),
@@ -480,9 +548,11 @@ Rules:
   const BASE = 'https://query1.finance.yahoo.com/v8/finance/chart/';
   const H    = { headers: { 'User-Agent': UA } };
   try {
-    const [r5d, rh] = await Promise.all([
+    // Fetch prix + historique + profil (sector/country/quoteType) en parallèle
+    const [r5d, rh, prof] = await Promise.all([
       fetch(`${BASE}${sym}?range=5d&interval=1d&includePrePost=false`, H),
       fetch(`${BASE}${sym}?range=1y&interval=1mo&includePrePost=false`, H),
+      yfProfile(symbol).catch(() => ({})),
     ]);
     const d5 = r5d.ok ? await r5d.json() : null;
     const dh = rh.ok  ? await rh.json()  : null;
@@ -491,7 +561,18 @@ Rules:
 
     const meta = chart.meta;
     const price = meta.regularMarketPrice || meta.previousClose;
-    const prev  = meta.previousClose || meta.chartPreviousClose;
+    // Utiliser la vraie clôture J-1 depuis le tableau des closes 5d
+    // (meta.chartPreviousClose peut être la clôture de la semaine précédente pour certains marchés)
+    const closes5d  = chart?.indicators?.adjclose?.[0]?.adjclose || chart?.indicators?.quote?.[0]?.close || [];
+    const times5d   = chart?.timestamp || [];
+    const today     = Math.floor(Date.now() / 1000);
+    const dayAgo    = today - 86400;
+    // Trouver la dernière clôture datant d'avant aujourd'hui
+    let prevFromChart = null;
+    for (let i = closes5d.length - 1; i >= 0; i--) {
+      if (times5d[i] < dayAgo - 3600 && closes5d[i] != null) { prevFromChart = closes5d[i]; break; }
+    }
+    const prev  = prevFromChart || meta.previousClose || meta.chartPreviousClose;
     const changeAbs = price - prev;
     const changePct = prev ? (changeAbs / prev) * 100 : 0;
 
@@ -510,6 +591,13 @@ Rules:
     }
     // Données brutes pour le graphique (12 derniers mois mensuels)
     const chartPts = pts.slice(-13).map(p => ({ c: Math.round(p.c * 100) / 100, t: p.t }));
-    return res.json({ symbol, price, prevClose: prev, changeAbs, changePct, change1M, changeYTD, change1Y, currency: meta.currency||'USD', exchange: meta.exchangeName, chartData: chartPts, timestamp: Date.now() });
+    return res.json({ symbol, price, prevClose: prev, changeAbs, changePct, change1M, changeYTD, change1Y, currency: meta.currency||'USD', exchange: meta.exchangeName, chartData: chartPts, timestamp: Date.now(),
+      // ── Profil (sector, country, quoteType) ── désormais inclus dans chaque réponse prix
+      sector:    prof?.sector    || null,
+      country:   prof?.country   || null,
+      industry:  prof?.industry  || null,
+      mktCap:    prof?.mktCap    || null,
+      quoteType: prof?.quoteType || null,  // 'ETF', 'EQUITY', 'MUTUALFUND'…
+    });
   } catch (e) { return res.status(500).json({ error: e.message }); }
 };
