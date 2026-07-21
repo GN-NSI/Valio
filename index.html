@@ -532,20 +532,34 @@ const TICKER_SUBSECTOR={
 };
 
 // ═══ TICKERS ETF CONNUS (override si asset_type incorrect en DB) ═══
-const ETF_TICKERS=new Set(['ESE.PA','ESE','PAASI.PA','PAASI','CW8','LVO.DE','IWDA','VWCE','UTI.PA','PAEEM.PA','EXA1.DE','IWDA.AS','SWDA.L','VWCE.DE','CW8.PA']);
+const ETF_TICKERS=new Set(['ESE.PA','ESE','PAASI.PA','PAASI','CW8','LVO.DE','IWDA','VWCE','UTI.PA','PAEEM.PA','EXA1.DE','IWDA.AS','SWDA.L','VWCE.DE','CW8.PA','PUST.PA','PUST','EDEN.PA','EDEN','CAC.PA','CAC40','STLA.PA']);
 function isETF(p){
   if(!p) return false;
   if(ETF_TICKERS.has(p.ticker)) return true;
   if((p.asset_type||'').toLowerCase()==='etf') return true;
   if((p.name||'').toLowerCase().includes('etf')) return true;
   if((p.name||'').toLowerCase().includes('tracker')) return true;
+  // quoteType depuis l'API prix (quote.js retourne maintenant ce champ)
+  const qt=(S.prices[p.ticker]||{}).quoteType||'';
+  if(qt==='ETF'||qt==='MUTUALFUND') return true;
   return false;
 }
+// Auto-détection pays depuis le suffixe de bourse du ticker (.PA → FR, .KS → KR, etc.)
+function _autoCountry(ticker){
+  if(!ticker||!ticker.includes('.')) return 'US'; // Ticker sans suffixe = US par défaut
+  const sfx=ticker.split('.').pop().toUpperCase();
+  const MAP={PA:'FR',AS:'NL',DE:'DE',ST:'SE',L:'GB',LON:'GB',KS:'KR',KQ:'KR',T:'JP',HK:'HK',
+    SS:'CN',SZ:'CN',TO:'CA',V:'CA',AX:'AU',NZ:'NZ',BR:'BR',MI:'IT',MC:'ES',SW:'CH',
+    HE:'FI',CO:'DK',OL:'NO',AT:'AT',IST:'TR',BO:'IN',NS:'IN'};
+  return MAP[sfx]||null;
+}
+
 function getProfile(ticker){
   const base=S.profiles[ticker]||{};
-  const px=S.prices[ticker]||{};   // Yahoo Finance retourne sector/country dans l'API prix
+  const px=S.prices[ticker]||{};          // secteur + pays retournés par quote.js désormais
   const override=META_OVERRIDE[ticker]||{};
-  const country=override.country||TICKER_COUNTRY[ticker]||base.country||px.country||null;
+  const autoC=_autoCountry(ticker);        // fallback : suffixe de bourse → pays
+  const country=override.country||TICKER_COUNTRY[ticker]||base.country||px.country||autoC||null;
   const sector=override.sector||TICKER_SECTOR[ticker]||base.sector||px.sector||null;
   const mktCap=base.mktCap||px.mktCap||null;
   return{country,sector,mktCap};
