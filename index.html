@@ -409,15 +409,16 @@ const TICKER_SECTOR={
   '000660.KS':'Information Technology',  // SK Hynix
   'XFAB.PA':'Information Technology',
   NVTS:'Information Technology',ASML:'Information Technology',
-  NBIS:'Technology',  // Nebius (IA/cloud)
+  NBIS:'Information Technology',  // Nebius (IA/cloud)
   // Industrials
   VRT:'Industrials',
-  // Tech (others)
+  // Consumer Discretionary
   UBER:'Consumer Discretionary',LYFT:'Consumer Discretionary',
-  // ETFs — NB : les ETFs n'ont pas de secteur, ils apparaissent comme "ETF"
+  'EDEN.PA':'Consumer Discretionary','STLAP.PA':'Consumer Discretionary',  // Edenred, Stellantis
+  // ETFs — apparaissent en catégorie "ETF" dans le camembert secteur
   'ESE.PA':'ETF',ESE:'ETF','PAASI.PA':'ETF',PAASI:'ETF',CW8:'ETF',
-  'PUST.PA':'ETF',PUST:'ETF','EDEN.PA':'ETF','UST.PA':'ETF',
-  'CW8.PA':'ETF','WPEA.PA':'ETF','WPAL.PA':'ETF',
+  'PUST.PA':'ETF',PUST:'ETF','UST.PA':'ETF','CW8.PA':'ETF',
+  'WPEA.PA':'ETF','WPAL.PA':'ETF',
   // Actions françaises
   'GTT.PA':'Industrials','AI.PA':'Materials',
   'OR.PA':'Consumer Staples','MC.PA':'Consumer Discretionary',
@@ -427,7 +428,6 @@ const TICKER_SECTOR={
   'SU.PA':'Industrials','SAP.DE':'Information Technology',
   'SAF.PA':'Industrials','SIE.DE':'Industrials',
   'ALO.PA':'Industrials','ATO.PA':'Energy',
-  'STLAP.PA':'Consumer Discretionary',
   // ETFs européens
   'UTI.PA':'ETF','PAEEM.PA':'ETF','EXA1.DE':'ETF',
   'IWDA.AS':'ETF','SWDA.L':'ETF','VWCE.DE':'ETF',
@@ -479,6 +479,56 @@ const ETF_BREAKDOWN={
     countries:{ES:0.21,FR:0.19,IT:0.17,DE:0.13,NL:0.09,BE:0.06,AT:0.05,Autres:0.10},
     regions:{'Europe':1},
     capi:{'Large (100–1 000 Mds $)':0.70,'Mid (10–100 Mds $)':0.30},
+  },
+  // ── ETFs NASDAQ ─────────────────────────────────────────────────────────
+  'PUST.PA':{  // Amundi Nasdaq-100 II UCITS ETF
+    sectors:{'Information Technology':0.47,'Communication Services':0.18,'Consumer Discretionary':0.12,'Health Care':0.06,'Industrials':0.05,'Financials':0.04,'Consumer Staples':0.03,'Other':0.05},
+    countries:{US:1.0},
+    regions:{'Amérique du Nord':1.0},
+    capi:{'Mega (>1 000 Mds $)':0.58,'Large (100–1 000 Mds $)':0.38,'Mid (10–100 Mds $)':0.04},
+  },
+  'PUST':{
+    sectors:{'Information Technology':0.47,'Communication Services':0.18,'Consumer Discretionary':0.12,'Health Care':0.06,'Industrials':0.05,'Financials':0.04,'Consumer Staples':0.03,'Other':0.05},
+    countries:{US:1.0},regions:{'Amérique du Nord':1.0},
+    capi:{'Mega (>1 000 Mds $)':0.58,'Large (100–1 000 Mds $)':0.38,'Mid (10–100 Mds $)':0.04},
+  },
+  // ── ETFs S&P 500 / US ───────────────────────────────────────────────────
+  'UST.PA':{  // Amundi PEA S&P 500 UCITS ETF (ou équivalent US)
+    sectors:{'Information Technology':0.31,'Financials':0.14,'Health Care':0.11,'Consumer Discretionary':0.10,'Communication Services':0.09,'Industrials':0.08,'Consumer Staples':0.05,'Energy':0.04,'Materials':0.02,'Utilities':0.02,'Real Estate':0.02,'Other':0.02},
+    countries:{US:1.0},
+    regions:{'Amérique du Nord':1.0},
+    capi:{'Mega (>1 000 Mds $)':0.55,'Large (100–1 000 Mds $)':0.43,'Mid (10–100 Mds $)':0.02},
+  },
+  'UST':{
+    sectors:{'Information Technology':0.31,'Financials':0.14,'Health Care':0.11,'Consumer Discretionary':0.10,'Communication Services':0.09,'Industrials':0.08,'Consumer Staples':0.05,'Energy':0.04,'Materials':0.02,'Utilities':0.02,'Real Estate':0.02,'Other':0.02},
+    countries:{US:1.0},regions:{'Amérique du Nord':1.0},
+    capi:{'Mega (>1 000 Mds $)':0.55,'Large (100–1 000 Mds $)':0.43,'Mid (10–100 Mds $)':0.02},
+  },
+  // ── ETF Monde (MSCI World) ───────────────────────────────────────────────
+  'CW8.PA':{  // Amundi MSCI World UCITS ETF
+    sectors:{'Information Technology':0.23,'Financials':0.15,'Health Care':0.12,'Consumer Discretionary':0.10,'Industrials':0.10,'Communication Services':0.09,'Consumer Staples':0.06,'Energy':0.04,'Materials':0.04,'Utilities':0.03,'Real Estate':0.02,'Other':0.02},
+    countries:{US:0.66,JP:0.06,GB:0.04,FR:0.03,CA:0.03,DE:0.03,CH:0.02,AU:0.02,NL:0.02,DK:0.01,Autres:0.08},
+    regions:{'Amérique du Nord':0.68,'Europe':0.18,'Asie':0.12,'Océanie':0.02},
+    capi:{'Mega (>1 000 Mds $)':0.50,'Large (100–1 000 Mds $)':0.42,'Mid (10–100 Mds $)':0.08},
+  },
+  'CW8':{
+    sectors:{'Information Technology':0.23,'Financials':0.15,'Health Care':0.12,'Consumer Discretionary':0.10,'Industrials':0.10,'Communication Services':0.09,'Consumer Staples':0.06,'Energy':0.04,'Materials':0.04,'Utilities':0.03,'Real Estate':0.02,'Other':0.02},
+    countries:{US:0.66,JP:0.06,GB:0.04,FR:0.03,CA:0.03,DE:0.03,CH:0.02,AU:0.02,NL:0.02,Autres:0.09},
+    regions:{'Amérique du Nord':0.68,'Europe':0.18,'Asie':0.12,'Océanie':0.02},
+    capi:{'Mega (>1 000 Mds $)':0.50,'Large (100–1 000 Mds $)':0.42,'Mid (10–100 Mds $)':0.08},
+  },
+  // ── ETF Europe (MSCI Europe) ─────────────────────────────────────────────
+  'WPEA.PA':{  // WisdomTree Europe Equity (ou Amundi MSCI Europe)
+    sectors:{'Financials':0.18,'Industrials':0.15,'Health Care':0.13,'Consumer Staples':0.09,'Materials':0.08,'Consumer Discretionary':0.08,'Energy':0.07,'Information Technology':0.07,'Utilities':0.05,'Communication Services':0.05,'Real Estate':0.01,'Other':0.04},
+    countries:{GB:0.22,FR:0.16,DE:0.13,CH:0.12,NL:0.08,SE:0.06,DK:0.04,IT:0.04,ES:0.03,Autres:0.12},
+    regions:{'Europe':1.0},
+    capi:{'Large (100–1 000 Mds $)':0.65,'Mid (10–100 Mds $)':0.30,'Small (<10 Mds $)':0.05},
+  },
+  'WPEA':{
+    sectors:{'Financials':0.18,'Industrials':0.15,'Health Care':0.13,'Consumer Staples':0.09,'Materials':0.08,'Consumer Discretionary':0.08,'Energy':0.07,'Information Technology':0.07,'Utilities':0.05,'Communication Services':0.05,'Real Estate':0.01,'Other':0.04},
+    countries:{GB:0.22,FR:0.16,DE:0.13,CH:0.12,NL:0.08,SE:0.06,DK:0.04,IT:0.04,ES:0.03,Autres:0.12},
+    regions:{'Europe':1.0},
+    capi:{'Large (100–1 000 Mds $)':0.65,'Mid (10–100 Mds $)':0.30,'Small (<10 Mds $)':0.05},
   },
 };
 
@@ -541,7 +591,7 @@ const TICKER_SUBSECTOR={
 };
 
 // ═══ TICKERS ETF CONNUS (override si asset_type incorrect en DB) ═══
-const ETF_TICKERS=new Set(['ESE.PA','ESE','PAASI.PA','PAASI','CW8','LVO.DE','IWDA','VWCE','UTI.PA','PAEEM.PA','EXA1.DE','IWDA.AS','SWDA.L','VWCE.DE','CW8.PA','PUST.PA','PUST','EDEN.PA','EDEN','CAC.PA','CAC40','STLA.PA','UST.PA','UST','WPEA.PA','WPEA','PAEEM','WPAL.PA','LYPS.DE','LCRD.PA']);
+const ETF_TICKERS=new Set(['ESE.PA','ESE','PAASI.PA','PAASI','CW8','LVO.DE','IWDA','VWCE','UTI.PA','PAEEM.PA','EXA1.DE','IWDA.AS','SWDA.L','VWCE.DE','CW8.PA','PUST.PA','PUST','CAC.PA','UST.PA','UST','WPEA.PA','WPEA','PAEEM','WPAL.PA','LYPS.DE','LCRD.PA','LCWD.PA','LCRE.PA']);
 function isETF(p){
   if(!p) return false;
   if(ETF_TICKERS.has(p.ticker)) return true;
@@ -1240,9 +1290,34 @@ function buildChartData(){
   }
 
   if(chartMode==='region'){
-    if(!drill.length)return{...groupByKey(pos,p=>RMAP[getProfile(p.ticker).country||'XX']||'Autre'),clickable:true};
-    if(drill.length===1){const filt=pos.filter(p=>(RMAP[getProfile(p.ticker).country||'XX']||'Autre')===drill[0]);return{...groupByKey(filt,p=>CNAMES[getProfile(p.ticker).country||'XX']||p.ticker),clickable:true};}
-    const filt=pos.filter(p=>(CNAMES[getProfile(p.ticker).country||'XX']||p.ticker)===drill[1]);return{...groupByKey(filt,p=>p.ticker,(t,i)=>tickerColor(t,i)),clickable:false};
+    const getRegion=ep=>ep._etfKey||(RMAP[getProfile(ep.ticker).country||'XX']||'Autre');
+    if(!drill.length){
+      const exp=explodeForMode(pos,'region');
+      const m={};exp.forEach(ep=>{const k=getRegion(ep);m[k]=(m[k]||0)+(ep.valueEur||0);});
+      const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
+      return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((_,i)=>PALETTE[i%PALETTE.length]),clickable:true};
+    }
+    if(drill.length===1){
+      const sel=drill[0];
+      // Niveau 2 : pays dans la région — non-ETFs directs + ETFs décomposés par pays
+      const expPays=explodeForMode(pos,'pays');
+      const filt=expPays.filter(ep=>{
+        const reg=ep._etfKey?null:(RMAP[getProfile(ep.ticker).country||'XX']||'Autre');
+        if(ep._isEtfSlice){
+          // Pour ETF slice pays, vérifier si le pays appartient à la région sélectionnée
+          const c=ep._etfKey; return (RMAP[c]||'Autre')===sel;
+        }
+        return reg===sel;
+      });
+      const m={};filt.forEach(ep=>{
+        const k=ep._isEtfSlice?(CNAMES[ep._etfKey]||ep._etfKey):(CNAMES[getProfile(ep.ticker).country||'XX']||ep.ticker);
+        m[k]=(m[k]||0)+(ep.valueEur||0);
+      });
+      const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
+      return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((_,i)=>PALETTE[i%PALETTE.length]),clickable:true};
+    }
+    const filt=pos.filter(p=>(CNAMES[getProfile(p.ticker).country||'XX']||p.ticker)===drill[1]);
+    return{...groupByKey(filt,p=>p.name||p.ticker,(t,i)=>tickerColor(t,i)),clickable:false};
   }
 
   if(chartMode==='pays'){
@@ -5438,8 +5513,10 @@ function _friendRows(pos){
     var pctColor=p.pnlPct!=null&&p.pnlPct>=0?'var(--green)':'var(--red)';
     var eColor=p.pnlEur!=null&&p.pnlEur>=0?'var(--green)':'var(--red)';
     return '<tr style="border-bottom:1px solid var(--border2)">'+
-      '<td style="padding:10px 8px"><div style="font-weight:600;font-size:13px">'+p.ticker+'</div>'+
-        (TICKER_SUBSECTOR[p.ticker]?'<div style="font-size:11px;color:var(--muted)">'+TICKER_SUBSECTOR[p.ticker]+'</div>':'')+'</td>'+
+      '<td style="padding:10px 8px">'+
+        '<div style="font-weight:600;font-size:13px">'+(p.name||p.ticker)+'</div>'+
+        '<div style="font-size:11px;color:var(--muted)">'+p.ticker+(TICKER_SUBSECTOR[p.ticker]?' · '+TICKER_SUBSECTOR[p.ticker]:'')+'</div>'+
+      '</td>'+
       '<td style="padding:10px 8px;text-align:right" class="mono">'+fN(p.quantity,4)+'</td>'+
       '<td style="padding:10px 8px;text-align:right" class="mono">'+_fPx(p.pruNative!=null?p.pruNative:p.pruEur,p.curr)+'</td>'+
       '<td style="padding:10px 8px;text-align:right" class="mono">'+_fPx(p.priceNative!=null?p.priceNative:p.priceEur,p.curr)+'</td>'+
@@ -5490,10 +5567,29 @@ function _friendChartData(){
   }
 
   if(mode==='region'){
-    if(!drill.length) return {...groupByKey(pos,function(p){return RMAP[getProfile(p.ticker).country||'XX']||'Autre';}),clickable:true};
-    if(drill.length===1){var filt=pos.filter(function(p){return (RMAP[getProfile(p.ticker).country||'XX']||'Autre')===drill[0];});return {...groupByKey(filt,function(p){return CNAMES[getProfile(p.ticker).country||'XX']||p.ticker;}),clickable:true};}
-    var filt2=pos.filter(function(p){return (CNAMES[getProfile(p.ticker).country||'XX']||p.ticker)===drill[1];});
-    return {...groupByKey(filt2,function(p){return p.ticker;},function(t,i){return tickerColor(t,i);}),clickable:false};
+    var getRegionF=function(ep){return ep._etfKey||(RMAP[getProfile(ep.ticker).country||'XX']||'Autre');};
+    if(!drill.length){
+      var expR=explodeForMode(pos,'region');
+      var mR={};expR.forEach(function(ep){var k=getRegionF(ep);mR[k]=(mR[k]||0)+(ep.valueEur||0);});
+      var entR=Object.entries(mR).filter(function(e){return e[1]>0;}).sort(function(a,b){return b[1]-a[1];});
+      return{labels:entR.map(function(e){return e[0];}),values:entR.map(function(e){return e[1];}),colors:entR.map(function(_,i){return PALETTE[i%PALETTE.length];}),clickable:true};
+    }
+    if(drill.length===1){
+      var selR=drill[0];
+      var expPR=explodeForMode(pos,'pays');
+      var filtR=expPR.filter(function(ep){
+        if(ep._isEtfSlice){return (RMAP[ep._etfKey]||'Autre')===selR;}
+        return (RMAP[getProfile(ep.ticker).country||'XX']||'Autre')===selR;
+      });
+      var mR2={};filtR.forEach(function(ep){
+        var k=ep._isEtfSlice?(CNAMES[ep._etfKey]||ep._etfKey):(CNAMES[getProfile(ep.ticker).country||'XX']||ep.ticker);
+        mR2[k]=(mR2[k]||0)+(ep.valueEur||0);
+      });
+      var entR2=Object.entries(mR2).filter(function(e){return e[1]>0;}).sort(function(a,b){return b[1]-a[1];});
+      return{labels:entR2.map(function(e){return e[0];}),values:entR2.map(function(e){return e[1];}),colors:entR2.map(function(_,i){return PALETTE[i%PALETTE.length];}),clickable:true};
+    }
+    var filt3=pos.filter(function(p){return (CNAMES[getProfile(p.ticker).country||'XX']||p.ticker)===drill[1];});
+    return {...groupByKey(filt3,function(p){return p.name||p.ticker;},function(t,i){return tickerColor(t,i);}),clickable:false};
   }
 
   if(mode==='pays'){
@@ -5608,8 +5704,10 @@ function _friendRowsMasked(pos,totalVal){
     var w=totalVal>0?((p.valueEur||0)/totalVal*100):0;
     var pctColor=p.pnlPct!=null&&p.pnlPct>=0?'var(--green)':'var(--red)';
     return '<tr style="border-bottom:1px solid var(--border2)">'+
-      '<td style="padding:10px 8px"><div style="font-weight:600;font-size:13px">'+p.ticker+'</div>'+
-        (TICKER_SUBSECTOR[p.ticker]?'<div style="font-size:11px;color:var(--muted)">'+TICKER_SUBSECTOR[p.ticker]+'</div>':'')+'</td>'+
+      '<td style="padding:10px 8px">'+
+        '<div style="font-weight:600;font-size:13px">'+(p.name||p.ticker)+'</div>'+
+        '<div style="font-size:11px;color:var(--muted)">'+p.ticker+(TICKER_SUBSECTOR[p.ticker]?' · '+TICKER_SUBSECTOR[p.ticker]:'')+'</div>'+
+      '</td>'+
       '<td style="padding:10px 8px;text-align:right" class="mono">'+w.toFixed(1)+'%</td>'+
       '<td style="padding:10px 8px;text-align:right;color:'+pctColor+'" class="mono">'+(p.pnlPct!=null?(p.pnlPct>=0?'+':'')+p.pnlPct.toFixed(1)+'%':'—')+'</td>'+
       '</tr>';
