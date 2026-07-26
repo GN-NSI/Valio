@@ -532,6 +532,88 @@ const ETF_BREAKDOWN={
   },
 };
 
+
+// ═══ MAPPING SEGMENTS → ACTIVITÉS RÉELLES ═══
+// Normalise les noms de segments saisis manuellement en catégories d'activité
+// Ex: "Google Cloud" + "AWS" + "Intelligent Cloud" → "Cloud & Infrastructure"
+const SEGMENT_ACTIVITY_MAP=[
+  // Cloud & Infrastructure
+  {re:/cloud|aws|azure|infrastructure|data ?cent/i, act:'Cloud & Infrastructure'},
+  // Publicité
+  {re:/ad|advertis|publicit|family of apps|search|youtube|marketing/i, act:'Publicité & Search'},
+  // E-commerce & Retail
+  {re:/e-?commerce|retail|store|online|marketplace|north america|international/i, act:'E-commerce & Retail'},
+  // Logiciels & Productivité
+  {re:/office|productiv|software|logiciel|365|workspace|licens|dynamics|business process/i, act:'Logiciels & Productivité'},
+  // Gaming & Divertissement
+  {re:/gaming|xbox|game|entertainment|jeu|media|streaming|music/i, act:'Gaming & Divertissement'},
+  // Semi-conducteurs & Hardware
+  {re:/semi|chip|processor|gpu|hardware|device|surface|foundry|wafer|memory|dram|nand/i, act:'Semi-conducteurs & Hardware'},
+  // Paiements & Fintech
+  {re:/payment|paiement|fintech|transaction|merchant|card|acquiring/i, act:'Paiements & Fintech'},
+  // Abonnements & Services
+  {re:/subscription|abonnement|service|membership|prime|saas/i, act:'Abonnements & Services'},
+  // R&D / Métavers / Paris technologiques
+  {re:/reality labs|metaverse|other bets|moonshot|innovation|research|waymo|autre pari/i, act:'Paris technologiques (R&D)'},
+  // Automobile / Mobilité
+  {re:/automotive|vehicle|mobility|ride|delivery|freight|logistics/i, act:'Mobilité & Logistique'},
+  // Santé & Pharma
+  {re:/pharma|health|medical|vaccine|drug|thérap/i, act:'Santé & Pharma'},
+  // Énergie
+  {re:/energy|oil|gas|renewable|pétrole|électric/i, act:'Énergie'},
+];
+function _segToActivity(segName){
+  if(!segName) return 'Autre';
+  for(const m of SEGMENT_ACTIVITY_MAP){ if(m.re.test(segName)) return m.act; }
+  return segName; // Si aucun mapping, on garde le nom du segment tel quel
+}
+
+// Cache des segments utilisateur : {ticker: [{name, value, pct}]}
+let USER_SEGMENTS={};
+async function loadUserSegments(){
+  const u=getUser(); if(!u) return;
+  try{
+    const rows=await dbGet('earnings_manual','user_id=eq.'+u.id+'&select=ticker,period,segments&order=period.desc');
+    if(!rows||!rows.length) return;
+    const byTicker={};
+    rows.forEach(r=>{
+      if(!r.segments||!r.segments.length) return;
+      // Garde uniquement la période la plus récente par ticker (rows déjà triés desc)
+      if(byTicker[r.ticker]) return;
+      const total=r.segments.reduce((s,seg)=>s+(seg.value||0),0);
+      if(total<=0) return;
+      byTicker[r.ticker]=r.segments.map(seg=>({
+        name:seg.name, value:seg.value, pct:seg.value/total
+      }));
+    });
+    USER_SEGMENTS=byTicker;
+  }catch(e){ console.error('loadUserSegments:',e); }
+}
+
+// Explode positions par activité réelle (segments utilisateur)
+function explodeByActivity(positions){
+  const result=[];
+  positions.forEach(p=>{
+    const segs=USER_SEGMENTS[p.ticker];
+    if(!segs||!segs.length||!(p.valueEur>0)){
+      // Pas de segments saisis → utiliser le sous-secteur ou le secteur classique
+      const fallback=TICKER_SUBSECTOR[p.ticker]||getProfile(p.ticker).sector||'Non défini';
+      result.push({...p,_actKey:fallback,_isActSlice:false});
+      return;
+    }
+    segs.forEach(seg=>{
+      result.push({
+        ...p,
+        _actKey:_segToActivity(seg.name),
+        _actSegName:seg.name,
+        _isActSlice:true,
+        valueEur:p.valueEur*seg.pct
+      });
+    });
+  });
+  return result;
+}
+
 // Explode ETF positions into sub-positions selon la dimension du graphique
 function explodeForMode(positions, mode){
   const result=[];
@@ -783,6 +865,7 @@ async function bootstrap(){
     fetch(API+'?symbol=EURTWD%3DX',{signal:AbortSignal.timeout(5000)}).then(r=>r.json()).then(d=>{if(d.price)S.eurTwd=d.price;}),
   ]).catch(()=>{});
   try{await loadManualPrices();}catch(e){}
+  try{await loadUserSegments();}catch(e){}  // Segments CA pour le mode 'Par activité réelle'
 }
 async function refreshData(){showToast('🔄 Actualisation…');S.prices={};S.profiles={};S.fundamentals={};S.enrichedPos=[];S.portfolioRendered=false;document.getElementById('page-portfolio').innerHTML='';try{await bootstrap();}catch(e){console.error('Refresh error:',e);}navigate(S.page);}
 
@@ -964,6 +1047,7 @@ async function renderPortfolio(){
                 <option value="enveloppe">Par enveloppe</option>
                 <option value="type">Stock picking / ETF</option>
                 <option value="secteur">Par secteur</option>
+                <option value="activite">Par activité réelle 🎯</option>
                 <option value="region">Par région 🔍</option>
                 <option value="pays">Par pays</option>
                 <option value="capi">Par capitalisation</option>
@@ -1289,6 +1373,25 @@ function buildChartData(){
     return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((e,i)=>tickerColor(e[0],i)),clickable:false};
   }
 
+  if(chartMode==='activite'){
+    // Répartition par activité réelle basée sur les segments de CA saisis manuellement
+    const exp=explodeByActivity(pos);
+    if(drill.length===0){
+      const m={};exp.forEach(ep=>{const k=ep._actKey||'Autre';m[k]=(m[k]||0)+(ep.valueEur||0);});
+      const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
+      return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((_,i)=>PALETTE[i%PALETTE.length]),clickable:true};
+    }
+    // Niveau 2 : entreprises dans l'activité sélectionnée
+    const sel=drill[0];
+    const filt=exp.filter(ep=>(ep._actKey||'Autre')===sel);
+    const m={};filt.forEach(ep=>{
+      const k=ep._isActSlice?((ep.name||ep.ticker)+' · '+ep._actSegName):(ep.name||ep.ticker);
+      m[k]=(m[k]||0)+(ep.valueEur||0);
+    });
+    const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
+    return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((e,i)=>tickerColor(e[0].split(' ·')[0],i)),clickable:false};
+  }
+
   if(chartMode==='region'){
     const getRegion=ep=>ep._etfKey||(RMAP[getProfile(ep.ticker).country||'XX']||'Autre');
     if(!drill.length){
@@ -1411,7 +1514,22 @@ function handleDrill(label){
   }
 }
 
-function changeChartMode(mode){chartMode=mode;chartDrill=[];renderDonut();}
+function changeChartMode(mode){
+  chartMode=mode;chartDrill=[];
+  // Le mode 'activité réelle' a besoin des segments — les charger à la volée si absents
+  if(mode==='activite'&&!Object.keys(USER_SEGMENTS).length){
+    const ld=document.getElementById('chart-loading'); if(ld)ld.style.display='inline-block';
+    loadUserSegments().then(function(){
+      if(ld)ld.style.display='none';
+      renderDonut();
+      if(!Object.keys(USER_SEGMENTS).length){
+        showToast('Aucun segment saisi — ajoute-les via « Saisir mes résultats » sur une fiche entreprise');
+      }
+    });
+    return;
+  }
+  renderDonut();
+}
 
 function toggleSidebar(){
   const sb=document.getElementById('sidebar');
@@ -1628,8 +1746,8 @@ function renderWatchlistTable(){
       '<td>'+priceStr+'</td>'+
       '<td style="text-align:left">'+tgtCell+'</td>'+
       ['per','fwdpe','peg','pocf','marge','ca1a','cafwd','eps1a','epsfwd','debt'].map(function(k){return '<td id="wr-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
-      '<td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="editTargets(\''+w.id+'\')" title="Définir les cibles">🎯</button>'+
-      '<button class="btn btn-danger btn-sm" onclick="removeWatch(this)" data-id="'+w.id+'" data-ticker="'+w.ticker+'">✕</button></td>'+
+      '<td style="white-space:nowrap;position:sticky;right:0;background:var(--card);box-shadow:-6px 0 12px -4px rgba(0,0,0,.5);z-index:2"><button class="btn btn-ghost btn-sm" onclick="editTargets(\''+w.id+'\')" title="Définir les cibles">🎯</button>'+
+      '<button class="btn btn-danger btn-sm" onclick="removeWatch(this)" data-id="'+w.id+'" data-ticker="'+w.ticker+'" title="Retirer de la watchlist">✕</button></td>'+
       '</tr>';
   }).join('');
   el.innerHTML='<div class="card"><div class="tbl-wrap"><table>'+
@@ -1645,7 +1763,7 @@ function renderWatchlistTable(){
     thSort('CA 1A','ca1a',wlSort,'sortWL')+
     thSort('EPS 1A','eps1a',wlSort,'sortWL')+thSort('EPS Fwd','epsfwd',wlSort,'sortWL')+
     thSort('D/EBITDA','debt',wlSort,'sortWL')+
-    '<th></th>'+
+    '<th style="position:sticky;right:0;background:var(--card);box-shadow:-6px 0 12px -4px rgba(0,0,0,.5);z-index:3;min-width:90px">Actions</th>'+
     '</tr></thead><tbody>'+rows+'</tbody></table></div></div>'+
     '<div style="margin-top:12px;display:flex;justify-content:flex-end">'+
     '<button class="btn btn-primary" onclick="loadWatchRatios()">⟳ Charger les ratios</button></div>';
