@@ -547,7 +547,7 @@ const SEGMENT_ACTIVITY_MAP=[
   // ③ Publicité & Social — avant E-commerce pour capter "Search", "Ads"
   {re:/\bad\b|advertis|publicit|family of apps|\bsearch\b|\byoutube\b|social network|réseau social|display|tiktok|digital marketing/i, major:'Publicité & Social'},
   // ④ E-commerce & Retail — "U.S.", "North America", "International" d'Amazon inclus
-  {re:/e-?commerce|\bretail\b|\bstore\b|\bonline\b|marketplace|north america|\bu\.?s\.?\b|\busa\b|états-unis|united states|international retail|online sales/i, major:'E-commerce & Retail'},
+  {re:/e-?commerce|\bretail\b|\bstore\b|\bonline\b|marketplace|north america|\bu\.?s\.?\b|\busa\b|états-unis|united states|international retail|online sales|third.?party seller|seller services|third.?party/i, major:'E-commerce & Retail'},
   // ⑤ Logiciels & Productivité
   {re:/\boffice\b|productiv|\bsoftware\b|logiciel|\b365\b|workspace|licens|dynamics|business process|enterprise app|\bsaas\b/i, major:'Logiciels & Productivité'},
   // ⑥ Gaming & Divertissement
@@ -589,6 +589,7 @@ const SUBSECTOR_TO_MAJOR={
   // Cloud & Infrastructure
   'Cloud & Logiciels':'Cloud & Infrastructure',
   'Infrastructure Datacenter':'Cloud & Infrastructure',
+  'Cloud GPU & IA (Nebius)':'Cloud & Infrastructure',  // Nebius
   // Publicité & Social — Reddit = réseaux sociaux monétisés par pub
   'Réseaux sociaux':'Publicité & Social',
   'Recherche & Cloud':'Publicité & Search',  // Google = 77% pub
@@ -691,6 +692,8 @@ const TICKER_SUBSECTOR={
   'XFAB.PA':'Fonderies (Fabrication)',
   NVTS:'Semi puissance (GaN)',
   ASML:'Lithographie',
+  NBIS:'Cloud GPU & IA (Nebius)',  // Nebius = cloud GPU pour IA, ex-Yandex
+  RDDT:'Réseaux sociaux',         // Reddit = pub display/social → Publicité & Social
   // Cloud & Software
   MSFT:'Cloud & Logiciels',
   // Communication & Réseaux sociaux
@@ -1706,6 +1709,7 @@ function renderRatios(){
 
 var wlSort={col:null,dir:'desc'};
 var scSort={col:'poids',dir:'desc'};
+var _scrShowWatch=true; // Toggle watchlist dans le screener
 
 function sortWL(col){
   if(wlSort.col===col)wlSort.dir=wlSort.dir==='desc'?'asc':'desc';
@@ -1917,12 +1921,21 @@ async function removeWatch(btn){var id=btn.dataset.id||btn;var ticker=btn.datase
 }
 
 // ═══ SCREENER (Portefeuille + Watchlist combinés) ═══
+window._toggleScrWatch=function(){_scrShowWatch=!_scrShowWatch;renderScreener();};
+
 async function renderScreener(){
   var pg=document.getElementById('page');
-  pg.innerHTML='<div style="margin-bottom:22px">'+
-    '<h2 style="font-size:18px;font-weight:700">Screener</h2>'+
-    '<p style="color:var(--muted);font-size:13px;margin-top:3px">Portefeuille + Watchlist — tous tes titres, triables par ratio</p>'+
-    '</div><div id="sc-content"><div style="text-align:center;padding:40px"><div class="spinner"></div></div></div>';
+  var _wBg=_scrShowWatch?'rgba(245,158,11,.15)':'var(--bg2)';
+  var _wColor=_scrShowWatch?'#f59e0b':'var(--muted)';
+  pg.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:22px">'+
+    '<div>'+
+      '<h2 style="font-size:18px;font-weight:700">Screener</h2>'+
+      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
+    '</div>'+
+    '<button onclick="_toggleScrWatch()" style="padding:6px 14px;border:1px solid var(--border2);border-radius:20px;background:'+_wBg+';color:'+_wColor+';font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">'+
+      '⭐ Watchlist — '+(_scrShowWatch?'<b>ON</b>':'OFF')+
+    '</button>'+
+  '</div><div id="sc-content"><div style="text-align:center;padding:40px"><div class="spinner"></div></div></div>';
 
   // Charger la watchlist si nécessaire, avec timeout de sécurité
   if(!watchlistItems.length){
@@ -1932,7 +1945,8 @@ async function renderScreener(){
 
   var pfPos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p);});
   var wlOnly=watchlistItems.filter(function(w){return !pfPos.find(function(p){return p.ticker===w.ticker;});});
-  var allItems=sortItems(pfPos.concat(wlOnly.map(function(w){return {ticker:w.ticker,name:w.name,_isWatch:true};})),scSort);
+  var wlMapped=_scrShowWatch?wlOnly.map(function(w){return {ticker:w.ticker,name:w.name,_isWatch:true};}):[];
+  var allItems=sortItems(pfPos.concat(wlMapped),scSort);
 
   // Charger les prix manquants pour les items de la watchlist
   await Promise.all(allItems.filter(function(p){return p._isWatch && !S.prices[p.ticker];}).map(async function(p){
@@ -3352,7 +3366,15 @@ var TICKER_SEGMENTS = {
   NVDA_FY2026:['Data Center','Gaming','Professional Visualization','Automotive','OEM & Other'],
   MSFT:['Productivity & Business Processes','Intelligent Cloud','More Personal Computing'],
   GOOGL:['Google Search & Other','YouTube Ads','Google Network','Subscriptions Platforms & Devices','Google Cloud','Other Bets'],
-  AMZN:['North America','International','AWS'],
+  AMZN:[
+    'Online stores',             // Ventes directes 1P
+    'Physical stores',           // Whole Foods & Amazon Go
+    'Third-party seller services', // Marketplace 3P
+    'Advertising services',      // Pub display & sponsored
+    'Subscription services',     // Prime, Kindle Unlimited…
+    'AWS',                       // Cloud & Infrastructure
+    'Other',                     // Divers
+  ],
   META:['Family of Apps','Reality Labs'],
   AAPL:['iPhone','Mac','iPad','Wearables & Accessories','Services'],
   TSM:['Advanced','Specialty'],
