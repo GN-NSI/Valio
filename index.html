@@ -582,6 +582,23 @@ const TICKER_ACTIVITY_OVERRIDE={
   'SNAP':'Publicité & Social',
   'PINS':'Publicité & Social',
   'SPOT':'Abonnements & Services',
+  'NVDA':'Hardware IA & Semi',    // Nvidia VEND des GPU aux clouds — il n'est PAS un cloud
+  'NVDA_FY2026':'Hardware IA & Semi',
+};
+
+// ── Sous-groupes dans le segment Cloud & Infrastructure ─────────────────────
+// Niveau 2 du drill-down pour le Cloud uniquement
+const CLOUD_SUBGROUP={
+  // Hyperscalers — fournisseurs cloud établis, multi-milliards de $$
+  'Amazon':'Hyperscalers','AMZN':'Hyperscalers',
+  'Alphabet':'Hyperscalers','GOOGL':'Hyperscalers','GOOG':'Hyperscalers',
+  'Microsoft':'Hyperscalers','MSFT':'Hyperscalers',
+  'Oracle':'Hyperscalers','ORCL':'Hyperscalers',
+  'IBM':'Hyperscalers',
+  // Néo Clouds — cloud IA nouvelle génération, spécialisé GPU
+  'Nebius':'Néo Clouds','NBIS':'Néo Clouds',
+  'CoreWeave':'Néo Clouds',
+  'Lambda Labs':'Néo Clouds',
 };
 
 const SUBSECTOR_TO_MAJOR={
@@ -1443,30 +1460,52 @@ function buildChartData(){
   }
 
   if(chartMode==='activite'){
-    // Répartition par activité réelle — 3 niveaux d'entonnoir
+    // ── Répartition par activité réelle — entonnoir 3 niveaux ───────────────
+    // Niv 1 : catégories majeures (Cloud, Hardware IA, Pub, E-commerce…)
+    // Niv 2 : entreprises dans la catégorie (Meta, Alphabet, Reddit…)
+    //         sauf pour Cloud → sous-groupes (Hyperscalers / Néo Clouds)
+    // Niv 3 : segments de l'entreprise (Google Search, YouTube, AWS…)
+    //         sauf pour Cloud niveau 2 → entreprises dans le sous-groupe
     const exp=explodeByActivity(pos);
     if(drill.length===0){
-      // Niveau 1 : grandes catégories d'activité
       const m={};exp.forEach(ep=>{const k=ep._actKey||'Autre';m[k]=(m[k]||0)+(ep.valueEur||0);});
       const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
       return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((_,i)=>PALETTE[i%PALETTE.length]),clickable:true};
     }
     if(drill.length===1){
-      // Niveau 2 : sous-catégories dans la grande catégorie sélectionnée
       const sel=drill[0];
       const filt=exp.filter(ep=>(ep._actKey||'Autre')===sel);
       const m={};
-      filt.forEach(ep=>{const k=ep._actSubKey||ep._actKey;m[k]=(m[k]||0)+(ep.valueEur||0);});
+      filt.forEach(ep=>{
+        let k;
+        if(sel==='Cloud & Infrastructure'){
+          // Cloud : sous-groupes Hyperscalers / Néo Clouds
+          k=CLOUD_SUBGROUP[ep.name]||CLOUD_SUBGROUP[ep.ticker]||'Autres Clouds';
+        } else {
+          // Toutes les autres catégories : nom de l'entreprise
+          k=ep.name||ep.ticker;
+        }
+        m[k]=(m[k]||0)+(ep.valueEur||0);
+      });
       const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
       return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((_,i)=>PALETTE[i%PALETTE.length]),clickable:true};
     }
-    // Niveau 3 : entreprises dans la sous-catégorie sélectionnée
     const [selMaj,selSub]=drill;
-    const filt=exp.filter(ep=>(ep._actKey||'Autre')===selMaj&&(ep._actSubKey||ep._actKey)===selSub);
+    const filtMaj=exp.filter(ep=>(ep._actKey||'Autre')===selMaj);
     const m={};
-    filt.forEach(ep=>{const k=ep.name||ep.ticker;m[k]=(m[k]||0)+(ep.valueEur||0);});
+    if(selMaj==='Cloud & Infrastructure'){
+      // Niv 3 Cloud : entreprises dans le sous-groupe (Hyperscalers ou Néo Clouds)
+      filtMaj.filter(ep=>(CLOUD_SUBGROUP[ep.name]||CLOUD_SUBGROUP[ep.ticker]||'Autres Clouds')===selSub)
+        .forEach(ep=>{const k=ep.name||ep.ticker;m[k]=(m[k]||0)+(ep.valueEur||0);});
+    } else {
+      // Niv 3 autres : segments de l'entreprise sélectionnée
+      filtMaj.filter(ep=>(ep.name||ep.ticker)===selSub)
+        .forEach(ep=>{const k=ep._actSubKey||ep._actKey;m[k]=(m[k]||0)+(ep.valueEur||0);});
+    }
     const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
-    return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((e,i)=>tickerColor(e[0],i)),clickable:false};
+    return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),
+      colors:ent.map((e,i)=>tickerColor(e[0],i)),
+      clickable:!(selMaj==='Cloud & Infrastructure'&&drill.length===2&&ent.length<=1)};
   }
 
   if(chartMode==='region'){
