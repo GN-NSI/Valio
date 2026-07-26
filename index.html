@@ -536,37 +536,82 @@ const ETF_BREAKDOWN={
 // ═══ MAPPING SEGMENTS → ACTIVITÉS RÉELLES ═══
 // Normalise les noms de segments saisis manuellement en catégories d'activité
 // Ex: "Google Cloud" + "AWS" + "Intelligent Cloud" → "Cloud & Infrastructure"
+// ═══ MAPPING SEGMENTS → ACTIVITÉS RÉELLES ═══
+// 3 niveaux d'entonnoir : Catégorie majeure → Sous-catégorie → Entreprises
+// Ordre IMPORTANT : cloud avant hardware pour éviter que "Google Cloud" → hardware
 const SEGMENT_ACTIVITY_MAP=[
-  // Cloud & Infrastructure
-  {re:/cloud|aws|azure|infrastructure|data ?cent/i, act:'Cloud & Infrastructure'},
-  // Publicité
-  {re:/ad|advertis|publicit|family of apps|search|youtube|marketing/i, act:'Publicité & Search'},
-  // E-commerce & Retail
-  {re:/e-?commerce|retail|store|online|marketplace|north america|international/i, act:'E-commerce & Retail'},
-  // Logiciels & Productivité
-  {re:/office|productiv|software|logiciel|365|workspace|licens|dynamics|business process/i, act:'Logiciels & Productivité'},
-  // Gaming & Divertissement
-  {re:/gaming|xbox|game|entertainment|jeu|media|streaming|music/i, act:'Gaming & Divertissement'},
-  // Semi-conducteurs & Hardware
-  {re:/semi|chip|processor|gpu|hardware|device|surface|foundry|wafer|memory|dram|nand/i, act:'Semi-conducteurs & Hardware'},
-  // Paiements & Fintech
-  {re:/payment|paiement|fintech|transaction|merchant|card|acquiring/i, act:'Paiements & Fintech'},
-  // Abonnements & Services
-  {re:/subscription|abonnement|service|membership|prime|saas/i, act:'Abonnements & Services'},
-  // R&D / Métavers / Paris technologiques
-  {re:/reality labs|metaverse|other bets|moonshot|innovation|research|waymo|autre pari/i, act:'Paris technologiques (R&D)'},
-  // Automobile / Mobilité
-  {re:/automotive|vehicle|mobility|ride|delivery|freight|logistics/i, act:'Mobilité & Logistique'},
-  // Santé & Pharma
-  {re:/pharma|health|medical|vaccine|drug|thérap/i, act:'Santé & Pharma'},
-  // Énergie
-  {re:/energy|oil|gas|renewable|pétrole|électric/i, act:'Énergie'},
+  // ① Cloud & Infrastructure (hyperscalers, Azure, AWS, Google Cloud…)
+  {re:/\bcloud\b|\baws\b|azure|intelligent cloud|infrastructure|data ?cent(er|re)|server farm/i, major:'Cloud & Infrastructure'},
+  // ② Hardware IA & Semi — GPU, mémoires, fonderies, photonique (Nvidia = hardware, PAS cloud)
+  {re:/\bgpu\b|\bchip\b|processor|\bhardware\b|wafer|foundry|fonderie|\bmemory\b|\bdram\b|\bnand\b|\bhbm\b|photon|litho|accelerator|\bfpga\b|semi-?cond|equipement semi/i, major:'Hardware IA & Semi'},
+  // ③ Publicité & Social — avant E-commerce pour capter "Search", "Ads"
+  {re:/\bad\b|advertis|publicit|family of apps|\bsearch\b|\byoutube\b|social network|réseau social|display|tiktok|digital marketing/i, major:'Publicité & Social'},
+  // ④ E-commerce & Retail — "U.S.", "North America", "International" d'Amazon inclus
+  {re:/e-?commerce|\bretail\b|\bstore\b|\bonline\b|marketplace|north america|\bu\.?s\.?\b|\busa\b|états-unis|united states|international retail|online sales/i, major:'E-commerce & Retail'},
+  // ⑤ Logiciels & Productivité
+  {re:/\boffice\b|productiv|\bsoftware\b|logiciel|\b365\b|workspace|licens|dynamics|business process|enterprise app|\bsaas\b/i, major:'Logiciels & Productivité'},
+  // ⑥ Gaming & Divertissement
+  {re:/gaming|\bxbox\b|\bgame\b|entertainment|\bjeu\b|\bmedia\b|streaming|\bmusic\b/i, major:'Gaming & Divertissement'},
+  // ⑦ Mobilité & Services
+  {re:/automotive|vehicle|mobility|\bride\b|delivery|freight|logistics|mobilit|transport/i, major:'Mobilité & Services'},
+  // ⑧ Financials — paiements, crypto, data financière, assurance
+  {re:/payment|paiement|fintech|transaction|merchant|\bcard\b|acquiring|banking|insurance|asset manag|brokerage|lending|credit/i, major:'Financials'},
+  // ⑨ Paris technologiques (R&D long terme)
+  {re:/reality labs|metaverse|other bets|moonshot|\bwaymo\b|paris techno|r&d|research and dev/i, major:'Paris technologiques (R&D)'},
+  // ⑩ Santé & Biotech
+  {re:/pharma|health|medical|vaccine|\bdrug\b|thérap|biotech|diagnostic/i, major:'Santé & Biotech'},
+  // ⑪ Énergie
+  {re:/\benergy\b|\boil\b|\bgas\b|renewable|pétrole|électric/i, major:'Énergie'},
+  // ⑫ Abonnements
+  {re:/subscription|abonnement|membership|\bprime\b/i, major:'Abonnements & Services'},
 ];
+// Retourne {major, detail} pour un nom de segment saisi par l'utilisateur
 function _segToActivity(segName){
-  if(!segName) return 'Autre';
-  for(const m of SEGMENT_ACTIVITY_MAP){ if(m.re.test(segName)) return m.act; }
-  return segName; // Si aucun mapping, on garde le nom du segment tel quel
+  if(!segName) return {major:'Autre',detail:null};
+  for(const m of SEGMENT_ACTIVITY_MAP){ if(m.re.test(segName)) return {major:m.major,detail:null}; }
+  return {major:segName,detail:null}; // Pas de mapping → garde le nom tel quel
 }
+
+// Mapping TICKER_SUBSECTOR → Catégorie majeure (pour positions sans segments)
+// Permet à Nvidia, SK Hynix etc. de tomber dans "Hardware IA & Semi" et non "Information Technology"
+const SUBSECTOR_TO_MAJOR={
+  // Hardware IA & Semi (tous les semis/chipmakers = Hardware, pas Cloud)
+  'GPU & Accélérateurs IA':'Hardware IA & Semi',
+  'Fonderies (Fabrication)':'Hardware IA & Semi',
+  'Mémoires (HBM / DRAM)':'Hardware IA & Semi',
+  'Mémoires (DRAM/NAND)':'Hardware IA & Semi',
+  'Équipements semi':'Hardware IA & Semi',
+  'Tests & Mesure semi':'Hardware IA & Semi',
+  'Photonique & Lasers (IA)':'Hardware IA & Semi',
+  'Semi spécialisés (RF/mmWave)':'Hardware IA & Semi',
+  'Semi puissance (GaN)':'Hardware IA & Semi',
+  'Lithographie':'Hardware IA & Semi',
+  // Cloud & Infrastructure
+  'Cloud & Logiciels':'Cloud & Infrastructure',
+  'Infrastructure Datacenter':'Cloud & Infrastructure',
+  // Publicité & Social — Reddit = réseaux sociaux monétisés par pub
+  'Réseaux sociaux':'Publicité & Social',
+  'Recherche & Cloud':'Publicité & Search',  // Google = 77% pub
+  // E-commerce & Voyage
+  'E-commerce & Cloud (AWS)':'E-commerce & Retail',  // sera splitté via segments Amazon
+  'Tourisme en ligne':'Voyage & Booking',
+  // Mobilité
+  'Mobilité à la demande':'Mobilité & Services',
+  // Financials — regroupé : paiements, crypto, data, banques
+  'Data & Notation financière':'Financials',
+  'Paiements (Réseau)':'Financials',
+  'Crypto-exchange':'Financials',
+  'Brokerage':'Financials',
+  'Banque universelle':'Financials',
+  'Gaz industriels & Santé':'Santé & Industrie',
+  // Consumer
+  'Luxe & Mode':'Luxe & Consumer',
+  'Luxe & Cosmétiques':'Luxe & Consumer',
+  'Pharma & Vaccins':'Santé & Biotech',
+  'Pétrole & Énergies':'Énergie',
+  'Eau & Déchets':'Utilities & Infra',
+  'Conception de cuves GNL':'Utilities & Infra',
+};
 
 // Cache des segments utilisateur : {ticker: [{name, value, pct}]}
 let USER_SEGMENTS={};
@@ -578,38 +623,40 @@ async function loadUserSegments(){
     const byTicker={};
     rows.forEach(r=>{
       if(!r.segments||!r.segments.length) return;
-      // Garde uniquement la période la plus récente par ticker (rows déjà triés desc)
-      if(byTicker[r.ticker]) return;
+      if(byTicker[r.ticker]) return; // Garde la période la plus récente
       const total=r.segments.reduce((s,seg)=>s+(seg.value||0),0);
       if(total<=0) return;
-      byTicker[r.ticker]=r.segments.map(seg=>({
-        name:seg.name, value:seg.value, pct:seg.value/total
-      }));
+      byTicker[r.ticker]=r.segments.map(seg=>({name:seg.name,value:seg.value,pct:seg.value/total}));
     });
     USER_SEGMENTS=byTicker;
   }catch(e){ console.error('loadUserSegments:',e); }
 }
 
-// Explode positions par activité réelle (segments utilisateur)
+// Décompose les positions par activité réelle — structure 3 niveaux :
+//   _actKey   = catégorie majeure  (ex: "Hardware IA & Semi")
+//   _actSubKey = sous-catégorie     (ex: "GPU & Accélérateurs IA" ou nom du segment)
 function explodeByActivity(positions){
   const result=[];
   positions.forEach(p=>{
     const segs=USER_SEGMENTS[p.ticker];
-    if(!segs||!segs.length||!(p.valueEur>0)){
-      // Pas de segments saisis → utiliser le sous-secteur ou le secteur classique
-      const fallback=TICKER_SUBSECTOR[p.ticker]||getProfile(p.ticker).sector||'Non défini';
-      result.push({...p,_actKey:fallback,_isActSlice:false});
-      return;
-    }
-    segs.forEach(seg=>{
-      result.push({
-        ...p,
-        _actKey:_segToActivity(seg.name),
-        _actSegName:seg.name,
-        _isActSlice:true,
-        valueEur:p.valueEur*seg.pct
+    if(segs&&segs.length&&(p.valueEur>0)){
+      // Segments saisis manuellement → décomposition fine par segment de CA
+      segs.forEach(seg=>{
+        const {major}=_segToActivity(seg.name);
+        result.push({
+          ...p,
+          _actKey:major,          // catégorie majeure pour le niveau 1
+          _actSubKey:seg.name,    // nom du segment original pour le niveau 2
+          _isActSlice:true,
+          valueEur:p.valueEur*seg.pct
+        });
       });
-    });
+    } else {
+      // Pas de segments → fallback TICKER_SUBSECTOR → SUBSECTOR_TO_MAJOR
+      const sub=TICKER_SUBSECTOR[p.ticker];
+      const major=sub?((SUBSECTOR_TO_MAJOR[sub])||sub):(SUBSECTOR_TO_MAJOR[getProfile(p.ticker).sector||'']||getProfile(p.ticker).sector||'Non défini');
+      result.push({...p,_actKey:major,_actSubKey:sub||major,_isActSlice:false});
+    }
   });
   return result;
 }
@@ -640,6 +687,7 @@ const TICKER_SUBSECTOR={
   SIV:'Semi spécialisés (RF/mmWave)',
   'SIVE.ST':'Photonique & Lasers (IA)',
   '005930.KS':'Mémoires (HBM / DRAM)',
+  '000660.KS':'Mémoires (HBM / DRAM)',  // SK Hynix — spécialiste HBM pour GPU IA
   'XFAB.PA':'Fonderies (Fabrication)',
   NVTS:'Semi puissance (GaN)',
   ASML:'Lithographie',
@@ -1374,22 +1422,30 @@ function buildChartData(){
   }
 
   if(chartMode==='activite'){
-    // Répartition par activité réelle basée sur les segments de CA saisis manuellement
+    // Répartition par activité réelle — 3 niveaux d'entonnoir
     const exp=explodeByActivity(pos);
     if(drill.length===0){
+      // Niveau 1 : grandes catégories d'activité
       const m={};exp.forEach(ep=>{const k=ep._actKey||'Autre';m[k]=(m[k]||0)+(ep.valueEur||0);});
       const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
       return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((_,i)=>PALETTE[i%PALETTE.length]),clickable:true};
     }
-    // Niveau 2 : entreprises dans l'activité sélectionnée
-    const sel=drill[0];
-    const filt=exp.filter(ep=>(ep._actKey||'Autre')===sel);
-    const m={};filt.forEach(ep=>{
-      const k=ep._isActSlice?((ep.name||ep.ticker)+' · '+ep._actSegName):(ep.name||ep.ticker);
-      m[k]=(m[k]||0)+(ep.valueEur||0);
-    });
+    if(drill.length===1){
+      // Niveau 2 : sous-catégories dans la grande catégorie sélectionnée
+      const sel=drill[0];
+      const filt=exp.filter(ep=>(ep._actKey||'Autre')===sel);
+      const m={};
+      filt.forEach(ep=>{const k=ep._actSubKey||ep._actKey;m[k]=(m[k]||0)+(ep.valueEur||0);});
+      const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
+      return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((_,i)=>PALETTE[i%PALETTE.length]),clickable:true};
+    }
+    // Niveau 3 : entreprises dans la sous-catégorie sélectionnée
+    const [selMaj,selSub]=drill;
+    const filt=exp.filter(ep=>(ep._actKey||'Autre')===selMaj&&(ep._actSubKey||ep._actKey)===selSub);
+    const m={};
+    filt.forEach(ep=>{const k=ep.name||ep.ticker;m[k]=(m[k]||0)+(ep.valueEur||0);});
     const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
-    return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((e,i)=>tickerColor(e[0].split(' ·')[0],i)),clickable:false};
+    return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((e,i)=>tickerColor(e[0],i)),clickable:false};
   }
 
   if(chartMode==='region'){
