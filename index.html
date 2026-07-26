@@ -549,7 +549,7 @@ const SEGMENT_ACTIVITY_MAP=[
   // ④ E-commerce & Retail — "U.S.", "North America", "International" d'Amazon inclus
   {re:/e-?commerce|\bretail\b|\bstore\b|\bonline\b|marketplace|north america|\bu\.?s\.?\b|\busa\b|états-unis|united states|international retail|online sales|third.?party seller|seller services|third.?party/i, major:'E-commerce & Retail'},
   // ⑤ Logiciels & Productivité
-  {re:/\boffice\b|productiv|\bsoftware\b|logiciel|\b365\b|workspace|licens|dynamics|business process|enterprise app|\bsaas\b/i, major:'Logiciels & Productivité'},
+  {re:/\boffice\b|productiv|\bsoftware\b|logiciel|\b365\b|workspace|licens|dynamics|business process|enterprise app|\bsaas\b|more personal computing|personal computing|windows|surface|\bdevices\b/i, major:'Logiciels & Productivité'},
   // ⑥ Gaming & Divertissement
   {re:/gaming|\bxbox\b|\bgame\b|entertainment|\bjeu\b|\bmedia\b|streaming|\bmusic\b/i, major:'Gaming & Divertissement'},
   // ⑦ Mobilité & Services
@@ -574,6 +574,16 @@ function _segToActivity(segName){
 
 // Mapping TICKER_SUBSECTOR → Catégorie majeure (pour positions sans segments)
 // Permet à Nvidia, SK Hynix etc. de tomber dans "Hardware IA & Semi" et non "Information Technology"
+// ── Override par ticker : force TOUS les segments dans une catégorie unique ──
+// Utile quand les segments sont géographiques (U.S / International) mais que l'activité
+// est toujours la même (ex: Reddit = 100% pub quelle que soit la région)
+const TICKER_ACTIVITY_OVERRIDE={
+  'RDDT':'Publicité & Social',    // Reddit : revenus 100% pub, segmentation = géo seulement
+  'SNAP':'Publicité & Social',
+  'PINS':'Publicité & Social',
+  'SPOT':'Abonnements & Services',
+};
+
 const SUBSECTOR_TO_MAJOR={
   // Hardware IA & Semi (tous les semis/chipmakers = Hardware, pas Cloud)
   'GPU & Accélérateurs IA':'Hardware IA & Semi',
@@ -598,14 +608,15 @@ const SUBSECTOR_TO_MAJOR={
   'Tourisme en ligne':'Voyage & Booking',
   // Mobilité
   'Mobilité à la demande':'Mobilité & Services',
-  // Financials — regroupé : paiements, crypto, data, banques
-  'Data & Notation financière':'Financials',
-  'Paiements (Réseau)':'Financials',
-  'Crypto-exchange':'Financials',
-  'Brokerage':'Financials',
-  'Banque universelle':'Financials',
+  // Infrastructure financière (Adyen, SPGI, Coinbase = infrastructure, pas banque)
+  'Infrastructure de paiement':'Infrastructure financière',
+  'Paiements (Réseau)':'Infrastructure financière',
+  'Data & Notation financière':'Infrastructure financière',
+  'Crypto-exchange':'Infrastructure financière',
+  'Brokerage':'Infrastructure financière',
+  'Banque universelle':'Financials',    // Les vraies banques restent dans Financials
+  // Santé, Industrie, Consumer
   'Gaz industriels & Santé':'Santé & Industrie',
-  // Consumer
   'Luxe & Mode':'Luxe & Consumer',
   'Luxe & Cosmétiques':'Luxe & Consumer',
   'Pharma & Vaccins':'Santé & Biotech',
@@ -641,13 +652,15 @@ function explodeByActivity(positions){
   positions.forEach(p=>{
     const segs=USER_SEGMENTS[p.ticker];
     if(segs&&segs.length&&(p.valueEur>0)){
-      // Segments saisis manuellement → décomposition fine par segment de CA
+      // Vérifie si un override ticker force tous les segments dans la même catégorie
+      // (ex: Reddit = 100% pub même si les segments sont U.S / International)
+      const tickerOverride=TICKER_ACTIVITY_OVERRIDE[p.ticker];
       segs.forEach(seg=>{
-        const {major}=_segToActivity(seg.name);
+        const major=tickerOverride||_segToActivity(seg.name).major;
         result.push({
           ...p,
-          _actKey:major,          // catégorie majeure pour le niveau 1
-          _actSubKey:seg.name,    // nom du segment original pour le niveau 2
+          _actKey:major,
+          _actSubKey:seg.name,    // Garde le nom du segment pour le niveau 2 (U.S vs International)
           _isActSlice:true,
           valueEur:p.valueEur*seg.pct
         });
@@ -693,6 +706,11 @@ const TICKER_SUBSECTOR={
   NVTS:'Semi puissance (GaN)',
   ASML:'Lithographie',
   NBIS:'Cloud GPU & IA (Nebius)',  // Nebius = cloud GPU pour IA, ex-Yandex
+  'ADYEN.AS':'Infrastructure de paiement',  // Adyen = infra paiement paneuropéenne
+  ADYEN:'Infrastructure de paiement',
+  SPGI:'Data & Notation financière',        // S&P Global = data/indices financiers
+  COIN:'Crypto-exchange',                   // Coinbase = échange crypto
+  BKNG:'Tourisme en ligne',
   RDDT:'Réseaux sociaux',         // Reddit = pub display/social → Publicité & Social
   // Cloud & Software
   MSFT:'Cloud & Logiciels',
