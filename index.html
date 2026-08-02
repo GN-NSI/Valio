@@ -1,4 +1,4 @@
-µ<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
@@ -5183,6 +5183,26 @@ var _friendsCache = null;
 var _priceHistCache = {}; // {key: [{t,c}]}
 
 // ── Historique de prix (cache session, ne cache PAS les résultats vides) ──
+// Déduit la devise native d'un ticker depuis son suffixe de bourse
+// Filet de sécurité quand la devise n'a pas encore été chargée
+function _currencyFromSuffix(ticker){
+  if(!ticker) return 'USD';
+  var suffix=(ticker.split('.')[1]||'').toUpperCase();
+  var map={
+    'KS':'KRW','KQ':'KRW',      // Corée (Samsung, SK Hynix)
+    'ST':'SEK',                  // Suède (Sivers)
+    'TW':'TWD','TWO':'TWD',      // Taïwan
+    'T':'JPY',                   // Japon
+    'HK':'HKD',                  // Hong Kong
+    'L':'GBP',                   // Londres
+    'PA':'EUR','AS':'EUR','DE':'EUR','BR':'EUR','MI':'EUR','MC':'EUR','F':'EUR','VI':'EUR','LS':'EUR','HE':'EUR','BE':'EUR', // Europe zone euro
+    'SW':'CHF','VX':'CHF',       // Suisse
+    'TO':'CAD','V':'CAD',        // Canada
+    'AX':'AUD'                   // Australie
+  };
+  return map[suffix]||'USD';
+}
+
 async function fetchPriceHistory(ticker, range){
   var key=ticker+'_'+range;
   if(_priceHistCache[key]&&_priceHistCache[key].length) return _priceHistCache[key];
@@ -5190,10 +5210,18 @@ async function fetchPriceHistory(ticker, range){
     var r=await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=chart&range='+range,{signal:AbortSignal.timeout(10000)});
     var d=await r.json();
     var pts=d.chartData||[];
-    if(pts.length) _priceHistCache[key]=pts; // N'enregistre PAS les tableaux vides
+    // Mémoriser la devise NATIVE du chart pour éviter les conversions erronées
+    // (ex: Samsung 005930.KS coté en KRW → sinon compté en USD = valeur x1500)
+    if(d.currency){
+      if(!S.prices[ticker]) S.prices[ticker]={};
+      if(!S.prices[ticker].currency) S.prices[ticker].currency=d.currency;
+      _histCurrency[ticker]=d.currency;
+    }
+    if(pts.length) _priceHistCache[key]=pts;
     return pts;
   }catch(e){return [];}
 }
+var _histCurrency={};
 
 var BM_COLORS = ['#634BE4','#22c55e','#f59e0b','#ef4444','#a855f7','#06b6d4'];
 // Couleurs fixes par ID → évite les doublons lors des désélections/sélections
@@ -5440,7 +5468,9 @@ async function _drawDepositChart(allDeposits, totalVal){
         var pts=(hists[ticker]||[]).filter(function(p){return p.t<=ts;});
         if(!pts.length) return sum;
         var price=pts[pts.length-1].c;
-        var px_cur=(S.prices[ticker]&&S.prices[ticker].currency)||'USD';
+        // Devise NATIVE du titre : priorité au chart, puis S.prices, sinon on déduit
+        // du suffixe de bourse (.KS=KRW, .ST=SEK, .TW=TWD, .PA/.AS/.DE=EUR, .L=GBP)
+        var px_cur=_histCurrency[ticker]||(S.prices[ticker]&&S.prices[ticker].currency)||_currencyFromSuffix(ticker);
         return sum+qty*toEur(price,px_cur);
       },0);
     });
