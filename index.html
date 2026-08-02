@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+µ<!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
@@ -393,6 +393,10 @@ const TICKER_SECTOR={
   // Communication Services
   GOOGL:'Communication Services',GOOG:'Communication Services',
   META:'Communication Services',RDDT:'Communication Services',
+  NFLX:'Communication Services',NETFLIX:'Communication Services',
+  // Ajouts Technology
+  LITE:'Information Technology',LUMENTUM:'Information Technology',
+  PENG:'Information Technology',ORCL:'Information Technology',ORACLE:'Information Technology',
   // Consumer Discretionary
   AMZN:'Consumer Discretionary',BKNG:'Consumer Discretionary',
   // Financials
@@ -617,6 +621,8 @@ const SUBSECTOR_TO_MAJOR={
   'Cloud & Logiciels':'Cloud & Infrastructure',
   'Infrastructure Datacenter':'Cloud & Infrastructure',
   'Cloud GPU & IA (Nebius)':'Cloud & Infrastructure',  // Nebius
+  // Streaming & médias
+  'Streaming & Contenu':'Médias & Streaming',
   // Publicité & Social — Reddit = réseaux sociaux monétisés par pub
   'Réseaux sociaux':'Publicité & Social',
   'Recherche & Cloud':'Publicité & Search',  // Google = 77% pub
@@ -661,6 +667,29 @@ async function loadUserSegments(){
   }catch(e){ console.error('loadUserSegments:',e); }
 }
 
+// Mapping secteur (Yahoo ou manuel) → catégorie majeure lisible
+// Permet à tout ticker non répertorié dans TICKER_SUBSECTOR de tomber dans une
+// catégorie propre au lieu de 'Non défini'
+const YAHOO_SECTOR_TO_MAJOR={
+  'Technology':'Cloud & Infrastructure',
+  'Information Technology':'Cloud & Infrastructure',
+  'Communication Services':'Publicité & Social',
+  'Consumer Cyclical':'Consumer & Retail',
+  'Consumer Discretionary':'Consumer & Retail',
+  'Consumer Defensive':'Consumer & Retail',
+  'Consumer Staples':'Consumer & Retail',
+  'Financial Services':'Financials',
+  'Financials':'Financials',
+  'Healthcare':'Santé & Biotech',
+  'Health Care':'Santé & Biotech',
+  'Industrials':'Santé & Industrie',
+  'Energy':'Énergie',
+  'Basic Materials':'Utilities & Infra',
+  'Materials':'Utilities & Infra',
+  'Real Estate':'Immobilier',
+  'Utilities':'Utilities & Infra',
+};
+
 // Décompose les positions par activité réelle — structure 3 niveaux :
 //   _actKey   = catégorie majeure  (ex: "Hardware IA & Semi")
 //   _actSubKey = sous-catégorie     (ex: "GPU & Accélérateurs IA" ou nom du segment)
@@ -685,7 +714,16 @@ function explodeByActivity(positions){
     } else {
       // Pas de segments → fallback TICKER_SUBSECTOR → SUBSECTOR_TO_MAJOR
       const sub=TICKER_SUBSECTOR[p.ticker];
-      const major=sub?((SUBSECTOR_TO_MAJOR[sub])||sub):(SUBSECTOR_TO_MAJOR[getProfile(p.ticker).sector||'']||getProfile(p.ticker).sector||'Non défini');
+      let major;
+      if(sub){
+        major=SUBSECTOR_TO_MAJOR[sub]||sub;
+      } else {
+        // Pas de sous-secteur connu → utiliser le secteur (manuel ou Yahoo)
+        // puis le mapper vers une catégorie majeure lisible
+        const prof=getProfile(p.ticker);
+        const rawSector=prof.sector||null;
+        major=rawSector?(YAHOO_SECTOR_TO_MAJOR[rawSector]||rawSector):'Non défini';
+      }
       result.push({...p,_actKey:major,_actSubKey:sub||major,_isActSlice:false});
     }
   });
@@ -709,6 +747,12 @@ function explodeForMode(positions, mode){
 
 // ═══ SOUS-SECTEURS PAR TICKER ═══
 const TICKER_SUBSECTOR={
+  // Ajouts : photonique, mémoire, streaming, cloud
+  LITE:'Photonique & Lasers (IA)','LITE.US':'Photonique & Lasers (IA)',
+  LUMENTUM:'Photonique & Lasers (IA)',
+  PENG:'Mémoires (HBM / DRAM)','PENG.US':'Mémoires (HBM / DRAM)',
+  NFLX:'Streaming & Contenu',NETFLIX:'Streaming & Contenu',
+  ORCL:'Cloud & Logiciels',ORACLE:'Cloud & Logiciels',
   // Semiconducteurs
   NVDA:'GPU & Accélérateurs IA',
   TSM:'Fonderies (Fabrication)',TSMC:'Fonderies (Fabrication)',
