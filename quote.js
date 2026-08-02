@@ -38,37 +38,7 @@ async function yfSummary(symbol, modules) {
   } catch { return null; }
 }
 
-// ── Cache mémoire des profils (sector/country/quoteType) — 6h Vercel warm ──
-const _profileMem = {};
-const PROFILE_MEM_TTL = 6 * 60 * 60 * 1000;
-
-async function yfProfile(symbol) {
-  const c = _profileMem[symbol];
-  if (c && Date.now() - c._t < PROFILE_MEM_TTL) return c;
-  try {
-    const yf = await Promise.race([
-      yfSummary(symbol, 'assetProfile,quoteType,summaryDetail'),
-      new Promise(resolve => setTimeout(() => resolve(null), 4000))
-    ]);
-    const ap = yf?.assetProfile || {};
-    const qt = yf?.quoteType    || {};
-    const sd = yf?.summaryDetail || {};
-    const p = {
-      sector:    ap.sector    || null,
-      country:   ap.country   || null,
-      industry:  ap.industry  || null,
-      mktCap:    sd.marketCap?.raw || null,
-      quoteType: qt.quoteType || null, // 'ETF', 'EQUITY', 'MUTUALFUND'…
-      _t: Date.now()
-    };
-    _profileMem[symbol] = p;
-    return p;
-  } catch {
-    return { sector:null, country:null, industry:null, mktCap:null, quoteType:null, _t:Date.now() };
-  }
-}
-
-
+// ── Cache Supabase 24h ──────────────────────────────────────────────────
 const SUPA_URL = process.env.SUPABASE_URL || 'https://dnmibojfzquicbhtactx.supabase.co';
 const SUPA_SVC = process.env.SUPABASE_SERVICE_KEY;
 const CACHE_TTL = 24 * 60 * 60 * 1000;
@@ -540,7 +510,8 @@ Rules:
       const closes = (adjC && adjC.length === rawC.length && adjC.some(v => v != null)) ? adjC : rawC;
       const times  = chart.timestamp || [];
       const pts = closes.map((c,i) => c != null ? { c: Math.round(c * 100) / 100, t: times[i] } : null).filter(Boolean);
-      return res.json({ symbol, chartData: pts });
+      const chartCurrency = chart.meta?.currency || 'USD';
+      return res.json({ symbol, chartData: pts, currency: chartCurrency });
     } catch(e) { return res.status(500).json({ error: e.message }); }
   }
 
@@ -548,11 +519,9 @@ Rules:
   const BASE = 'https://query1.finance.yahoo.com/v8/finance/chart/';
   const H    = { headers: { 'User-Agent': UA } };
   try {
-    // Fetch prix + historique + profil (sector/country/quoteType) en parallèle
-    const [r5d, rh, prof] = await Promise.all([
+    const [r5d, rh] = await Promise.all([
       fetch(`${BASE}${sym}?range=5d&interval=1d&includePrePost=false`, H),
       fetch(`${BASE}${sym}?range=1y&interval=1mo&includePrePost=false`, H),
-      yfProfile(symbol).catch(() => ({})),
     ]);
     const d5 = r5d.ok ? await r5d.json() : null;
     const dh = rh.ok  ? await rh.json()  : null;
@@ -591,13 +560,6 @@ Rules:
     }
     // Données brutes pour le graphique (12 derniers mois mensuels)
     const chartPts = pts.slice(-13).map(p => ({ c: Math.round(p.c * 100) / 100, t: p.t }));
-    return res.json({ symbol, price, prevClose: prev, changeAbs, changePct, change1M, changeYTD, change1Y, currency: meta.currency||'USD', exchange: meta.exchangeName, chartData: chartPts, timestamp: Date.now(),
-      // ── Profil (sector, country, quoteType) ── désormais inclus dans chaque réponse prix
-      sector:    prof?.sector    || null,
-      country:   prof?.country   || null,
-      industry:  prof?.industry  || null,
-      mktCap:    prof?.mktCap    || null,
-      quoteType: prof?.quoteType || null,  // 'ETF', 'EQUITY', 'MUTUALFUND'…
-    });
+    return res.json({ symbol, price, prevClose: prev, changeAbs, changePct, change1M, changeYTD, change1Y, currency: meta.currency||'USD', exchange: meta.exchangeName, chartData: chartPts, timestamp: Date.now() });
   } catch (e) { return res.status(500).json({ error: e.message }); }
 };
