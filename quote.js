@@ -938,26 +938,13 @@ function _fPx(val,curr){
 const manualPrices={};
 let chartMode='positions',chartDrill=[];
 
-// ═══ CLASSIFICATION CORE / SATELLITE (GARP Core-Satellite) ═══════════════════
-// Stockée en localStorage (par ticker). Valeurs : 'core', 'tactique', 'satellite'
-// Le "cœur tactique" compte 50% core / 50% satellite dans le ratio.
-var CORE_SAT = (function(){
-  try { return JSON.parse(localStorage.getItem('valio_coresat')||'{}'); }
-  catch(e){ return {}; }
-})();
-function getCoreSat(ticker){ return CORE_SAT[ticker]||'core'; } // défaut = core
-function setCoreSat(ticker, val){
-  CORE_SAT[ticker]=val;
-  try { localStorage.setItem('valio_coresat', JSON.stringify(CORE_SAT)); } catch(e){}
-}
-// Poids core/satellite d'un titre (le tactique est 50/50)
-function coreSatWeights(cls){
-  if(cls==='satellite') return {core:0, sat:1};
-  if(cls==='tactique')  return {core:0.5, sat:0.5};
-  return {core:1, sat:0}; // core par défaut
-}
-var CORESAT_LABELS={core:'Core', tactique:'Cœur tactique', satellite:'Satellite'};
-var CORESAT_COLORS={core:'#26C5DE', tactique:'#634BE4', satellite:'#f59e0b'};
+// ═══ CLASSIFICATION CORE / SATELLITE (GARP Core-Satellite) ═══
+var CORE_SAT=(function(){try{return JSON.parse(localStorage.getItem('valio_coresat')||'{}');}catch(e){return {};}})();
+function getCoreSat(ticker){return CORE_SAT[ticker]||'core';}
+function setCoreSat(ticker,val){CORE_SAT[ticker]=val;try{localStorage.setItem('valio_coresat',JSON.stringify(CORE_SAT));}catch(e){}}
+function coreSatWeights(cls){if(cls==='satellite')return {core:0,sat:1};if(cls==='tactique')return {core:0.5,sat:0.5};return {core:1,sat:0};}
+var CORESAT_LABELS={core:'Core',tactique:'Cœur tactique',satellite:'Satellite'};
+var CORESAT_COLORS={core:'#26C5DE',tactique:'#634BE4',satellite:'#f59e0b'};
 let posSort={col:'value',dir:'desc'};
 let ratiosSort={col:null,dir:'desc'};
 
@@ -1625,17 +1612,10 @@ function buildChartData(){
   }
 
   if(chartMode==='coresat'){
-    // Répartition Core / Cœur tactique / Satellite
     const buckets={'Core':0,'Cœur tactique':0,'Satellite':0};
-    pos.forEach(p=>{
-      if(!(p.valueEur>0)) return;
-      const cls=getCoreSat(p.ticker);
-      const lab=CORESAT_LABELS[cls]||'Core';
-      buckets[lab]=(buckets[lab]||0)+p.valueEur;
-    });
-    const order=['Core','Cœur tactique','Satellite'];
+    pos.forEach(p=>{ if(!(p.valueEur>0))return; const lab=CORESAT_LABELS[getCoreSat(p.ticker)]||'Core'; buckets[lab]=(buckets[lab]||0)+p.valueEur; });
     const colMap={'Core':'#26C5DE','Cœur tactique':'#634BE4','Satellite':'#f59e0b'};
-    const entries=order.map(k=>[k,buckets[k]]).filter(e=>e[1]>0);
+    const entries=['Core','Cœur tactique','Satellite'].map(k=>[k,buckets[k]]).filter(e=>e[1]>0);
     return{labels:entries.map(e=>e[0]),values:entries.map(e=>e[1]),colors:entries.map(e=>colMap[e[0]]),clickable:false};
   }
   if(chartMode==='capi'){
@@ -2060,54 +2040,33 @@ async function removeWatch(btn){var id=btn.dataset.id||btn;var ticker=btn.datase
 // ═══ SCREENER (Portefeuille + Watchlist combinés) ═══
 window._toggleScrWatch=function(){_scrShowWatch=!_scrShowWatch;renderScreener();};
 
-// ═══ SÉLECTEUR CORE / SATELLITE (dans le screener) ═══════════════════════════
 function _coreSatSelector(ticker){
   var cur=getCoreSat(ticker);
-  var opts=[['core','Core'],['tactique','Cœur tact.'],['satellite','Satellite']];
   var color=CORESAT_COLORS[cur]||'#26C5DE';
-  var sel='<select onchange="_setCoreSatFromSelect(\''+ticker+'\',this.value)" '+
-    'style="background:'+color+'22;color:'+color+';border:1px solid '+color+'55;border-radius:6px;'+
-    'padding:3px 6px;font-size:11px;font-weight:600;cursor:pointer;outline:none">';
-  opts.forEach(function(o){
-    sel+='<option value="'+o[0]+'"'+(o[0]===cur?' selected':'')+'>'+o[1]+'</option>';
-  });
-  sel+='</select>';
-  return sel;
+  var opts=[['core','Core'],['tactique','Cœur tact.'],['satellite','Satellite']];
+  var sel='<select onclick="event.stopPropagation()" onchange="_setCoreSatFromSelect(\''+ticker+'\',this.value)" style="background:'+color+'22;color:'+color+';border:1px solid '+color+'55;border-radius:6px;padding:3px 6px;font-size:11px;font-weight:600;cursor:pointer;outline:none">';
+  opts.forEach(function(o){sel+='<option value="'+o[0]+'"'+(o[0]===cur?' selected':'')+'>'+o[1]+'</option>';});
+  return sel+'</select>';
 }
-window._setCoreSatFromSelect=function(ticker,val){
-  setCoreSat(ticker,val);
-  // Rafraîchir la couleur du sélecteur + le KPI ratio sans tout recharger
-  _renderCoreSatKPI();
-  renderScreener();
-};
-
-// KPI ratio Core/Satellite affiché en haut du screener
+window._setCoreSatFromSelect=function(ticker,val){ setCoreSat(ticker,val); _renderCoreSatKPI(); renderScreenerTable(scSort); };
 function _computeCoreSatRatio(){
   var pos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p)&&p.valueEur>0;});
-  var totalCore=0, totalSat=0, totalVal=0;
-  pos.forEach(function(p){
-    var w=coreSatWeights(getCoreSat(p.ticker));
-    totalCore+=p.valueEur*w.core;
-    totalSat +=p.valueEur*w.sat;
-    totalVal +=p.valueEur;
-  });
-  if(totalVal<=0) return null;
-  return {corePct:totalCore/totalVal*100, satPct:totalSat/totalVal*100, totalVal:totalVal};
+  var tc=0,ts=0,tv=0;
+  pos.forEach(function(p){var w=coreSatWeights(getCoreSat(p.ticker));tc+=p.valueEur*w.core;ts+=p.valueEur*w.sat;tv+=p.valueEur;});
+  if(tv<=0)return null;
+  return {corePct:tc/tv*100,satPct:ts/tv*100};
 }
 function _renderCoreSatKPI(){
-  var el=document.getElementById('coresat-kpi'); if(!el) return;
-  var r=_computeCoreSatRatio();
-  if(!r){ el.innerHTML=''; return; }
-  el.innerHTML=
-    '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
-      '<span style="font-size:12px;color:var(--muted);font-weight:600">Ratio Core / Satellite :</span>'+
-      '<div style="flex:1;min-width:200px;max-width:400px;height:24px;border-radius:12px;overflow:hidden;display:flex;border:1px solid var(--border2)">'+
-        '<div style="width:'+r.corePct.toFixed(1)+'%;background:#26C5DE;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#001;min-width:'+(r.corePct>8?'auto':'0')+'">'+(r.corePct>8?r.corePct.toFixed(0)+'%':'')+'</div>'+
-        '<div style="width:'+r.satPct.toFixed(1)+'%;background:#f59e0b;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#001;min-width:'+(r.satPct>8?'auto':'0')+'">'+(r.satPct>8?r.satPct.toFixed(0)+'%':'')+'</div>'+
-      '</div>'+
-      '<span style="font-size:12px"><span style="color:#26C5DE;font-weight:700">'+r.corePct.toFixed(0)+'% Core</span> · <span style="color:#f59e0b;font-weight:700">'+r.satPct.toFixed(0)+'% Satellite</span></span>'+
+  var el=document.getElementById('coresat-kpi'); if(!el)return;
+  var r=_computeCoreSatRatio(); if(!r){el.innerHTML='';return;}
+  el.innerHTML='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
+    '<span style="font-size:12px;color:var(--muted);font-weight:600;white-space:nowrap">Ratio Core / Satellite</span>'+
+    '<div style="flex:1;min-width:180px;max-width:400px;height:24px;border-radius:12px;overflow:hidden;display:flex;border:1px solid var(--border2)">'+
+      '<div style="width:'+r.corePct.toFixed(1)+'%;background:#26C5DE;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#001">'+(r.corePct>10?r.corePct.toFixed(0)+'%':'')+'</div>'+
+      '<div style="width:'+r.satPct.toFixed(1)+'%;background:#f59e0b;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#001">'+(r.satPct>10?r.satPct.toFixed(0)+'%':'')+'</div>'+
     '</div>'+
-    '<div style="font-size:10px;color:var(--muted);margin-top:6px">Le « Cœur tactique » compte 50% Core / 50% Satellite. Classe tes titres via le sélecteur de chaque ligne.</div>';
+    '<span style="font-size:12px;white-space:nowrap"><span style="color:#26C5DE;font-weight:700">'+r.corePct.toFixed(0)+'% Core</span> · <span style="color:#f59e0b;font-weight:700">'+r.satPct.toFixed(0)+'% Sat.</span></span>'+
+  '</div><div style="font-size:10px;color:var(--muted);margin-top:6px">Le « Cœur tactique » compte 50% Core / 50% Satellite. Classe chaque titre via le sélecteur de sa ligne.</div>';
 }
 
 async function renderScreener(){
@@ -2123,7 +2082,7 @@ async function renderScreener(){
       '⭐ Watchlist — '+(_scrShowWatch?'<b>ON</b>':'OFF')+
     '</button>'+
   '</div><div id="coresat-kpi" style="margin-bottom:16px;padding:14px 16px;background:var(--bg2);border-radius:10px;border:1px solid var(--border)"></div><div id="sc-content"><div style="text-align:center;padding:40px"><div class="spinner"></div></div></div>';
-  setTimeout(_renderCoreSatKPI, 100);
+  setTimeout(_renderCoreSatKPI, 150);
 
   // Charger la watchlist si nécessaire, avec timeout de sécurité
   if(!watchlistItems.length){
@@ -2155,7 +2114,7 @@ async function renderScreener(){
       '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+p.ticker+'">'+p.name+badge+'</div><div class="ticker-sym">'+p.ticker+(TICKER_SUBSECTOR[p.ticker]?' · <span style="color:var(--muted2);font-size:10px">'+TICKER_SUBSECTOR[p.ticker]+'</span>':'')+'</div></div></div></td>'+
       '<td>'+poidsStr+'</td>'+
       '<td>'+priceStr+'</td>'+
-      (p._isWatch?'<td style="color:var(--muted2);font-size:11px">—</td>':'<td>'+_coreSatSelector(p.ticker)+'</td>')+
+      (p._isWatch?'<td style="color:var(--muted2);font-size:11px;text-align:center">—</td>':'<td style="text-align:center">'+_coreSatSelector(p.ticker)+'</td>')+
       ['per','fwdpe','peg','pocf','marge','ca1a','cafwd','eps1a','epsfwd','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '</tr>';
   }).join('');
@@ -2165,7 +2124,7 @@ async function renderScreener(){
     '<button class="btn btn-primary" onclick="loadScreenerRatios()">⟳ Charger les ratios</button></div>'+
     '<div class="card"><div class="tbl-wrap"><table>'+
     '<thead><tr>'+
-    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+thSort('Poids','poids',scSort,'sortSC')+thSort('Cours','price',scSort,'sortSC')+'<th style="min-width:130px">Classe ⚖️</th>'+thSort('PER','per',scSort,'sortSC')+thSort('Fwd PER','fwdpe',scSort,'sortSC')+thSort('PEG','peg',scSort,'sortSC')+thSort('P/OCF','pocf',scSort,'sortSC')+thSort('M. Nette','marge',scSort,'sortSC')+thSort('CA 1A','ca1a',scSort,'sortSC')+thSort('CA FWD','cafwd',scSort,'sortSC')+thSort('EPS 1A','eps1a',scSort,'sortSC')+thSort('EPS Fwd','epsfwd',scSort,'sortSC')+thSort('D/EBITDA','debt',scSort,'sortSC')+
+    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+thSort('Poids','poids',scSort,'sortSC')+thSort('Cours','price',scSort,'sortSC')+'<th style="min-width:120px;text-align:center">Classe ⚖️</th>'+thSort('PER','per',scSort,'sortSC')+thSort('Fwd PER','fwdpe',scSort,'sortSC')+thSort('PEG','peg',scSort,'sortSC')+thSort('P/OCF','pocf',scSort,'sortSC')+thSort('M. Nette','marge',scSort,'sortSC')+thSort('CA 1A','ca1a',scSort,'sortSC')+thSort('CA FWD','cafwd',scSort,'sortSC')+thSort('EPS 1A','eps1a',scSort,'sortSC')+thSort('EPS Fwd','epsfwd',scSort,'sortSC')+thSort('D/EBITDA','debt',scSort,'sortSC')+
     '</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
 
   allItems.forEach(function(p){ updateRatioRowById('sc',p.ticker); });
@@ -6769,6 +6728,7 @@ function renderScreenerTable(sort){
       '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+p.ticker+'">'+(p.name||p.ticker)+badge+'</div><div class="ticker-sym">'+p.ticker+(TICKER_SUBSECTOR[p.ticker]?' · <span style="color:var(--muted2);font-size:10px">'+TICKER_SUBSECTOR[p.ticker]+'</span>':'')+'</div></div></div></td>'+
       '<td>'+poidsStr+'</td>'+
       '<td>'+priceStr+'</td>'+
+      (p._isWatch?'<td style="color:var(--muted2);font-size:11px;text-align:center">—</td>':'<td style="text-align:center">'+_coreSatSelector(p.ticker)+'</td>')+
       ['per','fwdpe','peg','pocf','marge','ca1a','cafwd','eps1a','epsfwd','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '</tr>';
   }).join('');
