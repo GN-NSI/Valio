@@ -5507,7 +5507,32 @@ function _renderDepositsUI(deposits){
       '<div class="kpi-card"><div class="kpi-label">Valeur actuelle</div><div class="kpi-value">'+fE(totalVal)+'</div><div class="kpi-sub">Positions ouvertes</div></div>'+
       '<div class="kpi-card"><div class="kpi-label">PV latentes</div><div class="kpi-value"><span class="'+(totalVal-totalCost>=0?'c-green':'c-red')+'">'+(totalVal-totalCost>=0?'+':'')+fE(totalVal-totalCost)+'</span></div><div class="kpi-sub">Non réalisées</div></div>'+
       '<div class="kpi-card"><div class="kpi-label">PV réalisées</div><div class="kpi-value"><span class="'+(totalRealized>=0?'c-green':'c-red')+'">'+(totalRealized>=0?'+':'')+fE(Math.abs(totalRealized))+'</span></div><div class="kpi-sub">Gains actés</div></div>'+
+      (function(){
+        var pvTot=(totalVal-totalCost)+totalRealized;
+        var pctVsDep=totalDeposited>0?(pvTot/totalDeposited*100):null;
+        return '<div class="kpi-card" style="border:1px solid '+(pvTot>=0?'rgba(0,230,118,.35)':'rgba(239,68,68,.35)')+'">'+
+          '<div class="kpi-label">Plus-value totale</div>'+
+          '<div class="kpi-value"><span class="'+(pvTot>=0?'c-green':'c-red')+'">'+(pvTot>=0?'+':'')+fE(pvTot)+'</span></div>'+
+          '<div class="kpi-sub">Latentes + réalisées'+(pctVsDep!=null?' · '+(pctVsDep>=0?'+':'')+pctVsDep.toFixed(1)+'% des versements':'')+'</div></div>';
+      })()+
     '</div>'+
+    // ── Réconciliation : versements + gains réalisés doivent couvrir le coût des
+    // positions. Un écart signale des dépôts manquants (ou des frais/dividendes non saisis).
+    (function(){
+      var cashImplicite=totalDeposited+totalRealized-totalCost;
+      if(Math.abs(cashImplicite)<25) return ''; // écart négligeable → rien à signaler
+      var manque=cashImplicite<0;
+      var col=manque?'#f59e0b':'#26C5DE';
+      return '<div style="margin-bottom:20px;padding:12px 16px;background:'+col+'14;border:1px solid '+col+'44;border-radius:10px">'+
+        '<div style="font-size:12px;font-weight:700;color:'+col+';margin-bottom:6px">'+(manque?'⚠️ Écart de cohérence détecté':'💵 Liquidités non investies')+'</div>'+
+        '<div style="font-size:12px;color:var(--muted);line-height:1.5">'+
+          'Coût de tes positions : <b style="color:var(--text)">'+fE(totalCost)+'</b> · '+
+          'Versements + gains réalisés : <b style="color:var(--text)">'+fE(totalDeposited+totalRealized)+'</b><br>'+
+          (manque
+            ? 'Il manque <b style="color:'+col+'">'+fE(Math.abs(cashImplicite))+'</b> : tu as acheté pour plus que ce que tu as déposé. Il te manque probablement des dépôts non enregistrés (ou des dividendes reçus). Ajoute-les pour que la plus-value totale soit exacte.'
+            : 'Il te reste <b style="color:'+col+'">'+fE(cashImplicite)+'</b> de liquidités non investies (non comptées dans « Valeur actuelle » qui ne montre que les positions ouvertes).')+
+        '</div></div>';
+    })()+
     '<div class="card" style="margin-bottom:16px">'+
       '<div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-bottom:12px">Évolution du solde vs dépôts cumulés</div>'+
       '<div style="position:relative;height:300px"><canvas id="deposit-chart"></canvas></div>'+
@@ -6981,10 +7006,35 @@ async function renderLeaderboard(){
           costEur+=(tx.quantity||0)*toEur(tx.price||0,tx.currency)+toEur(tx.fees||0,tx.currency); qty+=(tx.quantity||0); }
         else if(ty==='sell'&&qty>1e-9){ var avg=costEur/qty; costEur-=(tx.quantity||0)*avg; qty-=(tx.quantity||0); }
       });
-      if(qty<=1e-7) return null; // plus en portefeuille
       var live=S.prices[tk]; // quote live = source de vérité (prix + devise exacts)
       var pts=_lbHistCache[tk]||[];
       var histLast=pts.length?pts[pts.length-1].c:null;
+
+      // ── POSITION ENTIÈREMENT VENDUE ─────────────────────────────────────
+      // On garde le titre au classement si la vente a eu lieu DANS la fenêtre :
+      // perf réalisée = (produit de cession / coût des titres vendus) − 1
+      if(qty<=1e-7){
+        var soldCost=0, soldProceeds=0, lastSell=null, q2=0, c2=0;
+        t.forEach(function(tx){
+          var ty2=(tx.transaction_type||tx.type||'').toLowerCase();
+          var ts2=Math.floor(new Date(tx.transaction_date).getTime()/1000);
+          if(ty2==='buy'){ c2+=(tx.quantity||0)*toEur(tx.price||0,tx.currency)+toEur(tx.fees||0,tx.currency); q2+=(tx.quantity||0); }
+          else if(ty2==='sell'&&q2>1e-9){
+            var avg2=c2/q2, qs=(tx.quantity||0);
+            if(ts2>=fromTs){ // vente dans la fenêtre → compte dans la perf réalisée
+              soldCost+=qs*avg2;
+              soldProceeds+=qs*toEur(tx.price||0,tx.currency)-toEur(tx.fees||0,tx.currency);
+              lastSell=ts2;
+            }
+            c2-=qs*avg2; q2-=qs;
+          }
+        });
+        if(lastSell==null||soldCost<=0) return null; // vendu hors fenêtre → hors classement
+        var rr=(soldProceeds/soldCost-1)*100;
+        if(!isFinite(rr)||Math.abs(rr)>3000) return null;
+        return {perf:rr, sold:true};
+      }
+
       var curNative=(live&&live.price)||histLast; if(!curNative) return null;
       var curEur=toEur(curNative,(live&&live.currency)||'USD');
       var pru=costEur/qty;
@@ -6992,18 +7042,21 @@ async function renderLeaderboard(){
 
       // Acheté EN COURS de période → sa PV réelle (cohérente avec son portefeuille)
       if(firstBuy!=null && firstBuy>fromTs)
-        return (sincePurchase!=null&&isFinite(sincePurchase)&&Math.abs(sincePurchase)<3000)?sincePurchase:null;
+        return (sincePurchase!=null&&isFinite(sincePurchase)&&Math.abs(sincePurchase)<3000)?{perf:sincePurchase,sold:false}:null;
 
-      // Détenu AVANT la période → variation du cours sur la période (historique)
+      // Détenu AVANT la période → variation du cours sur la période
       if(!pts.length) return null;
-      // Sanity : si l'historique dévie fortement du prix live (split mal ajusté…), il est inutilisable
       if(live&&live.price&&histLast&&Math.abs(histLast/live.price-1)>0.2) return null;
       var start=null; for(var i=0;i<pts.length;i++){ if(pts[i].t<=fromTs) start=pts[i].c; else break; }
       if(start==null) start=(pts[0].t>=fromTs)?pts[0].c:null;
       if(!start) return null;
-      var r=(histLast/start-1)*100;
+      // Perf convertie en EUR : deux cotations de la même société (ex. SIVE.ST en SEK
+      // et 2DG.SG en EUR) doivent donner un résultat comparable, pas biaisé par le change
+      var _c=(live&&live.currency)||'USD';
+      var startEur=toEur(start,_c), lastEur=toEur(histLast,_c);
+      var r=(lastEur/startEur-1)*100;
       if(!isFinite(r)||Math.abs(r)>600) return null;
-      return r;
+      return {perf:r, sold:false};
     }
     var stocks={week:[],month:[],ytd:[]};
     ['week','month','ytd'].forEach(function(w){
@@ -7011,14 +7064,30 @@ async function renderLeaderboard(){
       people.forEach(function(p){
         var tks=[...new Set((txByPerson[p.id]||[]).map(function(t){return t.ticker;}).filter(Boolean))];
         tks.forEach(function(tk){
-          var perf=_lbUserStockPerf(txByPerson[p.id],tk,W[w]);
-          if(perf!=null) entries.push({tk:tk,perf:perf,who:[p.name+(p.me?' (toi)':'')]});
+          var res=_lbUserStockPerf(txByPerson[p.id],tk,W[w]);
+          if(res!=null) entries.push({tk:tk,perf:res.perf,sold:!!res.sold,who:[p.name+(p.me?' (toi)':'')]});
         });
       });
-      // fusionne les lignes identiques (même titre + même perf = détenu sur toute la période)
+      // Fusion par SOCIÉTÉ (pas par ticker) : une même entreprise cotée sur deux
+      // places (ex. SIVE.ST à Stockholm et 2DG.SG à Stuttgart) ne doit apparaître
+      // qu'une fois. Clé = nom normalisé si connu, sinon le ticker.
+      function _coKey(tk){
+        var nm=nameByTk[tk];
+        if(!nm) return tk.toUpperCase();
+        return nm.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,18);
+      }
       var merged={};
-      entries.forEach(function(e){var k=e.tk+'|'+e.perf.toFixed(2);
-        if(merged[k]) merged[k].who=merged[k].who.concat(e.who); else merged[k]=e;});
+      entries.forEach(function(e){
+        var k=_coKey(e.tk)+'|'+(e.sold?'S':'H');
+        if(!merged[k]){ merged[k]=e; return; }
+        var m=merged[k];
+        m.who=[...new Set(m.who.concat(e.who))];
+        // Deux cotations du même titre → on retient celle avec un prix live
+        // (la plus liquide/fiable), sinon la première rencontrée.
+        var mHasLive=!!(S.prices[m.tk]&&S.prices[m.tk].price);
+        var eHasLive=!!(S.prices[e.tk]&&S.prices[e.tk].price);
+        if(eHasLive&&!mHasLive){ m.tk=e.tk; m.perf=e.perf; }
+      });
       stocks[w]=Object.values(merged).sort(function(a,b){return b.perf-a.perf;});
     });
 
@@ -7038,9 +7107,10 @@ async function renderLeaderboard(){
       if(!arr.length) return '<div style="color:var(--muted);font-size:12px;padding:14px">Pas assez de données.</div>';
       return '<table style="width:100%;border-collapse:collapse">'+arr.slice(0,8).map(function(r,i){
         var nm=nameByTk[r.tk]||r.tk;
+        var soldBadge=r.sold?' <span style="font-size:9px;background:rgba(245,158,11,.18);color:#f59e0b;padding:1px 5px;border-radius:4px;font-weight:700">VENDU</span>':'';
         return '<tr style="border-bottom:1px solid var(--border2)">'+
           '<td style="padding:9px 8px;width:34px;font-size:15px">'+medal(i)+'</td>'+
-          '<td style="padding:9px 8px"><span class="cd-link" data-ticker="'+r.tk+'" style="font-weight:600;font-size:13px;cursor:pointer">'+nm+'</span>'+
+          '<td style="padding:9px 8px"><span class="cd-link" data-ticker="'+r.tk+'" style="font-weight:600;font-size:13px;cursor:pointer">'+nm+'</span>'+soldBadge+
             '<div style="font-size:10px;color:var(--muted)">'+(nm!==r.tk?r.tk+' · ':'')+'par '+r.who.join(', ')+'</div></td>'+
           '<td style="padding:9px 8px;text-align:right" class="mono"><span style="color:'+pcol(r.perf)+';font-weight:700">'+(r.perf>=0?'+':'')+r.perf.toFixed(2)+'%</span></td></tr>';
       }).join('')+'</table>';
