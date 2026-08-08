@@ -1151,6 +1151,7 @@ function renderPosHead(){
     <th ${thCls('value')} style="text-align:right">Valeur (€) ${sortIcon('value')}</th>
     <th ${thCls('pnl')} style="text-align:right">P&amp;L (€) ${sortIcon('pnl')}</th>
     <th ${thCls('pnlpct')} style="text-align:right">P&amp;L % ${sortIcon('pnlpct')}</th>
+    <th style="text-align:center;min-width:120px">Classe ⚖️</th>
     <th style="text-align:right">Comptes</th>
   </tr>`;
   var el=document.querySelector('#pos-body')?.closest('table')?.querySelector('thead');
@@ -1231,6 +1232,7 @@ async function renderPortfolio(){
           <th ${thCls('value')} style="text-align:right">Valeur (€) ${sortIcon('value')}</th>
           <th ${thCls('pnl')} style="text-align:right">P&amp;L (€) ${sortIcon('pnl')}</th>
           <th ${thCls('pnlpct')} style="text-align:right">P&amp;L % ${sortIcon('pnlpct')}</th>
+          <th style="text-align:center;min-width:120px">Classe ⚖️</th>
           <th style="text-align:right">Comptes</th>
         </tr></thead>
         <tbody id="pos-body">${posTblRows(sortPos(pos))}</tbody>
@@ -1275,6 +1277,7 @@ function posTblRows(pos){
       <td class="mono" id="vl-${p.ticker}">${valHTML}</td>
       <td id="pl-${p.ticker}">${pnlHTML}</td>
       <td id="pp-${p.ticker}">${pctHTML}</td>
+      <td style="text-align:center" onclick="event.stopPropagation()">${_coreSatSelector(p.ticker)}</td>
       <td>${p.accounts.map(a=>acctTag(a)).join('')}</td>
     </tr>`;
   }).join('');
@@ -2048,7 +2051,18 @@ function _coreSatSelector(ticker){
   opts.forEach(function(o){sel+='<option value="'+o[0]+'"'+(o[0]===cur?' selected':'')+'>'+o[1]+'</option>';});
   return sel+'</select>';
 }
-window._setCoreSatFromSelect=function(ticker,val){ setCoreSat(ticker,val); _renderCoreSatKPI(); if(typeof renderScreenerTable==='function')renderScreenerTable(scSort); if(chartMode==='coresat'&&typeof renderChart==='function')renderChart(); };
+window._setCoreSatFromSelect=function(ticker,val){
+  setCoreSat(ticker,val);
+  if(typeof _renderCoreSatKPI==='function') _renderCoreSatKPI();
+  if(typeof renderScreenerTable==='function' && document.querySelector('#sc-content table')) renderScreenerTable(scSort);
+  // Rafraîchir le tableau des positions (met à jour la couleur du sélecteur)
+  var pb=document.getElementById('pos-body');
+  if(pb && typeof posTblRows==='function' && S.enrichedPos && S.enrichedPos.length){
+    pb.innerHTML=posTblRows(typeof sortPos==='function'?sortPos(S.enrichedPos):S.enrichedPos);
+  }
+  // Rafraîchir le camembert s'il est en mode coresat
+  if(chartMode==='coresat' && typeof renderChart==='function') renderChart();
+};
 function _computeCoreSatRatio(){
   var pos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p)&&p.valueEur>0;});
   var tc=0,ts=0,tv=0;
