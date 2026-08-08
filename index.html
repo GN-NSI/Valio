@@ -937,6 +937,14 @@ function _fPx(val,curr){
 
 const manualPrices={};
 let chartMode='positions',chartDrill=[];
+
+// ═══ CLASSIFICATION CORE / SATELLITE (GARP Core-Satellite) ═══
+var CORE_SAT=(function(){try{return JSON.parse(localStorage.getItem('valio_coresat')||'{}');}catch(e){return {};}})();
+function getCoreSat(ticker){return CORE_SAT[ticker]||'core';}
+function setCoreSat(ticker,val){CORE_SAT[ticker]=val;try{localStorage.setItem('valio_coresat',JSON.stringify(CORE_SAT));}catch(e){}}
+function coreSatWeights(cls){if(cls==='satellite')return {core:0,sat:1};if(cls==='tactique')return {core:0.5,sat:0.5};return {core:1,sat:0};}
+var CORESAT_LABELS={core:'Core',tactique:'Cœur tactique',satellite:'Satellite'};
+var CORESAT_COLORS={core:'#26C5DE',tactique:'#634BE4',satellite:'#f59e0b'};
 let posSort={col:'value',dir:'desc'};
 let ratiosSort={col:null,dir:'desc'};
 
@@ -1181,6 +1189,7 @@ async function renderPortfolio(){
                 <option value="region">Par région 🔍</option>
                 <option value="pays">Par pays</option>
                 <option value="capi">Par capitalisation</option>
+                <option value="coresat">Core / Satellite ⚖️</option>
               </select>
               <span id="chart-loading" style="display:none"><div class="spinner"></div></span>
             </div>
@@ -1602,6 +1611,13 @@ function buildChartData(){
     }
   }
 
+  if(chartMode==='coresat'){
+    const buckets={'Core':0,'Cœur tactique':0,'Satellite':0};
+    pos.forEach(p=>{ if(!(p.valueEur>0))return; const lab=CORESAT_LABELS[getCoreSat(p.ticker)]||'Core'; buckets[lab]=(buckets[lab]||0)+p.valueEur; });
+    const colMap={'Core':'#26C5DE','Cœur tactique':'#634BE4','Satellite':'#f59e0b'};
+    const entries=['Core','Cœur tactique','Satellite'].map(k=>[k,buckets[k]]).filter(e=>e[1]>0);
+    return{labels:entries.map(e=>e[0]),values:entries.map(e=>e[1]),colors:entries.map(e=>colMap[e[0]]),clickable:false};
+  }
   if(chartMode==='capi'){
     const tiers={'Mega (>1 000 Mds $)':0,'Large (100–1 000 Mds $)':0,'Mid (10–100 Mds $)':0,'Small (<10 Mds $)':0};
     const exp=explodeForMode(pos,'capi');
@@ -2024,6 +2040,35 @@ async function removeWatch(btn){var id=btn.dataset.id||btn;var ticker=btn.datase
 // ═══ SCREENER (Portefeuille + Watchlist combinés) ═══
 window._toggleScrWatch=function(){_scrShowWatch=!_scrShowWatch;renderScreener();};
 
+function _coreSatSelector(ticker){
+  var cur=getCoreSat(ticker);
+  var color=CORESAT_COLORS[cur]||'#26C5DE';
+  var opts=[['core','Core'],['tactique','Cœur tact.'],['satellite','Satellite']];
+  var sel='<select onclick="event.stopPropagation()" onchange="_setCoreSatFromSelect(\''+ticker+'\',this.value)" style="background:'+color+'22;color:'+color+';border:1px solid '+color+'55;border-radius:6px;padding:3px 6px;font-size:11px;font-weight:600;cursor:pointer;outline:none">';
+  opts.forEach(function(o){sel+='<option value="'+o[0]+'"'+(o[0]===cur?' selected':'')+'>'+o[1]+'</option>';});
+  return sel+'</select>';
+}
+window._setCoreSatFromSelect=function(ticker,val){ setCoreSat(ticker,val); _renderCoreSatKPI(); if(typeof renderScreenerTable==='function')renderScreenerTable(scSort); if(chartMode==='coresat'&&typeof renderChart==='function')renderChart(); };
+function _computeCoreSatRatio(){
+  var pos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p)&&p.valueEur>0;});
+  var tc=0,ts=0,tv=0;
+  pos.forEach(function(p){var w=coreSatWeights(getCoreSat(p.ticker));tc+=p.valueEur*w.core;ts+=p.valueEur*w.sat;tv+=p.valueEur;});
+  if(tv<=0)return null;
+  return {corePct:tc/tv*100,satPct:ts/tv*100};
+}
+function _renderCoreSatKPI(){
+  var el=document.getElementById('coresat-kpi'); if(!el)return;
+  var r=_computeCoreSatRatio(); if(!r){el.innerHTML='';return;}
+  el.innerHTML='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
+    '<span style="font-size:12px;color:var(--muted);font-weight:600;white-space:nowrap">Ratio Core / Satellite</span>'+
+    '<div style="flex:1;min-width:180px;max-width:400px;height:24px;border-radius:12px;overflow:hidden;display:flex;border:1px solid var(--border2)">'+
+      '<div style="width:'+r.corePct.toFixed(1)+'%;background:#26C5DE;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#001">'+(r.corePct>10?r.corePct.toFixed(0)+'%':'')+'</div>'+
+      '<div style="width:'+r.satPct.toFixed(1)+'%;background:#f59e0b;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#001">'+(r.satPct>10?r.satPct.toFixed(0)+'%':'')+'</div>'+
+    '</div>'+
+    '<span style="font-size:12px;white-space:nowrap"><span style="color:#26C5DE;font-weight:700">'+r.corePct.toFixed(0)+'% Core</span> · <span style="color:#f59e0b;font-weight:700">'+r.satPct.toFixed(0)+'% Sat.</span></span>'+
+  '</div><div style="font-size:10px;color:var(--muted);margin-top:6px">Le « Cœur tactique » compte 50% Core / 50% Satellite. Classe chaque titre via le sélecteur de sa ligne.</div>';
+}
+
 async function renderScreener(){
   var pg=document.getElementById('page');
   var _wBg=_scrShowWatch?'rgba(245,158,11,.15)':'var(--bg2)';
@@ -2068,20 +2113,23 @@ async function renderScreener(){
       '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+p.ticker+'">'+p.name+badge+'</div><div class="ticker-sym">'+p.ticker+(TICKER_SUBSECTOR[p.ticker]?' · <span style="color:var(--muted2);font-size:10px">'+TICKER_SUBSECTOR[p.ticker]+'</span>':'')+'</div></div></div></td>'+
       '<td>'+poidsStr+'</td>'+
       '<td>'+priceStr+'</td>'+
+      (p._isWatch?'<td style="color:var(--muted2);font-size:11px;text-align:center">—</td>':'<td style="text-align:center">'+_coreSatSelector(p.ticker)+'</td>')+
       ['per','fwdpe','peg','pocf','marge','ca1a','cafwd','eps1a','epsfwd','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '</tr>';
   }).join('');
 
   document.getElementById('sc-content').innerHTML=
+    '<div id="coresat-kpi" style="margin-bottom:16px;padding:14px 16px;background:var(--bg2);border-radius:10px;border:1px solid var(--border)"></div>'+
     '<div style="display:flex;justify-content:flex-end;margin-bottom:12px">'+
     '<button class="btn btn-primary" onclick="loadScreenerRatios()">⟳ Charger les ratios</button></div>'+
     '<div class="card"><div class="tbl-wrap"><table>'+
     '<thead><tr>'+
-    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+thSort('Poids','poids',scSort,'sortSC')+thSort('Cours','price',scSort,'sortSC')+thSort('PER','per',scSort,'sortSC')+thSort('Fwd PER','fwdpe',scSort,'sortSC')+thSort('PEG','peg',scSort,'sortSC')+thSort('P/OCF','pocf',scSort,'sortSC')+thSort('M. Nette','marge',scSort,'sortSC')+thSort('CA 1A','ca1a',scSort,'sortSC')+thSort('CA FWD','cafwd',scSort,'sortSC')+thSort('EPS 1A','eps1a',scSort,'sortSC')+thSort('EPS Fwd','epsfwd',scSort,'sortSC')+thSort('D/EBITDA','debt',scSort,'sortSC')+
+    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+thSort('Poids','poids',scSort,'sortSC')+thSort('Cours','price',scSort,'sortSC')+'<th style="min-width:120px;text-align:center">Classe ⚖️</th>'+thSort('PER','per',scSort,'sortSC')+thSort('Fwd PER','fwdpe',scSort,'sortSC')+thSort('PEG','peg',scSort,'sortSC')+thSort('P/OCF','pocf',scSort,'sortSC')+thSort('M. Nette','marge',scSort,'sortSC')+thSort('CA 1A','ca1a',scSort,'sortSC')+thSort('CA FWD','cafwd',scSort,'sortSC')+thSort('EPS 1A','eps1a',scSort,'sortSC')+thSort('EPS Fwd','epsfwd',scSort,'sortSC')+thSort('D/EBITDA','debt',scSort,'sortSC')+
     '</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
 
   allItems.forEach(function(p){ updateRatioRowById('sc',p.ticker); });
   setTimeout(loadScreenerRatios, 300);
+  setTimeout(_renderCoreSatKPI, 150);
 }
 
 async function loadScreenerRatios(){
@@ -4919,6 +4967,102 @@ function estimateExitMultiple(f, gC) {
 // Rendement annualisé = ((EPS0 × (1+g)^N × multiple) / prix)^(1/N) − 1
 // Prix juste = valeur future actualisée à 10 %/an
 var _ymSel={};
+
+// ══════════════════════════════════════════════════════════════════════════
+// PER FORWARD PROJETÉ — trajectoire de compression du multiple (GARP)
+// Logique : à cours constant, si l'EPS croît, le PER se compresse.
+// Croissance dérivée du consensus analystes (année 0 et +1), puis fade
+// GÉOMÉTRIQUE (multiplicatif) pour extrapoler l'année +2/+3.
+// ══════════════════════════════════════════════════════════════════════════
+function _perProjeteHtml(ticker, price, eps0, f, fin, cSym){
+  if(!(price>0)||!(eps0>0)) return '';
+  var ae = f && f.analystEstimates;
+  if(!ae) return '';
+
+  // ── Récupérer les 2 croissances annuelles consensus ──
+  // g1 = croissance exercice en cours (thisYear.epsGrowth)
+  // g2 = croissance exercice suivant (currentYear.epsGrowth)
+  var g1 = (ae.thisYear && ae.thisYear.epsGrowth != null && ae.thisYear.epsGrowth > 0 && ae.thisYear.epsGrowth < 200)
+    ? ae.thisYear.epsGrowth : null;
+  var g2 = (ae.currentYear && ae.currentYear.epsGrowth != null && ae.currentYear.epsGrowth > 0 && ae.currentYear.epsGrowth < 200)
+    ? ae.currentYear.epsGrowth : null;
+
+  // Fallback : dériver g1 depuis les EPS estimés si epsGrowth absent
+  if(g1==null && ae.thisYear && ae.thisYear.epsAvg>0 && eps0>0){
+    var _g=(ae.thisYear.epsAvg/eps0-1)*100; if(_g>0&&_g<200) g1=_g;
+  }
+  if(g2==null && ae.currentYear && ae.currentYear.epsAvg>0 && ae.thisYear && ae.thisYear.epsAvg>0){
+    var _g2=(ae.currentYear.epsAvg/ae.thisYear.epsAvg-1)*100; if(_g2>0&&_g2<200) g2=_g2;
+  }
+
+  if(g1==null && g2==null) return ''; // pas de données de croissance → pas de bloc
+
+  // ── Construire la trajectoire de croissance sur 3 ans avec fade géométrique ──
+  // Année +1 : g1 (ou g2 si g1 absent)
+  // Année +2 : g2 (ou g1*0.85 si g2 absent)
+  // Année +3 : fade géométrique = g2 * (g2/g1), borné [plancher, g2]
+  var growthPath = [];
+  var gA = g1 != null ? g1 : g2;              // année +1
+  var gB = g2 != null ? g2 : (gA * 0.85);     // année +2
+  // Fade ratio géométrique entre les 2 années connues
+  var fadeRatio = (g1 != null && g2 != null && g1 > 0) ? (g2/g1) : 0.85;
+  fadeRatio = Math.max(0.5, Math.min(1.0, fadeRatio)); // borné [0.5, 1.0] : jamais accélération, jamais chute brutale
+  var gC3 = gB * fadeRatio;                    // année +3
+  var FLOOR = 8; // plancher de croissance mature (%)
+  gC3 = Math.max(FLOOR, gC3);
+  growthPath = [gA, gB, gC3];
+
+  // ── Projeter EPS et PER à cours constant ──
+  var perNow = price / eps0;
+  var years = [];
+  var epsProj = eps0;
+  var curYear = new Date().getFullYear();
+  for(var i=0;i<3;i++){
+    epsProj = epsProj * (1 + growthPath[i]/100);
+    var perProj = price / epsProj;
+    years.push({
+      year: curYear + i + 1,
+      growth: growthPath[i],
+      eps: epsProj,
+      per: perProj,
+      isExtrapolated: (i===2) || (i===1 && g2==null)
+    });
+  }
+
+  // ── Couleur du PER projeté ──
+  function perColor(p){ return p < 15 ? '#22c55e' : p < 22 ? '#84cc16' : p < 30 ? '#f59e0b' : '#ef4444'; }
+
+  var rows = years.map(function(y){
+    var growthSrc = y.isExtrapolated ? '<span style="color:var(--muted2);font-size:9px">extrapolé</span>' : '<span style="color:var(--muted2);font-size:9px">consensus</span>';
+    return '<tr style="border-bottom:1px solid var(--border2)">' +
+      '<td style="padding:8px;font-weight:700;font-size:13px">'+y.year+'</td>' +
+      '<td style="padding:8px;text-align:right;font-size:12px" class="mono">+'+y.growth.toFixed(0)+'% '+growthSrc+'</td>' +
+      '<td style="padding:8px;text-align:right;font-size:12px" class="mono">'+cSym+fN(y.eps)+'</td>' +
+      '<td style="padding:8px;text-align:right;font-size:15px;font-weight:800;color:'+perColor(y.per)+'" class="mono">'+y.per.toFixed(1)+'x</td>' +
+    '</tr>';
+  }).join('');
+
+  return '<div style="margin-bottom:18px;padding:14px 16px;background:linear-gradient(135deg,rgba(99,75,228,.08),rgba(38,197,222,.05));border-radius:10px;border:1px solid var(--border)">' +
+    '<div style="font-size:13px;font-weight:700;margin-bottom:4px">📉 PER forward projeté <span style="font-size:11px;font-weight:400;color:var(--muted)">— à cours constant ('+cSym+fN(price)+')</span></div>' +
+    '<div style="font-size:11px;color:var(--muted);margin-bottom:12px">Si le cours ne bouge pas et que l\'EPS croît selon le consensus, voici comment le PER se compresse. Un PER projeté bas = la croissance rend le titre « pas cher » dans le futur (thèse GARP).</div>' +
+    '<table style="width:100%;border-collapse:collapse">' +
+    '<thead><tr style="border-bottom:2px solid var(--border)">' +
+      '<th style="padding:8px;text-align:left;font-size:10px;color:var(--muted)">ANNÉE</th>' +
+      '<th style="padding:8px;text-align:right;font-size:10px;color:var(--muted)">CROISSANCE EPS</th>' +
+      '<th style="padding:8px;text-align:right;font-size:10px;color:var(--muted)">EPS PROJETÉ</th>' +
+      '<th style="padding:8px;text-align:right;font-size:10px;color:var(--muted)">PER PROJETÉ</th>' +
+    '</tr></thead><tbody>' +
+    '<tr style="background:rgba(255,255,255,.03);border-bottom:1px solid var(--border2)">' +
+      '<td style="padding:8px;font-weight:700;font-size:13px;color:var(--muted)">Aujourd\'hui</td>' +
+      '<td style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">—</td>' +
+      '<td style="padding:8px;text-align:right;font-size:12px;color:var(--muted)" class="mono">'+cSym+fN(eps0)+'</td>' +
+      '<td style="padding:8px;text-align:right;font-size:15px;font-weight:800;color:'+perColor(perNow)+'" class="mono">'+perNow.toFixed(1)+'x</td>' +
+    '</tr>' + rows +
+    '</tbody></table>' +
+    '<div style="font-size:10px;color:var(--muted2);margin-top:10px">Croissance : consensus analystes (années +1/+2) puis fade géométrique ×'+fadeRatio.toFixed(2)+' pour +3. Plancher '+FLOOR+'%. Projection indicative — la croissance réelle peut différer.</div>' +
+  '</div>';
+}
+
 function renderYieldMatrix(ticker, price, f, fin){
   var el=document.getElementById('cd-yield-matrix'); if(!el) return;
   function lastNN(arr){ if(!arr)return null; for(var i=arr.length-1;i>=0;i--){ if(arr[i]!=null) return arr[i]; } return null; }
@@ -5014,6 +5158,7 @@ function renderYieldMatrix(ticker, price, f, fin){
       '<button class="btn btn-ghost btn-sm" onclick="window._ymDetail(\''+tName+'\','+gC+')" title="Voir le détail du calcul du multiple">🔍 Calcul</button>'+
       '<span style="font-size:10px;color:var(--muted2)">Croissance = consensus 5 ans Yahoo \u00b7 Multiple = estimation intelligente (secteur \u00b7 marges \u00b7 taille \u00b7 croissance)</span>'+
     '</div>'+
+    _perProjeteHtml(ticker, price, eps0, f, fin, cSym) +
     '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:11px;white-space:nowrap" class="mono">'+
     '<tr><th style="padding:5px 8px;color:var(--muted);font-size:9px;text-align:left">CROISS. \\ MULT.</th>'+
       mCols.map(function(m){return '<th style="padding:5px 8px;color:'+(m===mCur?'#634BE4':'var(--muted)')+';font-weight:'+(m===mCur?'800':'600')+'">'+m+'</th>';}).join('')+'</tr>'+
@@ -6681,6 +6826,7 @@ function renderScreenerTable(sort){
       '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+p.ticker+'">'+(p.name||p.ticker)+badge+'</div><div class="ticker-sym">'+p.ticker+(TICKER_SUBSECTOR[p.ticker]?' · <span style="color:var(--muted2);font-size:10px">'+TICKER_SUBSECTOR[p.ticker]+'</span>':'')+'</div></div></div></td>'+
       '<td>'+poidsStr+'</td>'+
       '<td>'+priceStr+'</td>'+
+      (p._isWatch?'<td style="color:var(--muted2);font-size:11px;text-align:center">—</td>':'<td style="text-align:center">'+_coreSatSelector(p.ticker)+'</td>')+
       ['per','fwdpe','peg','pocf','marge','ca1a','cafwd','eps1a','epsfwd','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '</tr>';
   }).join('');
