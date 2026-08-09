@@ -5135,91 +5135,59 @@ function _safetyMarginHtml(ticker, price, eps0, f, fin, cSym, exitMult, medianPE
 }
 
 function _perProjeteHtml(ticker, price, eps0, f, fin, cSym){
-  if(!(price>0)||!(eps0>0)) return '';
-  var ae = f && f.analystEstimates;
-  if(!ae) return '';
+  if(!(price>0)) return '';
+  // Trajectoire IDENTIQUE à celle du bloc Marge de sécurité (_epsPath3y) :
+  // base = EPS forward consensus de l'exercice en cours, puis croissances
+  // consensus/fade. Garantit que les deux blocs racontent la même histoire.
+  var path=_epsPath3y(f, eps0);
+  if(!path) return '';
 
-  // ── Récupérer les 2 croissances annuelles consensus ──
-  // g1 = croissance exercice en cours (thisYear.epsGrowth)
-  // g2 = croissance exercice suivant (currentYear.epsGrowth)
-  var g1 = (ae.thisYear && ae.thisYear.epsGrowth != null && ae.thisYear.epsGrowth > 0 && ae.thisYear.epsGrowth < 200)
-    ? ae.thisYear.epsGrowth : null;
-  var g2 = (ae.currentYear && ae.currentYear.epsGrowth != null && ae.currentYear.epsGrowth > 0 && ae.currentYear.epsGrowth < 200)
-    ? ae.currentYear.epsGrowth : null;
+  var perNow=(eps0>0)?(price/eps0):null;
+  var yNow=new Date().getFullYear();
+  function perColor(p){ return p<15?'#22c55e':p<22?'#84cc16':p<30?'#f59e0b':'#ef4444'; }
 
-  // Fallback : dériver g1 depuis les EPS estimés si epsGrowth absent
-  if(g1==null && ae.thisYear && ae.thisYear.epsAvg>0 && eps0>0){
-    var _g=(ae.thisYear.epsAvg/eps0-1)*100; if(_g>0&&_g<200) g1=_g;
-  }
-  if(g2==null && ae.currentYear && ae.currentYear.epsAvg>0 && ae.thisYear && ae.thisYear.epsAvg>0){
-    var _g2=(ae.currentYear.epsAvg/ae.thisYear.epsAvg-1)*100; if(_g2>0&&_g2<200) g2=_g2;
-  }
-
-  if(g1==null && g2==null) return ''; // pas de données de croissance → pas de bloc
-
-  // ── Construire la trajectoire de croissance sur 3 ans avec fade géométrique ──
-  // Année +1 : g1 (ou g2 si g1 absent)
-  // Année +2 : g2 (ou g1*0.85 si g2 absent)
-  // Année +3 : fade géométrique = g2 * (g2/g1), borné [plancher, g2]
-  var growthPath = [];
-  var gA = g1 != null ? g1 : g2;              // année +1
-  var gB = g2 != null ? g2 : (gA * 0.85);     // année +2
-  // Fade ratio géométrique entre les 2 années connues
-  var fadeRatio = (g1 != null && g2 != null && g1 > 0) ? (g2/g1) : 0.85;
-  fadeRatio = Math.max(0.5, Math.min(1.0, fadeRatio)); // borné [0.5, 1.0] : jamais accélération, jamais chute brutale
-  var gC3 = gB * fadeRatio;                    // année +3
-  var FLOOR = 8; // plancher de croissance mature (%)
-  gC3 = Math.max(FLOOR, gC3);
-  growthPath = [gA, gB, gC3];
-
-  // ── Projeter EPS et PER à cours constant ──
-  var perNow = price / eps0;
-  var years = [];
-  var epsProj = eps0;
-  var curYear = new Date().getFullYear();
+  // Ligne exercice en cours (consensus) puis 3 années projetées
+  var rows=[];
+  rows.push({label:'FY'+yNow+' <span style="font-size:10px;font-weight:400;color:var(--muted)">(consensus)</span>',
+             growth:null, eps:path.epsBase, src:'consensus'});
+  var e=path.epsBase;
   for(var i=0;i<3;i++){
-    epsProj = epsProj * (1 + growthPath[i]/100);
-    var perProj = price / epsProj;
-    years.push({
-      year: curYear + i + 1,
-      growth: growthPath[i],
-      eps: epsProj,
-      per: perProj,
-      isExtrapolated: (i===2) || (i===1 && g2==null)
-    });
+    e=e*(1+path.growths[i]/100);
+    rows.push({label:'FY'+(yNow+i+1), growth:path.growths[i], eps:e, src:(i===0?'consensus':'extrapolé')});
   }
 
-  // ── Couleur du PER projeté ──
-  function perColor(p){ return p < 15 ? '#22c55e' : p < 22 ? '#84cc16' : p < 30 ? '#f59e0b' : '#ef4444'; }
-
-  var rows = years.map(function(y){
-    var growthSrc = y.isExtrapolated ? '<span style="color:var(--muted2);font-size:9px">extrapolé</span>' : '<span style="color:var(--muted2);font-size:9px">consensus</span>';
-    return '<tr style="border-bottom:1px solid var(--border2)">' +
-      '<td style="padding:8px;font-weight:700;font-size:13px">'+y.year+'</td>' +
-      '<td style="padding:8px;text-align:right;font-size:12px" class="mono">+'+y.growth.toFixed(0)+'% '+growthSrc+'</td>' +
-      '<td style="padding:8px;text-align:right;font-size:12px" class="mono">'+cSym+fN(y.eps)+'</td>' +
-      '<td style="padding:8px;text-align:right;font-size:15px;font-weight:800;color:'+perColor(y.per)+'" class="mono">'+y.per.toFixed(1)+'x</td>' +
+  var body=rows.map(function(r,idx){
+    var per=price/r.eps;
+    var last=(idx===rows.length-1);
+    return '<tr style="border-bottom:1px solid var(--border2)'+(last?';background:rgba(99,75,228,.07)':'')+'">'+
+      '<td style="padding:8px;font-weight:'+(last?'800':'700')+';font-size:13px">'+r.label+
+        (last?' <span style="font-size:9px;color:var(--blue)">← base du verdict</span>':'')+'</td>'+
+      '<td style="padding:8px;text-align:right;font-size:12px" class="mono">'+
+        (r.growth!=null?'+'+r.growth.toFixed(0)+'% <span style="color:var(--muted2);font-size:9px">'+r.src+'</span>':'<span style="color:var(--muted2);font-size:10px">consensus</span>')+'</td>'+
+      '<td style="padding:8px;text-align:right;font-size:12px" class="mono">'+cSym+fN(r.eps)+'</td>'+
+      '<td style="padding:8px;text-align:right;font-size:15px;font-weight:800;color:'+perColor(per)+'" class="mono">'+per.toFixed(1)+'x</td>'+
     '</tr>';
   }).join('');
 
-  return '<div style="margin-bottom:18px;padding:14px 16px;background:linear-gradient(135deg,rgba(99,75,228,.08),rgba(38,197,222,.05));border-radius:10px;border:1px solid var(--border)">' +
-    '<div style="font-size:13px;font-weight:700;margin-bottom:4px">📉 PER forward projeté <span style="font-size:11px;font-weight:400;color:var(--muted)">— à cours constant ('+cSym+fN(price)+')</span></div>' +
-    '<div style="font-size:11px;color:var(--muted);margin-bottom:12px">Si le cours ne bouge pas et que l\'EPS croît selon le consensus, voici comment le PER se compresse. Un PER projeté bas = la croissance rend le titre « pas cher » dans le futur (thèse GARP).</div>' +
-    '<table style="width:100%;border-collapse:collapse">' +
-    '<thead><tr style="border-bottom:2px solid var(--border)">' +
-      '<th style="padding:8px;text-align:left;font-size:10px;color:var(--muted)">ANNÉE</th>' +
-      '<th style="padding:8px;text-align:right;font-size:10px;color:var(--muted)">CROISSANCE EPS</th>' +
-      '<th style="padding:8px;text-align:right;font-size:10px;color:var(--muted)">EPS PROJETÉ</th>' +
-      '<th style="padding:8px;text-align:right;font-size:10px;color:var(--muted)">PER PROJETÉ</th>' +
-    '</tr></thead><tbody>' +
-    '<tr style="background:rgba(255,255,255,.03);border-bottom:1px solid var(--border2)">' +
-      '<td style="padding:8px;font-weight:700;font-size:13px;color:var(--muted)">Aujourd\'hui</td>' +
-      '<td style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">—</td>' +
-      '<td style="padding:8px;text-align:right;font-size:12px;color:var(--muted)" class="mono">'+cSym+fN(eps0)+'</td>' +
-      '<td style="padding:8px;text-align:right;font-size:15px;font-weight:800;color:'+perColor(perNow)+'" class="mono">'+perNow.toFixed(1)+'x</td>' +
-    '</tr>' + rows +
-    '</tbody></table>' +
-    '<div style="font-size:10px;color:var(--muted2);margin-top:10px">Croissance : consensus analystes (années +1/+2) puis fade géométrique ×'+fadeRatio.toFixed(2)+' pour +3. Plancher '+FLOOR+'%. Projection indicative — la croissance réelle peut différer.</div>' +
+  return '<div style="margin-bottom:18px;padding:14px 16px;background:linear-gradient(135deg,rgba(99,75,228,.08),rgba(38,197,222,.05));border-radius:10px;border:1px solid var(--border)">'+
+    '<div style="font-size:13px;font-weight:700;margin-bottom:4px">\ud83d\udcc9 PER forward projet\u00e9 <span style="font-size:11px;font-weight:400;color:var(--muted)">\u2014 \u00e0 cours constant ('+cSym+fN(price)+')</span></div>'+
+    '<div style="font-size:11px;color:var(--muted);margin-bottom:12px">Si le cours ne bouge pas et que l\'EPS cro\u00eet selon le consensus, voici comment le PER se compresse. Un PER projet\u00e9 bas = la croissance rend le titre \u00ab pas cher \u00bb dans le futur (th\u00e8se GARP).</div>'+
+    '<table style="width:100%;border-collapse:collapse">'+
+    '<thead><tr style="border-bottom:2px solid var(--border)">'+
+      '<th style="padding:8px;text-align:left;font-size:10px;color:var(--muted)">EXERCICE</th>'+
+      '<th style="padding:8px;text-align:right;font-size:10px;color:var(--muted)">CROISSANCE EPS</th>'+
+      '<th style="padding:8px;text-align:right;font-size:10px;color:var(--muted)">EPS PROJET\u00c9</th>'+
+      '<th style="padding:8px;text-align:right;font-size:10px;color:var(--muted)">PER PROJET\u00c9</th>'+
+    '</tr></thead><tbody>'+
+    (perNow!=null?'<tr style="border-bottom:1px solid var(--border2)">'+
+      '<td style="padding:8px;font-size:12px;color:var(--muted)">Aujourd\'hui <span style="font-size:9px">(EPS TTM)</span></td>'+
+      '<td style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">\u2014</td>'+
+      '<td style="padding:8px;text-align:right;font-size:12px;color:var(--muted)" class="mono">'+cSym+fN(eps0)+'</td>'+
+      '<td style="padding:8px;text-align:right;font-size:15px;font-weight:800;color:'+perColor(perNow)+'" class="mono">'+perNow.toFixed(1)+'x</td>'+
+    '</tr>':'')+
+    body+
+    '</tbody></table>'+
+    '<div style="font-size:10px;color:var(--muted2);margin-top:10px">Base = EPS consensus de l\'exercice en cours ('+cSym+fN(path.epsBase)+'), puis croissance consensus analystes pour FY'+(yNow+1)+' et fade g\u00e9om\u00e9trique \u00d7'+path.fade.toFixed(2)+' ensuite (plancher 6 %). La derni\u00e8re ligne sert de base au calcul de marge de s\u00e9curit\u00e9 ci-dessus.</div>'+
   '</div>';
 }
 
@@ -5305,9 +5273,9 @@ function renderYieldMatrix(ticker, price, f, fin){
     '<div style="display:flex;align-items:center;gap:6px;margin-bottom:14px">'+
       togBtn('5 ans',5)+togBtn('10 ans',10)+
       '<div style="margin-left:16px;display:flex;gap:26px;flex-wrap:wrap">'+
-        '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Prix d\'entr\u00e9e ('+rC+'%/an)</div><div style="font-size:20px;font-weight:800;color:#634BE4" class="mono">'+fair.toFixed(2)+' '+cSym+'</div></div>'+
-        '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Rendement estim\u00e9</div><div style="font-size:20px;font-weight:800;color:'+cellColor(selRet)+'" class="mono">'+selRet.toFixed(2)+' %/an</div></div>'+
-        '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Marge de s\u00e9curit\u00e9</div><div style="font-size:20px;font-weight:800;color:'+(marge>=0?'#22c55e':'#f59e0b')+'" class="mono">'+(marge>=0?'+':'')+marge.toFixed(2)+' %</div></div>'+
+        '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Mon sc\u00e9nario \u2014 prix d\'entr\u00e9e ('+rC+'%/an)</div><div style="font-size:20px;font-weight:800;color:#634BE4" class="mono">'+fair.toFixed(2)+' '+cSym+'</div></div>'+
+        '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Mon sc\u00e9nario \u2014 rendement '+N+' ans</div><div style="font-size:20px;font-weight:800;color:'+cellColor(selRet)+'" class="mono">'+selRet.toFixed(2)+' %/an</div></div>'+
+        '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Mon sc\u00e9nario \u2014 marge</div><div style="font-size:20px;font-weight:800;color:'+(marge>=0?'#22c55e':'#f59e0b')+'" class="mono">'+(marge>=0?'+':'')+marge.toFixed(2)+' %</div></div>'+
       '</div>'+
     '</div>'+
     '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin-bottom:14px;padding:10px;background:var(--bg2,rgba(255,255,255,.02));border-radius:8px">'+
@@ -5318,7 +5286,7 @@ function renderYieldMatrix(ticker, price, f, fin){
       '<button class="btn btn-ghost btn-sm" onclick="window._ymApply(\''+tName+'\')">Appliquer</button>'+
       '<button class="btn btn-ghost btn-sm" onclick="window._ymReset(\''+tName+'\')" title="Revenir au consensus analystes">\u21ba Consensus</button>'+
       '<button class="btn btn-ghost btn-sm" onclick="window._ymDetail(\''+tName+'\','+gC+')" title="Voir le détail du calcul du multiple">🔍 Calcul</button>'+
-      '<span style="font-size:10px;color:var(--muted2)">Croissance = consensus 5 ans Yahoo \u00b7 Multiple = estimation intelligente (secteur \u00b7 marges \u00b7 taille \u00b7 croissance)</span>'+
+      '<span style="font-size:10px;color:var(--muted2)">\u26a0\ufe0f Ces 4 champs = TON sc\u00e9nario \u00e9ditable. Le bloc VERDICT ci-dessous est ind\u00e9pendant : consensus analystes sur 3 ans, sans tes modifications \u2014 c\u2019est lui qui alimente le score /100.</span>'+
     '</div>'+
     _safetyMarginHtml(ticker, price, eps0, f, fin, cSym, mCur, _medPE, rC) +
     _perProjeteHtml(ticker, price, eps0, f, fin, cSym) +
