@@ -3495,7 +3495,7 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
       else cdValChart('cdchart-pfcf', fin.years, pfcfVals, curPFCF,          'P/FCF');
       if(pocfTS.length>=8) cdRatioTimeChart('cdchart-pocf','P/OCF',pocfTS, f&&f.pocf, _buyTs,_sellTs);
       else cdValChart('cdchart-pocf', fin.years, pocfVals, curPOCF,          'P/OCF');
-      try{ window._cdLastFin=fin; window._cdLastNativePrice=curPrice; renderYieldMatrix(ticker, curPrice, f, fin); }catch(e){ var ym=document.getElementById('cd-yield-matrix'); if(ym) ym.innerHTML='<div style="color:var(--muted);font-size:12px">Données insuffisantes (EPS manquant).</div>'; }
+      try{ window._cdLastFin=fin; window._cdLastManual=manualData; window._cdLastNativePrice=curPrice; renderYieldMatrix(ticker, curPrice, f, fin); }catch(e){ var ym=document.getElementById('cd-yield-matrix'); if(ym) ym.innerHTML='<div style="color:var(--muted);font-size:12px">Données insuffisantes (EPS manquant).</div>'; }
       // Segments pie (données manuelles)
       // Breakdown card chart (segments ou géographie selon vue active)
       var _bkdRenderChart = function(view) {
@@ -5033,45 +5033,102 @@ function estimateExitMultiple(f, gC, medianPE) {
 // Base = EPS forward de l'exercice en cours · fade GÉOMÉTRIQUE au-delà du consensus.
 function _epsPath3y(f, epsFallback){
   var ae=(f&&f.analystEstimates)||null;
-  var epsBase=(ae&&ae.thisYear&&ae.thisYear.epsAvg>0)?ae.thisYear.epsAvg:epsFallback;
-  if(!(epsBase>0)) return null;
   function ok(g){ return g!=null&&isFinite(g)&&g>-60&&g<250; }
+  var yNow=new Date().getFullYear();
+
+  // ── PRIORITÉ ABSOLUE : EPS annuels saisis à la main (non-GAAP, retraités) ──
+  // L'utilisateur exclut lui-même les éléments non récurrents (plus-values sur
+  // participations type SpaceX/Anthropic, cessions, reprises fiscales). Ces
+  // données sont plus fiables que le consensus Yahoo, qui mélange GAAP et
+  // non-GAAP selon les périodes et gonfle certains exercices.
+  var manualEps=null, manualYear=null, manualKind=null, manualQtrs=0;
+  try{
+    var md=window._cdLastManual||[];
+
+    // (a) TTM depuis les trimestres saisis (format 'YYYY-Q1'). Source la plus
+    //     à jour : capte l'accélération en cours (ex. Google Cloud) que l'annuel
+    //     clos ne reflète pas encore.
+    var qs=md.filter(function(m){ return m.period&&/^\d{4}-Q[1-4]$/.test(m.period)&&m.eps_diluted!=null; })
+      .map(function(m){ var p=m.period.split('-Q'); return {y:+p[0], q:+p[1], v:+m.eps_diluted, idx:(+p[0])*4+(+p[1])}; })
+      .sort(function(a,b){ return a.idx-b.idx; });
+    manualQtrs=qs.length;
+    if(qs.length>=4){
+      var last4=qs.slice(-4);
+      // Exiger 4 trimestres STRICTEMENT consécutifs (sinon TTM faussé par un trou)
+      if(last4[3].idx-last4[0].idx===3){
+        manualEps=last4.reduce(function(s,x){ return s+x.v; },0);
+        manualYear=last4[3].y;           // année du trimestre le plus récent
+        manualKind='TTM '+last4[0].y+'-Q'+last4[0].q+' \u2192 '+last4[3].y+'-Q'+last4[3].q;
+      }
+    }
+
+    // (b) Sinon : dernier exercice annuel saisi
+    if(manualEps==null){
+      var anns=md.filter(function(m){ return m.period&&/^FY\d{4}$/.test(m.period)&&m.eps_diluted!=null&&m.eps_diluted>0; })
+        .sort(function(a,b){ return (parseInt(a.period.replace('FY',''),10)||0)-(parseInt(b.period.replace('FY',''),10)||0); });
+      if(anns.length){
+        manualEps=anns[anns.length-1].eps_diluted;
+        manualYear=parseInt(anns[anns.length-1].period.replace('FY',''),10)||null;
+        manualKind='annuel FY'+manualYear;
+      }
+    }
+  }catch(e){}
 
   var epsNext=(ae&&ae.currentYear&&ae.currentYear.epsAvg>0)?ae.currentYear.epsAvg:null;
   var nBase=(ae&&ae.thisYear&&ae.thisYear.epsCount)||null;
   var nNext=(ae&&ae.currentYear&&(ae.currentYear.epsCount||ae.currentYear.count))||null;
-
-  // ── PRIORITÉ 1 : croissance CALCULÉE depuis les deux EPS consensus ────────
-  // Auditable et cohérent. Le champ `growth` brut de Yahoo n'est pas toujours
-  // resynchronisé après révision des estimations → on ne s'y fie qu'en secours.
-  var g1=null, g1src=null;
-  if(epsNext&&epsBase>0){
-    var gc=(epsNext/epsBase-1)*100;
-    if(ok(gc)){ g1=gc; g1src='calc'; }
-  }
-  if(g1==null&&ae&&ae.currentYear&&ok(ae.currentYear.epsGrowth)){ g1=ae.currentYear.epsGrowth; g1src='yahoo'; }
-  if(g1==null&&f&&ok(f.epsGrowthFwd1Y)){ g1=f.epsGrowthFwd1Y; g1src='fwd1y'; }
-  if(g1==null){ g1=12; g1src='defaut'; }
-
-  // Consensus long terme (5 ans) — sert de contrôle de vraisemblance
   var g5=(f&&f.epsGrowthFwd5Y!=null&&f.epsGrowthFwd5Y>0&&f.epsGrowthFwd5Y<80)?f.epsGrowthFwd5Y:null;
-
-  // Croissance de l'exercice en cours, pour dériver le rythme de décélération
   var gThis=(ae&&ae.thisYear&&ok(ae.thisYear.epsGrowth))?ae.thisYear.epsGrowth:null;
-  var fade=(gThis!=null&&gThis>0&&g1>0)?(g1/gThis):0.85;
-  fade=Math.max(0.55,Math.min(1.0,fade));
-  var FLOOR=6;
-  var g2=Math.max(FLOOR,g1*fade), g3=Math.max(FLOOR,g2*fade);
-  var eps3=epsBase*(1+g1/100)*(1+g2/100)*(1+g3/100);
 
-  // ── Contrôle de vraisemblance ────────────────────────────────────────────
-  // Un consensus +1y très inférieur au consensus 5 ans signale soit un choc
-  // temporaire (capex, amortissements), soit une donnée Yahoo périmée.
-  // Deux signaux : décélération brutale vs exercice en cours, ou écart au consensus 5 ans
-  var suspect=(gThis!=null&&gThis>15&&g1<gThis*0.25)||(g5!=null&&g5>10&&g1<g5*0.45);
+  var epsBase, baseYear, baseSrc, g1, g1src, oneOff=false, suspect=false;
+  var baseKind=manualKind;
+  var targetYear=yNow+3; // on projette toujours à ~3 ans
 
-  return {epsBase:epsBase, epsNext:epsNext, growths:[g1,g2,g3], eps3:eps3, fade:fade,
-          g1src:g1src, g5:g5, gThis:gThis, suspect:suspect, nBase:nBase, nNext:nNext};
+  if(manualEps>0 && manualYear){
+    // ═══ MODE NON-GAAP MANUEL ═══
+    epsBase=manualEps; baseYear=manualYear; baseSrc='manuel';
+    // Croissance : consensus long terme (non-GAAP, lissé) en priorité.
+    // On évite volontairement les croissances annuelles Yahoo, polluées par le GAAP.
+    if(g5!=null){ g1=g5; g1src='consensus 5 ans'; }
+    else if(epsNext>0&&ae&&ae.thisYear&&ae.thisYear.epsAvg>0){
+      var gd=(epsNext/ae.thisYear.epsAvg-1)*100;
+      g1=ok(gd)&&gd>0?gd:12; g1src='consensus analystes';
+    }
+    else if(f&&ok(f.epsGrowthFwd1Y)&&f.epsGrowthFwd1Y>0){ g1=f.epsGrowthFwd1Y; g1src='consensus 1 an'; }
+    else { g1=12; g1src='defaut'; }
+  } else {
+    // ═══ MODE CONSENSUS YAHOO (aucune saisie manuelle) ═══
+    epsBase=(ae&&ae.thisYear&&ae.thisYear.epsAvg>0)?ae.thisYear.epsAvg:epsFallback;
+    baseYear=yNow; baseSrc='yahoo';
+    if(!(epsBase>0)) return null;
+    if(epsNext&&epsBase>0){ var gc=(epsNext/epsBase-1)*100; if(ok(gc)){ g1=gc; g1src='calc'; } }
+    if(g1==null&&ae&&ae.currentYear&&ok(ae.currentYear.epsGrowth)){ g1=ae.currentYear.epsGrowth; g1src='yahoo'; }
+    if(g1==null&&f&&ok(f.epsGrowthFwd1Y)){ g1=f.epsGrowthFwd1Y; g1src='fwd1y'; }
+    if(g1==null){ g1=12; g1src='defaut'; }
+    // Garde-fou : exercice pollué par des éléments non récurrents
+    if(gThis!=null&&gThis>40&&g1<8&&epsNext>0){
+      oneOff=true; epsBase=epsNext; baseYear=yNow+1;
+      g1=(g5!=null&&g5>0)?g5:12; g1src='normalise'; gThis=null;
+    }
+    suspect=(!oneOff)&&((gThis!=null&&gThis>15&&g1<gThis*0.25)||(g5!=null&&g5>10&&g1<g5*0.45));
+  }
+  if(!(epsBase>0)) return null;
+
+  // Nombre d'années à projeter pour atteindre l'exercice cible
+  var nSteps=Math.max(1,Math.min(6,targetYear-baseYear));
+  var fade=(gThis!=null&&gThis>0&&g1>0)?(g1/gThis):0.88;
+  fade=Math.max(0.6,Math.min(1.0,fade));
+  var FLOOR=6, growths=[], e2=epsBase, g=g1;
+  for(var i=0;i<nSteps;i++){
+    growths.push(g);
+    e2=e2*(1+g/100);
+    g=Math.max(FLOOR,g*fade);
+  }
+
+  return {epsBase:epsBase, epsNext:epsNext, growths:growths, eps3:e2, fade:fade,
+          g1src:g1src, baseSrc:baseSrc, baseYear:baseYear, targetYear:targetYear,
+          g5:g5, gThis:gThis, suspect:suspect, oneOff:oneOff, nBase:nBase, nNext:nNext,
+          baseKind:baseKind, manualQtrs:manualQtrs};
 }
 
 
@@ -5150,7 +5207,7 @@ function _safetyMarginHtml(ticker, price, eps0, f, fin, cSym, exitMult, medianPE
     '</div>'+
     '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Ancrages du multiple (le <b>plus bas</b> est retenu) : '+ancHtml+'</div>'+
     '<div style="font-size:10px;color:var(--muted2);line-height:1.5">'+
-      'Croissance EPS consensus puis fade géométrique ×'+path.fade.toFixed(2)+' : '+gTxt+' · '+
+      (path.baseSrc==='manuel'?'<b style="color:#00E676">Base : tes résultats non-GAAP FY'+path.baseYear+'</b>':'Base : consensus FY'+path.baseYear)+' → FY'+path.targetYear+' · croissance '+path.g1src+' puis fade ×'+path.fade.toFixed(2)+' : '+gTxt+' · '+
       'Prix juste = EPS 3 ans × multiple ÷ (1+'+tx+'%)³. Hors dividendes. '+
       'Une marge positive signifie que le cours actuel permet d\'atteindre '+tx+' %/an même avec ces hypothèses prudentes.'+
     '</div>'+
@@ -5171,12 +5228,15 @@ function _perProjeteHtml(ticker, price, eps0, f, fin, cSym){
 
   // Ligne exercice en cours (consensus) puis 3 années projetées
   var rows=[];
-  rows.push({label:'FY'+yNow+' <span style="font-size:10px;font-weight:400;color:var(--muted)">(consensus)</span>',
-             growth:null, eps:path.epsBase, src:'consensus'});
+  var baseTag=path.baseSrc==='manuel'
+    ? '<span style="font-size:10px;font-weight:400;color:#00E676">('+(path.baseKind||'tes donn\u00e9es')+' non-GAAP)</span>'
+    : '<span style="font-size:10px;font-weight:400;color:var(--muted)">(consensus)</span>';
+  var baseLbl=(path.baseSrc==='manuel'&&path.baseKind&&path.baseKind.indexOf('TTM')===0)?'TTM actuel':'FY'+path.baseYear;
+  rows.push({label:baseLbl+' '+baseTag, growth:null, eps:path.epsBase, src:'base'});
   var e=path.epsBase;
-  for(var i=0;i<3;i++){
+  for(var i=0;i<path.growths.length;i++){
     e=e*(1+path.growths[i]/100);
-    rows.push({label:'FY'+(yNow+i+1), growth:path.growths[i], eps:e, src:(i===0?'consensus':'extrapolé')});
+    rows.push({label:'FY'+(path.baseYear+i+1), growth:path.growths[i], eps:e, src:(i===0?'consensus':'extrapol\u00e9')});
   }
 
   var body=rows.map(function(r,idx){
@@ -5212,19 +5272,30 @@ function _perProjeteHtml(ticker, price, eps0, f, fin, cSym){
     '</tbody></table>'+
     // Données brutes du consensus, pour audit
     '<div style="margin-top:12px;padding:9px 12px;background:rgba(255,255,255,.03);border-radius:7px;font-size:11px;color:var(--muted);line-height:1.7">'+
-      '<b style="color:var(--text)">Donn\u00e9es consensus brutes</b> \u2014 '+
-      'FY'+yNow+' : <b style="color:var(--text)">'+cSym+fN(path.epsBase)+'</b>'+(path.nBase?' ('+path.nBase+' analystes)':'')+
+      '<b style="color:var(--text)">Base de projection</b> \u2014 '+
+      (path.baseSrc==='manuel'
+        ? (path.baseKind||'FY'+path.baseYear)+' : <b style="color:#00E676">'+cSym+fN(path.epsBase)+'</b> <span style="color:#00E676">\u2713 tes saisies non-GAAP</span>'+(path.manualQtrs?' <span style="color:var(--muted2);font-size:10px">('+path.manualQtrs+' trimestres saisis)</span>':'')
+        : 'FY'+path.baseYear+' : <b style="color:var(--text)">'+cSym+fN(path.epsBase)+'</b>'+(path.nBase?' ('+path.nBase+' analystes)':''))+
       (path.epsNext?' \u00b7 FY'+(yNow+1)+' : <b style="color:var(--text)">'+cSym+fN(path.epsNext)+'</b>'+(path.nNext?' ('+path.nNext+' analystes)':''):'')+
       ' \u2192 croissance '+(path.growths[0]>=0?'+':'')+path.growths[0].toFixed(1)+'% '+
       '<span style="font-size:9px">('+(path.g1src==='calc'?'calcul\u00e9e sur les EPS':path.g1src==='yahoo'?'champ Yahoo':'estimation')+')</span>'+
       (path.g5!=null?' \u00b7 consensus 5 ans : +'+path.g5.toFixed(1)+'%/an':'')+
     '</div>'+
+    (path.oneOff?'<div style="margin-top:8px;padding:10px 12px;background:rgba(38,197,222,.12);border:1px solid rgba(38,197,222,.4);border-radius:7px;font-size:11px;color:#26C5DE;line-height:1.6">'+
+      '\u2139\ufe0f <b>Exercice en cours neutralis\u00e9</b> \u2014 le consensus FY'+yNow+' affiche une croissance anormale suivie d\'une rechute, signature d\'\u00e9l\u00e9ments <b>non r\u00e9currents</b> '+
+      '(plus-values latentes sur participations, cessions, reprises fiscales). Ce b\u00e9n\u00e9fice n\'est pas reproductible. '+
+      'La projection repart donc de l\'exercice <b>FY'+(yNow+1)+'</b> ('+cSym+fN(path.epsBase)+'), consid\u00e9r\u00e9 normalis\u00e9, avec la croissance long terme du consensus (+'+path.growths[0].toFixed(0)+'%/an).'+
+    '</div>':'')+
     (path.suspect?'<div style="margin-top:8px;padding:10px 12px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.4);border-radius:7px;font-size:11px;color:#f59e0b;line-height:1.6">'+
       '\u26a0\ufe0f <b>Consensus court terme atypique</b> \u2014 la croissance FY'+(yNow+1)+' ('+path.growths[0].toFixed(0)+'%) est tr\u00e8s inf\u00e9rieure au consensus 5 ans (+'+(path.g5||0).toFixed(0)+'%/an). '+
       'Deux explications possibles : un choc temporaire sur le b\u00e9n\u00e9fice (capex et amortissements massifs, comme chez Alphabet), ou une donn\u00e9e Yahoo p\u00e9rim\u00e9e. '+
       'V\u00e9rifie les EPS bruts ci-dessus et, si tu juges le consensus 5 ans plus repr\u00e9sentatif, saisis-le dans \u00ab Croissance centrale \u00bb du sc\u00e9nario.'+
     '</div>':'')+
-    '<div style="font-size:10px;color:var(--muted2);margin-top:10px">Base = EPS consensus de l\'exercice en cours, puis croissance FY'+(yNow+1)+' et fade g\u00e9om\u00e9trique \u00d7'+path.fade.toFixed(2)+' ensuite (plancher 6 %). La derni\u00e8re ligne sert de base au calcul de marge de s\u00e9curit\u00e9 ci-dessus.</div>'+
+    '<div style="font-size:10px;color:var(--muted2);margin-top:10px">'+
+      (path.baseSrc==='manuel'
+        ? 'Base = <b>tes r\u00e9sultats annuels non-GAAP saisis</b> (FY'+path.baseYear+'), projet\u00e9s avec la croissance '+path.g1src+' puis fade g\u00e9om\u00e9trique \u00d7'+path.fade.toFixed(2)+' (plancher 6 %).'
+        : 'Base = EPS consensus Yahoo, puis croissance analystes et fade g\u00e9om\u00e9trique \u00d7'+path.fade.toFixed(2)+' (plancher 6 %). Saisis tes r\u00e9sultats non-GAAP pour une base plus fiable.')+
+      ' La derni\u00e8re ligne sert de base au calcul de marge de s\u00e9curit\u00e9 ci-dessus.</div>'+
   '</div>';
 }
 
