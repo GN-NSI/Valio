@@ -2490,6 +2490,23 @@ function calcQualityScore(f, price, analysis) {
   }
 
   // Normaliser sur 100 si certains champs manquent
+  // ── BLOC 0 : RENDEMENT ATTENDU 3 ANS (18 pts) — critère décisif ─────────
+  // Toujours calculé sur le SCÉNARIO CONSENSUS (jamais les hypothèses perso de
+  // l'utilisateur) : le score reste objectif et comparable entre deux titres.
+  // Barème calé sur l'objectif de 15 %/an (surperformance vs Nasdaq).
+  (function(){
+    if(!(px>0)) return;
+    var path=(typeof _epsPath3y==='function')?_epsPath3y(f, (f.forwardPE>0?px/f.forwardPE:null)):null;
+    if(!path||!(path.eps3>0)) return;
+    var mult=(typeof estimateExitMultiple==='function')?estimateExitMultiple(f, path.growths[0], null):null;
+    if(!(mult>0)) return;
+    var cagr=(Math.pow(path.eps3*mult/px,1/3)-1)*100;
+    if(!isFinite(cagr)||Math.abs(cagr)>200) return;
+    var pts = cagr>=25 ? 18 : cagr>=20 ? 16 : cagr>=15 ? 13 : cagr>=10 ? 8 : cagr>=5 ? 4 : cagr>=0 ? 1 : 0;
+    score += pts;
+    details.push({label:'Rendement attendu 3 ans', val:(cagr>=0?'+':'')+cagr.toFixed(1)+'%/an', pts:pts, max:18});
+  })();
+
   var maxPossible = details.reduce(function(a,d){return a+d.max;},0);
   var normalizedScore = maxPossible > 0 ? Math.round(score / maxPossible * 100) : null;
 
@@ -2530,7 +2547,7 @@ window.showQualityDetail = function(tkKey){
   var s = qs.score;
   var bg = s >= 75 ? '#16a34a' : s >= 55 ? '#ca8a04' : s >= 35 ? '#f97316' : '#dc2626';
   var label = s >= 75 ? 'Excellent' : s >= 55 ? 'Bon' : s >= 35 ? 'Correct' : 'Faible';
-  var rows = qs.details.map(function(d){
+  var rows = qs.details.slice().sort(function(a,b){return b.max-a.max;}).map(function(d){
     var pct2 = Math.round(d.pts/d.max*100);
     var col2 = pct2>=75?'#16a34a':pct2>=50?'#22c55e':pct2>=30?'#d97706':'#ef4444';
     var bar = '<div style="flex:1;height:6px;background:var(--border2);border-radius:3px;overflow:hidden">' +
@@ -4895,7 +4912,33 @@ window.showCdTab=function(t,noScroll){
 // Estime un multiple de sortie cohérent sur 5-10 ans selon :
 //   secteur historique · croissance EPS · marges · taille · levier AI/MOAT
 // → Point de départ modifiable par l'utilisateur
-function estimateExitMultiple(f, gC) {
+// Médiane du P/E historique du titre sur 5 ans.
+// Reconstruite point par point : cours à la date / EPS de l'exercice correspondant.
+// Plus robuste qu'une moyenne (insensible aux pics d'euphorie ou aux creux d'EPS).
+function _medianPE5y(fin, chartPts){
+  if(!fin||!fin.years||!fin.eps||!chartPts||!chartPts.length) return null;
+  var epsByYear={};
+  fin.years.forEach(function(y,i){
+    var yr=parseInt(String(y).replace(/[^0-9]/g,''),10);
+    var e=fin.eps[i];
+    if(yr&&e!=null&&e>0) epsByYear[yr]=e;
+  });
+  if(!Object.keys(epsByYear).length) return null;
+  var pers=[];
+  chartPts.forEach(function(p){
+    if(!p||p.c==null||p.c<=0||!p.t) return;
+    var e=epsByYear[new Date(p.t*1000).getFullYear()];
+    if(e==null||e<=0) return;
+    var per=p.c/e;
+    if(isFinite(per)&&per>2&&per<150) pers.push(per); // exclut les aberrations (EPS quasi nul)
+  });
+  if(pers.length<30) return null; // pas assez de points → non fiable
+  pers.sort(function(a,b){return a-b;});
+  var m=Math.floor(pers.length/2);
+  return pers.length%2 ? pers[m] : (pers[m-1]+pers[m])/2;
+}
+
+function estimateExitMultiple(f, gC, medianPE) {
   if(!f) return 22;
 
   // ── 1. Base sectorielle (fwd P/E moyen historique par secteur GICS) ──────
@@ -4974,7 +5017,38 @@ function estimateExitMultiple(f, gC) {
     // Dans la fourchette raisonnable : blend 35/65 (ancré sur le target)
     result = Math.round(0.35 * curPE + 0.65 * targetM);
   }
-  return Math.max(9, Math.min(45, result));
+  var modelM = Math.max(9, Math.min(45, result));
+
+  // ── 7. CHOIX CONSERVATEUR : le plus bas des trois ancrages ──────────────
+  // modèle sectoriel · P/E forward actuel · médiane 5 ans du titre.
+  // Rationnel : si le rendement tient avec l'hypothèse la plus prudente,
+  // la marge de sécurité est réelle et non dépendante d'un re-rating espéré.
+  var cands=[modelM];
+  if(f.forwardPE!=null&&f.forwardPE>3&&f.forwardPE<100) cands.push(f.forwardPE);
+  if(medianPE!=null&&medianPE>3&&medianPE<100) cands.push(medianPE);
+  return Math.max(8, Math.round(Math.min.apply(null,cands)));
+}
+
+// Trajectoire d'EPS sur 3 ans à partir du consensus analystes.
+// Base = EPS forward de l'exercice en cours · fade GÉOMÉTRIQUE au-delà du consensus.
+function _epsPath3y(f, epsFallback){
+  var ae=(f&&f.analystEstimates)||null;
+  var epsBase=(ae&&ae.thisYear&&ae.thisYear.epsAvg>0)?ae.thisYear.epsAvg:epsFallback;
+  if(!(epsBase>0)) return null;
+  function ok(g){ return g!=null&&g>-50&&g<200; }
+  var g1=(ae&&ae.currentYear&&ok(ae.currentYear.epsGrowth))?ae.currentYear.epsGrowth:null;
+  var gThis=(ae&&ae.thisYear&&ok(ae.thisYear.epsGrowth))?ae.thisYear.epsGrowth:null;
+  if(g1==null&&ae&&ae.currentYear&&ae.currentYear.epsAvg>0&&epsBase>0){
+    var _g=(ae.currentYear.epsAvg/epsBase-1)*100; if(ok(_g)) g1=_g;
+  }
+  if(g1==null) g1=(f&&f.epsGrowthFwd1Y!=null&&ok(f.epsGrowthFwd1Y))?f.epsGrowthFwd1Y:12;
+  // Ratio de décélération observé entre l'exercice en cours et le suivant
+  var fade=(gThis!=null&&gThis>0&&g1>0)?(g1/gThis):0.85;
+  fade=Math.max(0.55,Math.min(1.0,fade)); // jamais d'accélération, jamais d'effondrement
+  var FLOOR=6;
+  var g2=Math.max(FLOOR,g1*fade), g3=Math.max(FLOOR,g2*fade);
+  var eps3=epsBase*(1+g1/100)*(1+g2/100)*(1+g3/100);
+  return {epsBase:epsBase, growths:[g1,g2,g3], eps3:eps3, fade:fade};
 }
 
 
@@ -4988,6 +5062,78 @@ var _ymSel={};
 // Croissance dérivée du consensus analystes (année 0 et +1), puis fade
 // GÉOMÉTRIQUE (multiplicatif) pour extrapoler l'année +2/+3.
 // ══════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════
+// MARGE DE SÉCURITÉ — le verdict d'achat (Graham appliqué au GARP)
+// Prix juste = EPS projeté 3 ans × multiple de sortie ÷ (1 + taux exigé)^3
+// Le taux exigé (défaut 15 %/an) est le rendement minimum accepté.
+// ══════════════════════════════════════════════════════════════════════════
+function _safetyMarginHtml(ticker, price, eps0, f, fin, cSym, exitMult, medianPE, tauxExige){
+  if(!(price>0)) return '';
+  var path=_epsPath3y(f, eps0);
+  if(!path) return '';
+  var H=3, tx=(tauxExige!=null&&tauxExige>0)?tauxExige:15;
+  var prixFutur=path.eps3*exitMult;
+  var prixJuste=prixFutur/Math.pow(1+tx/100,H);
+  var marge=(prixJuste-price)/prixJuste*100;
+  // Rendement annualisé implicite AU COURS ACTUEL
+  var cagr=(Math.pow(prixFutur/price,1/H)-1)*100;
+
+  var okCagr=isFinite(cagr)&&Math.abs(cagr)<200;
+  var col = marge>=25?'#16a34a' : marge>=10?'#22c55e' : marge>=0?'#d97706' : '#ef4444';
+  var verdict = marge>=25?'Marge de sécurité confortable'
+              : marge>=10?'Marge de sécurité correcte'
+              : marge>=0?'Marge de sécurité faible'
+              : 'Aucune marge — cours au-dessus du prix juste';
+
+  // Les trois ancrages de multiple, pour transparence
+  var anc=[];
+  if(f&&f.forwardPE>3&&f.forwardPE<100) anc.push({l:'P/E fwd actuel',v:f.forwardPE});
+  if(medianPE!=null) anc.push({l:'Médiane 5 ans',v:medianPE});
+  anc.push({l:'Modèle sectoriel',v:estimateExitMultiple(f,path.growths[0],null)});
+  var ancHtml=anc.map(function(a){
+    var used=Math.abs(a.v-exitMult)<0.6;
+    return '<span style="font-size:10px;padding:2px 7px;border-radius:5px;'+
+      (used?'background:'+col+'28;color:'+col+';font-weight:700':'background:var(--border2);color:var(--muted)')+'">'+
+      a.l+' '+a.v.toFixed(1)+'x'+(used?' ✓':'')+'</span>';
+  }).join(' ');
+
+  var gTxt=path.growths.map(function(g){return '+'+g.toFixed(0)+'%';}).join(' · ');
+
+  return '<div style="margin-bottom:18px;padding:16px 18px;background:linear-gradient(135deg,'+col+'16,'+col+'06);border:1.5px solid '+col+'55;border-radius:12px">'+
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:14px;margin-bottom:14px">'+
+      '<div>'+
+        '<div style="font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.05em;margin-bottom:3px">VERDICT — MARGE DE SÉCURITÉ à '+tx+' %/an sur '+H+' ans</div>'+
+        '<div style="font-size:20px;font-weight:900;color:'+col+'">'+(marge>=0?'+':'')+marge.toFixed(1)+' % <span style="font-size:13px;font-weight:600">'+verdict+'</span></div>'+
+      '</div>'+
+      '<div style="text-align:right">'+
+        '<div style="font-size:11px;color:var(--muted)">Rendement annualisé implicite au cours actuel</div>'+
+        '<div style="font-size:20px;font-weight:900;color:'+(okCagr&&cagr>=tx?'#16a34a':okCagr&&cagr>=10?'#d97706':'#ef4444')+'" class="mono">'+
+          (okCagr?(cagr>=0?'+':'')+cagr.toFixed(1)+' %/an':'—')+'</div>'+
+      '</div>'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:12px">'+
+      '<div style="background:rgba(255,255,255,.04);border-radius:8px;padding:9px 11px">'+
+        '<div style="font-size:10px;color:var(--muted)">Prix juste (max à payer)</div>'+
+        '<div style="font-size:16px;font-weight:800;color:'+col+'" class="mono">'+cSym+fN(prixJuste)+'</div></div>'+
+      '<div style="background:rgba(255,255,255,.04);border-radius:8px;padding:9px 11px">'+
+        '<div style="font-size:10px;color:var(--muted)">Cours actuel</div>'+
+        '<div style="font-size:16px;font-weight:800" class="mono">'+cSym+fN(price)+'</div></div>'+
+      '<div style="background:rgba(255,255,255,.04);border-radius:8px;padding:9px 11px">'+
+        '<div style="font-size:10px;color:var(--muted)">EPS base → 3 ans</div>'+
+        '<div style="font-size:15px;font-weight:700" class="mono">'+cSym+fN(path.epsBase)+' → '+cSym+fN(path.eps3)+'</div></div>'+
+      '<div style="background:rgba(255,255,255,.04);border-radius:8px;padding:9px 11px">'+
+        '<div style="font-size:10px;color:var(--muted)">Multiple de sortie retenu</div>'+
+        '<div style="font-size:16px;font-weight:800" class="mono">'+exitMult.toFixed(1)+'x</div></div>'+
+    '</div>'+
+    '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Ancrages du multiple (le <b>plus bas</b> est retenu) : '+ancHtml+'</div>'+
+    '<div style="font-size:10px;color:var(--muted2);line-height:1.5">'+
+      'Croissance EPS consensus puis fade géométrique ×'+path.fade.toFixed(2)+' : '+gTxt+' · '+
+      'Prix juste = EPS 3 ans × multiple ÷ (1+'+tx+'%)³. Hors dividendes. '+
+      'Une marge positive signifie que le cours actuel permet d\'atteindre '+tx+' %/an même avec ces hypothèses prudentes.'+
+    '</div>'+
+  '</div>';
+}
+
 function _perProjeteHtml(ticker, price, eps0, f, fin, cSym){
   if(!(price>0)||!(eps0>0)) return '';
   var ae = f && f.analystEstimates;
@@ -5085,7 +5231,7 @@ function renderYieldMatrix(ticker, price, f, fin){
   // Horizon 5 ou 10 ans
   var N=(st.n===10)?10:5;
   // Rendement cible (%/an) — 4ème paramètre éditable, défaut 10%
-  var rC = (st.r != null && st.r > 0) ? st.r : 10;
+  var rC = (st.r != null && st.r > 0) ? st.r : 15; // 15 %/an = objectif de surperformance vs Nasdaq
   var titleEl=document.getElementById('cd-matrix-title');
   if(titleEl) titleEl.textContent='\uD83C\uDFAF Matrice de rendement \u2014 '+N+' ans';
 
@@ -5130,7 +5276,9 @@ function renderYieldMatrix(ticker, price, f, fin){
   // ── MULTIPLE DE SORTIE — intelligent, jamais caché automatiquement ──────────
   // estimateExitMultiple() est toujours rappelé à chaque render.
   // St.mC n'est persisté QUE si l'utilisateur clique "Appliquer" (st.mManual=true).
-  var _fpeForMatrix = estimateExitMultiple(f, gC);
+  // Médiane P/E 5 ans du titre (depuis l'historique de cours déjà chargé)
+  var _medPE = _medianPE5y(fin, window._cdChartPts||[]);
+  var _fpeForMatrix = estimateExitMultiple(f, gC, _medPE);
   var mCur = (st.mManual && st.mC != null) ? st.mC : _fpeForMatrix;
   if(st.g==null||st.m==null){ st={g:gC,m:mCur,eps:eps0,gC:gC,n:N,mManual:false}; _ymSel[ticker]=st; }
   st.eps=eps0; st.gC=gC;  // Ne JAMAIS mettre à jour st.mC ici — uniquement via _ymApply
@@ -5172,6 +5320,7 @@ function renderYieldMatrix(ticker, price, f, fin){
       '<button class="btn btn-ghost btn-sm" onclick="window._ymDetail(\''+tName+'\','+gC+')" title="Voir le détail du calcul du multiple">🔍 Calcul</button>'+
       '<span style="font-size:10px;color:var(--muted2)">Croissance = consensus 5 ans Yahoo \u00b7 Multiple = estimation intelligente (secteur \u00b7 marges \u00b7 taille \u00b7 croissance)</span>'+
     '</div>'+
+    _safetyMarginHtml(ticker, price, eps0, f, fin, cSym, mCur, _medPE, rC) +
     _perProjeteHtml(ticker, price, eps0, f, fin, cSym) +
     '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:11px;white-space:nowrap" class="mono">'+
     '<tr><th style="padding:5px 8px;color:var(--muted);font-size:9px;text-align:left">CROISS. \\ MULT.</th>'+
