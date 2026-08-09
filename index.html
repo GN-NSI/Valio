@@ -2379,199 +2379,418 @@ function openCompanyDetail(ticker, name) {
 //            Croissance (25pts) + Santé financière (10pts)
 // Sources : Greenblatt (Magic Formula), Damodaran, Morgan Stanley Quality screen
 // ══════════════════════════════════════════════════════════════════════════
-function calcQualityScore(f, price, analysis) {
-  if(!f || !price) return null;
-  var score = 0, details = [];
-  var px = price.price;
-  var cur = price.currency === 'EUR' ? '€' : '$';
+// ══════════════════════════════════════════════════════════════════════════
+// VALIO_SCORING_V2 — Quality Score · Value/Expectations Score · Valio Score
+// Principe : la qualité de l'ENTREPRISE et la qualité de l'OPPORTUNITÉ au
+// cours actuel sont deux questions distinctes. Le Quality Score n'utilise
+// jamais le prix. La valorisation agit ensuite comme modificateur asymétrique.
+// ══════════════════════════════════════════════════════════════════════════
+function _clamp(v,mn,mx){ return Math.max(mn,Math.min(mx,v)); }
 
-  // ── BLOC 1 : VALORISATION (30 pts) ─────────────────────────────────────
-  // Forward PE (12 pts) : < 15 excellent, 15-25 bien, 25-35 acceptable, > 35 cher
-  var fpe = f.forwardPE;
-  if(fpe != null && fpe > 0) {
-    var fpeScore = fpe < 15 ? 12 : fpe < 20 ? 10 : fpe < 25 ? 8 : fpe < 30 ? 5 : fpe < 40 ? 3 : 1;
-    score += fpeScore;
-    details.push({label:'P/E Fwd', val: fpe.toFixed(1)+'x', pts: fpeScore, max: 12});
-  }
-  // PEG (10 pts) : < 1 excellent, 1-1.5 bien, 1.5-2 acceptable, > 2 cher
-  var peg = f.pegRatio;
-  if(peg != null && peg > 0) {
-    var pegScore = peg < 0.8 ? 10 : peg < 1.2 ? 8 : peg < 1.5 ? 6 : peg < 2 ? 4 : 2;
-    score += pegScore;
-    details.push({label:'PEG', val: peg.toFixed(2)+'x', pts: pegScore, max: 10});
-  }
-  // P/FCF (8 pts) : < 15 excellent, 15-25 bien, 25-35 correct, > 35 cher
-  var pfcf = f.pfcf;
-  if(pfcf != null && pfcf > 0) {
-    var pfcfScore = pfcf < 15 ? 8 : pfcf < 25 ? 6 : pfcf < 35 ? 4 : 2;
-    score += pfcfScore;
-    details.push({label:'P/FCF', val: pfcf.toFixed(1)+'x', pts: pfcfScore, max: 8});
-  }
-
-  // ── BLOC 2 : QUALITÉ & PROFITABILITÉ (35 pts) ───────────────────────────
-  // Marge nette (10 pts) : > 30% excellent, 20-30% bien, 10-20% correct, < 10% faible
-  var nm = f.profitMarginPct;
-  if(nm != null) {
-    var nmScore = nm > 30 ? 10 : nm > 20 ? 8 : nm > 10 ? 5 : nm > 0 ? 2 : 0;
-    score += nmScore;
-    details.push({label:'Marge nette', val: nm.toFixed(1)+'%', pts: nmScore, max: 10});
-  }
-  // Marge brute (8 pts) : > 60% excellent (software/tech), 40-60% bien, 20-40% correct
-  var gm = f.grossMarginPct;
-  if(gm != null) {
-    var gmScore = gm > 60 ? 8 : gm > 40 ? 6 : gm > 25 ? 4 : 2;
-    score += gmScore;
-    details.push({label:'Marge brute', val: gm.toFixed(1)+'%', pts: gmScore, max: 8});
-  }
-  // ROE (9 pts) : > 30% excellent (Buffett), 20-30% bien, 10-20% correct
-  var roe = f.returnOnEquity;
-  if(roe != null) {
-    var roeScore = roe > 30 ? 9 : roe > 20 ? 7 : roe > 10 ? 4 : 1;
-    score += roeScore;
-    details.push({label:'ROE', val: roe.toFixed(1)+'%', pts: roeScore, max: 9});
-  }
-  // ROIC (8 pts) : > 25% excellent, 15-25% bien, 10-15% correct
-  var roic = f.roic;
-  if(roic != null) {
-    var roicScore = roic > 25 ? 8 : roic > 15 ? 6 : roic > 10 ? 3 : 1;
-    score += roicScore;
-    details.push({label:'ROIC', val: roic.toFixed(1)+'%', pts: roicScore, max: 8});
-  }
-
-  // ── BLOC 3 : CROISSANCE (25 pts) ────────────────────────────────────────
-  // Croissance CA YoY (10 pts)
-  var caGrw = f.revenueGrowthYoY;
-  if(caGrw != null) {
-    var caScore = caGrw > 25 ? 10 : caGrw > 15 ? 8 : caGrw > 8 ? 6 : caGrw > 3 ? 3 : caGrw >= 0 ? 1 : 0;
-    score += caScore;
-    details.push({label:'Crois. CA 1A', val: (caGrw>=0?'+':'')+caGrw.toFixed(1)+'%', pts: caScore, max: 10});
-  }
-  // Croissance EPS forward (15 pts) — le plus important pour le long terme
-  var epsGrw = f.epsGrowthFwd1Y;
-  if(epsGrw != null) {
-    var epsScore = epsGrw > 30 ? 15 : epsGrw > 20 ? 12 : epsGrw > 12 ? 9 : epsGrw > 6 ? 5 : epsGrw >= 0 ? 2 : 0;
-    score += epsScore;
-    details.push({label:'Crois. EPS fwd', val: (epsGrw>=0?'+':'')+epsGrw.toFixed(1)+'%', pts: epsScore, max: 15});
-  }
-
-  // ── BLOC 4 : SANTÉ FINANCIÈRE (10 pts) ──────────────────────────────────
-  // Dette/EBITDA (5 pts) : < 1 excellent, 1-2 bien, 2-3.5 acceptable, > 3.5 risqué
-  var debt = f.netDebtToEBITDA;
-  if(debt != null) {
-    var debtScore = debt < 0 ? 5 : debt < 1 ? 5 : debt < 2 ? 4 : debt < 3.5 ? 2 : 0;
-    score += debtScore;
-    details.push({label:'Dette/EBITDA', val: debt.toFixed(1)+'x', pts: debtScore, max: 5});
-  }
-  // Current ratio (5 pts) : > 2 excellent, 1.5-2 bien, 1-1.5 correct, < 1 risqué
-  var cr = f.currentRatio;
-  if(cr != null) {
-    var crScore = cr > 2 ? 5 : cr > 1.5 ? 4 : cr > 1 ? 2 : 0;
-    score += crScore;
-    details.push({label:'Current Ratio', val: cr.toFixed(1)+'x', pts: crScore, max: 5});
-  }
-
-  // ── BLOC 5 : MOAT & LEVIER IA (10 pts) ─────────────────────────────────
-  // Basé sur l'analyse manuelle MOAT & IA saisie dans Valio
-  // MOAT (5 pts) : score MOAT /100 → ≥70 = 5pts, ≥40 = 3pts, sinon 1pt
-  // IA (5 pts)   : score IA /100  → ≥70 = 5pts, ≥40 = 3pts, sinon 1pt
-  if(analysis && analysis.moat) {
-    var ms = _moatScore(analysis.moat);
-    var moatNorm = Math.round(ms / 100 * 100); // déjà sur 100 (somme_max=25*4=100)
-    var moatPts = moatNorm >= 70 ? 5 : moatNorm >= 40 ? 3 : 1;
-    score += moatPts;
-    details.push({label:'MOAT', val: moatNorm+'/100', pts: moatPts, max: 5});
-  }
-  if(analysis && analysis.ai) {
-    var as2 = _aiScore(analysis.ai, analysis.ai_flags);
-    var aiNorm = Math.round(as2 / 100 * 100);
-    var aiPts = aiNorm >= 70 ? 5 : aiNorm >= 40 ? 3 : 1;
-    score += aiPts;
-    details.push({label:'Levier IA', val: aiNorm+'/100', pts: aiPts, max: 5});
-  }
-
-  // Normaliser sur 100 si certains champs manquent
-  // ── BLOC 0 : RENDEMENT ATTENDU 3 ANS (18 pts) — critère décisif ─────────
-  // Toujours calculé sur le SCÉNARIO CONSENSUS (jamais les hypothèses perso de
-  // l'utilisateur) : le score reste objectif et comparable entre deux titres.
-  // Barème calé sur l'objectif de 15 %/an (surperformance vs Nasdaq).
-  (function(){
-    if(!(px>0)) return;
-    var path=(typeof _epsPath3y==='function')?_epsPath3y(f, (f.forwardPE>0?px/f.forwardPE:null)):null;
-    if(!path||!(path.eps3>0)) return;
-    var mult=(typeof estimateExitMultiple==='function')?estimateExitMultiple(f, path.growths[0], null):null;
-    if(!(mult>0)) return;
-    var cagr=(Math.pow(path.eps3*mult/px,1/3)-1)*100;
-    if(!isFinite(cagr)||Math.abs(cagr)>200) return;
-    var pts = cagr>=25 ? 18 : cagr>=20 ? 16 : cagr>=15 ? 13 : cagr>=10 ? 8 : cagr>=5 ? 4 : cagr>=0 ? 1 : 0;
-    score += pts;
-    details.push({label:'Rendement attendu 3 ans', val:(cagr>=0?'+':'')+cagr.toFixed(1)+'%/an', pts:pts, max:18});
-  })();
-
-  var maxPossible = details.reduce(function(a,d){return a+d.max;},0);
-  var normalizedScore = maxPossible > 0 ? Math.round(score / maxPossible * 100) : null;
-
-  return {score: normalizedScore, raw: score, maxPossible: maxPossible, details: details};
+// Barème par paliers : renvoie les points du premier seuil atteint.
+function _tier(v, tiers){
+  if(v==null||!isFinite(v)) return null;
+  for(var i=0;i<tiers.length;i++){ if(v>tiers[i][0]) return tiers[i][1]; }
+  return tiers[tiers.length-1][1];
+}
+function calcPositiveCAGR(start,end,years){
+  if(!(start>0)||!(end>0)||!(years>0)) return null;
+  return (Math.pow(end/start,1/years)-1)*100;
 }
 
-function renderQualityBadge(f, price, ticker, analysis) {
-  var qs = calcQualityScore(f, price, analysis);
-  if(!qs || qs.score == null) return '';
-  var s = qs.score;
-  var bg = s >= 75 ? '#16a34a' : s >= 55 ? '#ca8a04' : s >= 35 ? '#f97316' : '#dc2626';
-  var label = s >= 75 ? 'Excellent' : s >= 55 ? 'Bon' : s >= 35 ? 'Correct' : 'Faible';
-  var r2 = 16, circ = 2*Math.PI*r2;
-  var dash = (s/100)*circ, gap = circ - dash;
-  var svg = '<svg width="40" height="40" style="transform:rotate(-90deg)">' +
-    '<circle cx="20" cy="20" r="'+r2+'" fill="none" stroke="var(--border2)" stroke-width="3.5"/>' +
-    '<circle cx="20" cy="20" r="'+r2+'" fill="none" stroke="'+bg+'" stroke-width="3.5" ' +
-      'stroke-dasharray="'+dash.toFixed(1)+' '+gap.toFixed(1)+'" stroke-linecap="round"/>' +
-    '</svg>';
-  window._qualityDetails = window._qualityDetails || {};
-  var tkKey = (ticker||'_').replace(/[^A-Za-z0-9]/g,'');
-  window._qualityDetails[tkKey] = qs;
-  return '<div onclick="window.showQualityDetail(\''+tkKey+'\');" '+
-    'style="display:flex;align-items:center;gap:8px;background:'+bg+'18;border:1px solid '+bg+'55;'+
-    'border-radius:10px;padding:6px 10px;cursor:pointer" title="Cliquer pour voir le detail du score">' +
-    '<div style="position:relative;width:40px;height:40px;flex-shrink:0">' +
-      svg +
-      '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:'+bg+';transform:rotate(90deg)">'+s+'</div>' +
-    '</div>' +
-    '<div><div style="font-size:13px;font-weight:800;color:'+bg+'">'+label+'</div>' +
-    '<div style="font-size:10px;color:var(--muted)">Score qualite</div></div>' +
-  '</div>';
+// ── MANAGEMENT / ALLOCATION DU CAPITAL (bloc manuel, comme MOAT et IA) ────
+var MGMT_CRIT=[
+  {k:'capital',  label:'Allocation du capital',            w:2, hint:'Réinvestissements, M&A, buybacks et dette créent-ils de la valeur ?'},
+  {k:'execution',label:'Qualité d\u2019exécution',           w:1, hint:'Le management tient-il ses objectifs ?'},
+  {k:'alignment',label:'Alignement actionnaires',          w:1, hint:'Dilution, rémunération, insider ownership'},
+  {k:'strategy', label:'Clarté et discipline stratégique', w:1, hint:'Investit-il dans les meilleurs projets sans dispersion ?'}
+];
+function _managementScore(m){
+  var w=0,mx=0;
+  MGMT_CRIT.forEach(function(c){ w+=(+(m&&m[c.k])||0)*c.w; mx+=4*c.w; });
+  return mx>0?w/mx*100:0;
 }
 
-window.showQualityDetail = function(tkKey){
-  var qs = window._qualityDetails && window._qualityDetails[tkKey];
-  if(!qs) return;
-  var s = qs.score;
-  var bg = s >= 75 ? '#16a34a' : s >= 55 ? '#ca8a04' : s >= 35 ? '#f97316' : '#dc2626';
-  var label = s >= 75 ? 'Excellent' : s >= 55 ? 'Bon' : s >= 35 ? 'Correct' : 'Faible';
-  var rows = qs.details.slice().sort(function(a,b){return b.max-a.max;}).map(function(d){
-    var pct2 = Math.round(d.pts/d.max*100);
-    var col2 = pct2>=75?'#16a34a':pct2>=50?'#22c55e':pct2>=30?'#d97706':'#ef4444';
-    var bar = '<div style="flex:1;height:6px;background:var(--border2);border-radius:3px;overflow:hidden">' +
-      '<div style="width:'+pct2+'%;height:100%;background:'+col2+';border-radius:3px"></div></div>';
-    return '<tr style="border-bottom:1px solid var(--border2)">' +
-      '<td style="padding:9px 8px;font-size:12px">'+d.label+'</td>' +
-      '<td style="padding:9px 8px;text-align:right;font-size:12px;font-weight:600" class="mono">'+d.val+'</td>' +
-      '<td style="padding:9px 8px;width:120px"><div style="display:flex;align-items:center;gap:6px">'+bar+
-        '<span style="font-size:11px;color:var(--muted);white-space:nowrap">'+d.pts+'/'+d.max+'</span></div></td>' +
-    '</tr>';
-  }).join('');
-  showModal('<div style="padding:24px">' +
-    '<div style="font-size:22px;font-weight:900;color:'+bg+';margin-bottom:4px">'+s+'/100 \u2014 '+label+'</div>' +
-    '<div style="font-size:12px;color:var(--muted);margin-bottom:16px">'+qs.raw+' pts / '+qs.maxPossible+' mesures \u2014 Approche Quality Growth long terme</div>' +
-    '<table style="width:100%;border-collapse:collapse">' +
-    '<thead><tr style="border-bottom:2px solid var(--border)">' +
-      '<th style="padding:8px;text-align:left;font-size:11px;color:var(--muted)">CRITERE</th>' +
-      '<th style="padding:8px;text-align:right;font-size:11px;color:var(--muted)">VALEUR</th>' +
-      '<th style="padding:8px;font-size:11px;color:var(--muted)">SCORE</th>' +
-    '</tr></thead><tbody>'+rows+'</tbody></table>' +
-    '<div style="font-size:10px;color:var(--muted);margin-top:12px">Valorisation (P/E Fwd, PEG, P/FCF) \u00b7 Qualite (Marges, ROE, ROIC) \u00b7 Croissance (CA, EPS fwd) \u00b7 Sante (Dette, Current Ratio)</div>' +
-  '</div>', 'Score Qualite / Valorisation');
+// ══════════════════════════════════════════════════════════════════════════
+// QUALITY SCORE /100 — INDÉPENDANT DU COURS
+// Croissance 35 · MOAT 25 · Qualité économique 25 · IA 10 · Management 5
+// ══════════════════════════════════════════════════════════════════════════
+function calcQualityScoreV2(opts){
+  var f=(opts&&opts.fundamentals)||null;
+  var fin=(opts&&opts.financials)||null;
+  var an=(opts&&opts.analysis)||null;
+  if(!f) return null;
+
+  var details=[], rawPoints=0, availableWeight=0, applicableWeight=0;
+  var blocks={
+    growth:{label:'Croissance',max:35,points:0},
+    moat:{label:'MOAT',max:25,points:0},
+    economicQuality:{label:'Qualité économique',max:25,points:0},
+    ai:{label:'Levier IA',max:10,points:0},
+    management:{label:'Management',max:5,points:0}
+  };
+
+  // Détection secteur financier : certaines métriques n'y sont pas applicables
+  var sector=f.sector||'';
+  var industry=(f.industry||'').toLowerCase();
+  var isFinancial=(sector==='Financials'||sector==='Financial Services'||
+                   industry.indexOf('bank')>=0||industry.indexOf('insurance')>=0);
+
+  // add(bloc, libellé, valeur, format, barème, poids, applicable)
+  function add(block,label,val,fmt,tiers,max,applicable){
+    if(applicable===false){
+      details.push({block:block,label:label,val:'n/a',pts:null,max:max,state:'na'});
+      return;
+    }
+    applicableWeight+=max;
+    var pts=_tier(val,tiers);
+    if(pts==null){
+      details.push({block:block,label:label,val:'\u2014',pts:null,max:max,state:'missing'});
+      return;
+    }
+    availableWeight+=max; rawPoints+=pts; blocks[block].points+=pts;
+    details.push({block:block,label:label,val:fmt(val),pts:pts,max:max,state:'ok'});
+  }
+  var pct=function(v){ return (v>=0?'+':'')+v.toFixed(1)+'%'; };
+  var pctAbs=function(v){ return v.toFixed(1)+'%'; };
+  var mult=function(v){ return v.toFixed(1)+'x'; };
+
+  // ═══ BLOC 1 — CROISSANCE (35 pts) ═══ jamais corrigée par secteur
+  add('growth','Croissance CA (histo.)', f.revenueGrowthYoY, pct,
+      [[30,6],[20,5],[12,4],[7,3],[3,1.5],[0,0.5],[-1e9,0]], 6, true);
+  add('growth','Croissance CA FY1', (f.revenueGrowthFY1!=null?f.revenueGrowthFY1:f.revenueGrowthFwd1Y), pct,
+      [[25,8],[18,7],[12,5.5],[7,4],[3,2],[0,0.5],[-1e9,0]], 8, true);
+  add('growth','Croissance EPS (histo.)', f.epsGrowth1Y, pct,
+      [[30,6],[20,5],[12,4],[7,3],[3,1.5],[0,0.5],[-1e9,0]], 6, true);
+  add('growth','Croissance EPS FY1', (f.epsGrowthFY1!=null?f.epsGrowthFY1:f.epsGrowthFwd1Y), pct,
+      [[35,10],[25,9],[18,7],[12,5],[7,3],[3,1.5],[0,0.5],[-1e9,0]], 10, true);
+
+  // Croissance FCF : CAGR sur la plus longue période disponible (2 à 4 ans)
+  var fcfCagr=null;
+  try{
+    var fcfArr=(fin&&fin.freeCashFlow)||null;
+    if(fcfArr&&fcfArr.length>=3){
+      var vals=fcfArr.filter(function(v){return v!=null;});
+      if(vals.length>=3){
+        var end=vals[vals.length-1], nY=Math.min(3,vals.length-1);
+        var start=vals[vals.length-1-nY];
+        fcfCagr=calcPositiveCAGR(start,end,nY); // null si l'un des deux <= 0
+      }
+    }
+  }catch(e){}
+  add('growth','Croissance FCF (CAGR)', fcfCagr, pct,
+      [[25,5],[15,4],[8,3],[3,1.5],[0,0.5],[-1e9,0]], 5, true);
+
+  // ═══ BLOC 2 — MOAT (25 pts) ═══ analyse manuelle
+  applicableWeight+=25;
+  if(an&&an.moat){
+    var ms=_moatScore(an.moat);
+    var moatPts=ms/100*25;
+    if(an.moat_trend==='up') moatPts+=2;
+    if(an.moat_trend==='down') moatPts-=2;
+    moatPts=_clamp(moatPts,0,25);
+    availableWeight+=25; rawPoints+=moatPts; blocks.moat.points=moatPts;
+    details.push({block:'moat',label:'MOAT'+(an.moat_trend==='up'?' \u2197':an.moat_trend==='down'?' \u2198':''),
+                  val:Math.round(ms)+'/100',pts:moatPts,max:25,state:'ok'});
+  } else {
+    details.push({block:'moat',label:'MOAT',val:'non analysé',pts:null,max:25,state:'missing'});
+  }
+
+  // ═══ BLOC 3 — QUALITÉ ÉCONOMIQUE (25 pts) ═══
+  add('economicQuality','ROIC', f.roic, pctAbs,
+      [[30,7],[20,6],[15,5],[10,3.5],[7,2],[0,0.5],[-1e9,0]], 7, !isFinancial);
+  add('economicQuality','Marge opérationnelle', f.operatingMarginPct, pctAbs,
+      [[35,5],[25,4.5],[18,3.5],[10,2.5],[5,1],[0,0.5],[-1e9,0]], 5, true);
+
+  // FCF Margin = FCF / CA
+  var fcfMargin=null;
+  try{
+    var revTTM=null;
+    if(fin&&fin.revenue&&fin.revenue.length){
+      for(var i=fin.revenue.length-1;i>=0;i--){ if(fin.revenue[i]>0){ revTTM=fin.revenue[i]; break; } }
+    }
+    if(revTTM>0&&f.freeCashflow!=null) fcfMargin=f.freeCashflow/revTTM*100;
+  }catch(e){}
+  add('economicQuality','FCF Margin', fcfMargin, pctAbs,
+      [[30,5],[20,4],[12,3],[7,2],[2,1],[0,0.5],[-1e9,0]], 5, !isFinancial);
+
+  // Dette : si EBITDA <= 0 et dette nette positive, c'est 0 point (pas "manquant")
+  var ndE=f.netDebtToEBITDA;
+  if(!isFinancial&&ndE==null&&f.netDebt!=null&&f.netDebt>0&&(f.ebitda==null||f.ebitda<=0)) ndE=99;
+  add('economicQuality','Dette nette / EBITDA', (ndE!=null?-ndE:null), function(v){return mult(-v);},
+      [[0,5],[-1,4.5],[-2,3.5],[-3,2],[-4,0.5],[-1e9,0]], 5, !isFinancial);
+  add('economicQuality','ROE', f.returnOnEquity, pctAbs,
+      [[30,3],[20,2.5],[12,2],[7,1],[0,0.25],[-1e9,0]], 3, true);
+
+  // ═══ BLOC 4 — LEVIER IA (10 pts) ═══ avec protection anti-hype
+  applicableWeight+=10;
+  if(an&&an.ai){
+    var as=_aiScore(an.ai,an.ai_flags);
+    var aiPts=as/100*10;
+    var proof=+(an.ai.proof||0), whoPays=+(an.ai.whopays||0);
+    if(proof<=1&&whoPays<=1) aiPts=Math.min(aiPts,4);
+    else if(proof<=1||whoPays<=1) aiPts=Math.min(aiPts,6);
+    if(an.ai_trend==='up') aiPts+=1;
+    if(an.ai_trend==='down') aiPts-=1;
+    aiPts=_clamp(aiPts,0,10);
+    availableWeight+=10; rawPoints+=aiPts; blocks.ai.points=aiPts;
+    details.push({block:'ai',label:'Levier IA'+(an.ai_trend==='up'?' \u2197':an.ai_trend==='down'?' \u2198':''),
+                  val:Math.round(as)+'/100',pts:aiPts,max:10,state:'ok'});
+  } else {
+    details.push({block:'ai',label:'Levier IA',val:'non analysé',pts:null,max:10,state:'missing'});
+  }
+
+  // ═══ BLOC 5 — MANAGEMENT (5 pts) ═══
+  applicableWeight+=5;
+  if(an&&an.management){
+    var gs=_managementScore(an.management);
+    var mgPts=gs/100*5;
+    if(an.management_trend==='up') mgPts+=0.5;
+    if(an.management_trend==='down') mgPts-=0.5;
+    mgPts=_clamp(mgPts,0,5);
+    availableWeight+=5; rawPoints+=mgPts; blocks.management.points=mgPts;
+    details.push({block:'management',label:'Management',val:Math.round(gs)+'/100',pts:mgPts,max:5,state:'ok'});
+  } else {
+    details.push({block:'management',label:'Management',val:'non analysé',pts:null,max:5,state:'missing'});
+  }
+
+  // Normalisation sur les seuls critères disponibles + couverture
+  var coveragePct=applicableWeight>0?availableWeight/applicableWeight*100:0;
+  var score=availableWeight>0?Math.round(rawPoints/availableWeight*100):null;
+  var reliability=coveragePct>=80?'ok':coveragePct>=65?'partial':'low';
+
+  return {score:score, version:'VALIO_QUALITY_V2', rawPoints:rawPoints,
+          availableWeight:availableWeight, applicableWeight:applicableWeight,
+          coveragePct:coveragePct, reliability:reliability, isFinancial:isFinancial,
+          blocks:blocks, details:details};
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// VALUE / EXPECTATIONS SCORE — dépend du cours
+// Growth Gap = croissance EPS attendue − croissance EPS exigée par le cours
+// ══════════════════════════════════════════════════════════════════════════
+var VALIO_TARGET_RETURN=0.15; // 15 %/an
+var VALIO_HORIZON=3;          // 3 ans
+
+// Trajectoire d'EPS consensus, sans plancher caché
+function buildConsensusEpsPath(f,epsBase,horizon){
+  if(!(epsBase>0)) return null;
+  var g1=(f.epsGrowthFY1!=null?f.epsGrowthFY1:f.epsGrowthFwd1Y);
+  if(g1==null||!isFinite(g1)) return null;
+  g1=_clamp(g1,-60,120);
+  var gLong=(f.epsGrowthFwd5Y!=null&&isFinite(f.epsGrowthFwd5Y))?_clamp(f.epsGrowthFwd5Y,-30,60):g1*0.75;
+  var growths=[], eps=epsBase;
+  for(var i=0;i<horizon;i++){
+    // Fade linéaire explicite de g1 vers gLong sur l'horizon
+    var w=horizon>1?(i/(horizon-1)):0;
+    var g=g1*(1-w)+gLong*w;
+    growths.push(g); eps=eps*(1+g/100);
+  }
+  return {growths:growths, epsN:eps,
+          cagr:(Math.pow(eps/epsBase,1/horizon)-1)*100};
+}
+
+// Multiple de sortie NORMALISÉ — hypothèse Valio explicite, sans historique P/E
+var VALIO_SECTOR_BASE={
+  'Technology':25,'Information Technology':25,'Communication Services':21,
+  'Consumer Discretionary':20,'Consumer Cyclical':20,'Consumer Staples':18,'Consumer Defensive':18,
+  'Healthcare':20,'Health Care':20,'Financials':13,'Financial Services':13,
+  'Industrials':18,'Materials':14,'Basic Materials':14,'Energy':11,
+  'Utilities':14,'Real Estate':17
 };
+function estimateNormalizedExitMultiple(f,qualityScore){
+  var base=VALIO_SECTOR_BASE[f.sector]||18;
+  var growth=(f.epsGrowthFY1!=null?f.epsGrowthFY1:f.epsGrowthFwd1Y);
+  var growthAdj=(growth!=null&&isFinite(growth))?_clamp((growth-10)/5,-3,6):0;
+  var qualityAdj=0;
+  if(qualityScore!=null){
+    if(qualityScore>=90) qualityAdj=4;
+    else if(qualityScore>=80) qualityAdj=3;
+    else if(qualityScore>=70) qualityAdj=2;
+    else if(qualityScore>=60) qualityAdj=1;
+    else if(qualityScore<40) qualityAdj=-2;
+  }
+  return {value:_clamp(base+growthAdj+qualityAdj,8,40),
+          sectorBase:base, growthAdj:growthAdj, qualityAdj:qualityAdj};
+}
 
+function calcRequiredEpsGrowth(o){
+  if(!(o.currentPrice>0)||!(o.epsBase>0)||!(o.horizon>0)||!(o.exitMultiple>0)) return null;
+  var futurePrice=o.currentPrice*Math.pow(1+o.targetReturn,o.horizon);
+  var requiredEps=futurePrice/o.exitMultiple;
+  return (Math.pow(requiredEps/o.epsBase,1/o.horizon)-1)*100;
+}
+
+function gapToScore(gap){
+  if(gap==null||!isFinite(gap)) return null;
+  return _clamp(50+4*gap,0,100);
+}
+
+function calcValueExpectationsScore(o){
+  var f=o.fundamentals, price=o.price;
+  var qualityScore=o.qualityScore;
+  var targetReturn=(o.targetReturn!=null?o.targetReturn:VALIO_TARGET_RETURN);
+  var horizon=(o.horizon!=null?o.horizon:VALIO_HORIZON);
+  if(!f||!(price>0)) return null;
+
+  // EPS de départ = consensus FY0 (base comparable entre entreprises)
+  var epsBase=(f.epsFY0!=null&&f.epsFY0>0)?f.epsFY0
+             :((f.analystEstimates&&f.analystEstimates.thisYear&&f.analystEstimates.thisYear.epsAvg>0)
+                ?f.analystEstimates.thisYear.epsAvg:null);
+  if(!(epsBase>0)) return {score:null, reason:'EPS FY0 indisponible ou négatif', notMeaningful:true};
+
+  var path=buildConsensusEpsPath(f,epsBase,horizon);
+  if(!path) return {score:null, reason:'Croissance consensus FY1 indisponible', notMeaningful:true};
+
+  var em=estimateNormalizedExitMultiple(f,qualityScore);
+  var exitBase=em.value;
+  var exitBear=Math.max(8,exitBase*0.80);
+  var exitBull=Math.min(45,exitBase*1.15);
+
+  function req(m){ return calcRequiredEpsGrowth({currentPrice:price,epsBase:epsBase,horizon:horizon,targetReturn:targetReturn,exitMultiple:m}); }
+  var rBase=req(exitBase), rBear=req(exitBear), rBull=req(exitBull);
+
+  var gBase=(rBase!=null)?path.cagr-rBase:null;
+  var gBear=(rBear!=null)?path.cagr-rBear:null;
+  var gBull=(rBull!=null)?path.cagr-rBull:null;
+
+  var sBase=gapToScore(gBase), sBear=gapToScore(gBear), sBull=gapToScore(gBull);
+  var score=(sBase!=null&&sBear!=null)?Math.round(_clamp(0.65*sBase+0.35*sBear,0,100)):null;
+
+  return {score:score, version:'VALIO_VALUE_V2', currentPrice:price, epsBase:epsBase,
+          expectedEpsN:path.epsN, expectedCagr:path.cagr, growths:path.growths,
+          targetReturn:targetReturn*100, horizon:horizon,
+          exitMultiple:{bear:exitBear,base:exitBase,bull:exitBull}, exitDetail:em,
+          requiredGrowth:{bear:rBear,base:rBase,bull:rBull},
+          growthGap:{bear:gBear,base:gBase,bull:gBull},
+          gapScores:{bear:sBear,base:sBase,bull:sBull}};
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// VALIO SCORE — la valorisation MODIFIE la qualité, elle ne la remplace pas
+// ══════════════════════════════════════════════════════════════════════════
+function valueScoreToAdjustment(v){
+  if(v==null) return 0;
+  if(v>=90) return 10;
+  if(v>=80) return 7;
+  if(v>=70) return 4;
+  if(v>=60) return 1;
+  if(v>=50) return 0;
+  if(v>=40) return -4;
+  if(v>=30) return -8;
+  if(v>=20) return -12;
+  return -20;
+}
+function calcValioScore(qualityScore,valueScore){
+  if(qualityScore==null) return null;
+  return Math.round(_clamp(qualityScore+valueScoreToAdjustment(valueScore),0,100));
+}
+
+// Point d'entrée unique
+function calcValioScoring(f,price,analysis,financials){
+  var q=calcQualityScoreV2({fundamentals:f,financials:financials,analysis:analysis});
+  if(!q) return null;
+  var v=calcValueExpectationsScore({fundamentals:f,price:price,qualityScore:q.score});
+  var adj=valueScoreToAdjustment(v&&v.score);
+  return {quality:q, value:v, valuationAdjustment:adj,
+          valioScore:calcValioScore(q.score, v&&v.score),
+          versions:{quality:'VALIO_QUALITY_V2',value:'VALIO_VALUE_V2',scoring:'VALIO_SCORING_V2'}};
+}
+
+// ── BADGE + MODALE ────────────────────────────────────────────────────────
+function renderQualityBadge(f, price, ticker, analysis){
+  var r=calcValioScoring(f, price&&price.price, analysis, window._cdLastFin);
+  if(!r||r.valioScore==null) return '';
+  var s=r.valioScore;
+  var bg=s>=80?'#16a34a':s>=65?'#22c55e':s>=50?'#ca8a04':s>=35?'#f97316':'#dc2626';
+  var lbl=s>=80?'Excellent':s>=65?'Bon':s>=50?'Correct':s>=35?'Moyen':'Faible';
+  var rr=16, circ=2*Math.PI*rr, dash=(s/100)*circ;
+  var svg='<svg width="40" height="40" style="transform:rotate(-90deg)">'+
+    '<circle cx="20" cy="20" r="'+rr+'" fill="none" stroke="var(--border2)" stroke-width="3.5"/>'+
+    '<circle cx="20" cy="20" r="'+rr+'" fill="none" stroke="'+bg+'" stroke-width="3.5" stroke-dasharray="'+dash.toFixed(1)+' '+(circ-dash).toFixed(1)+'" stroke-linecap="round"/></svg>';
+  window._valioScoring=window._valioScoring||{};
+  var k=(ticker||'_').replace(/[^A-Za-z0-9]/g,'');
+  window._valioScoring[k]=r;
+  var warn=(r.quality.reliability!=='ok')?'<span title="Données partielles" style="color:#f59e0b"> \u26a0</span>':'';
+  return '<div onclick="window.showQualityDetail(\''+k+'\')" style="display:flex;align-items:center;gap:8px;'+
+    'background:'+bg+'18;border:1px solid '+bg+'55;border-radius:10px;padding:6px 10px;cursor:pointer" title="Valio Score \u2014 cliquer pour le d\u00e9tail">'+
+    '<div style="position:relative;width:40px;height:40px;flex-shrink:0">'+svg+
+      '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:'+bg+';transform:rotate(90deg)">'+s+'</div></div>'+
+    '<div><div style="font-size:13px;font-weight:800;color:'+bg+'">'+lbl+warn+'</div>'+
+    '<div style="font-size:10px;color:var(--muted)">Q '+r.quality.score+' \u00b7 V '+(r.value&&r.value.score!=null?r.value.score:'N/M')+'</div></div></div>';
+}
+
+window.showQualityDetail=function(k){
+  var r=window._valioScoring&&window._valioScoring[k]; if(!r) return;
+  var q=r.quality, v=r.value;
+  var col=function(s){ return s>=80?'#16a34a':s>=65?'#22c55e':s>=50?'#ca8a04':s>=35?'#f97316':'#dc2626'; };
+  function bar(p,m){
+    var pc=m>0?Math.round(p/m*100):0;
+    var c=pc>=75?'#16a34a':pc>=50?'#22c55e':pc>=30?'#d97706':'#ef4444';
+    return '<div style="flex:1;height:6px;background:var(--border2);border-radius:3px;overflow:hidden"><div style="width:'+pc+'%;height:100%;background:'+c+'"></div></div>';
+  }
+  // Synthèse des blocs Quality
+  var bk=['growth','moat','economicQuality','ai','management'].map(function(key){
+    var b=q.blocks[key];
+    return '<tr style="border-bottom:1px solid var(--border2)"><td style="padding:7px 8px;font-size:12px;font-weight:600">'+b.label+'</td>'+
+      '<td style="padding:7px 8px;width:130px"><div style="display:flex;align-items:center;gap:6px">'+bar(b.points,b.max)+
+      '<span style="font-size:11px;color:var(--muted);white-space:nowrap" class="mono">'+b.points.toFixed(1)+'/'+b.max+'</span></div></td></tr>';
+  }).join('');
+  // Détail critère par critère
+  var det=q.details.map(function(d){
+    var st=d.state==='na'?'<span style="font-size:10px;color:var(--muted2)">non applicable</span>'
+          :d.state==='missing'?'<span style="font-size:10px;color:#f59e0b">donnée manquante</span>'
+          :'<div style="display:flex;align-items:center;gap:6px">'+bar(d.pts,d.max)+'<span style="font-size:11px;color:var(--muted);white-space:nowrap" class="mono">'+d.pts.toFixed(1)+'/'+d.max+'</span></div>';
+    return '<tr style="border-bottom:1px solid var(--border2)"><td style="padding:6px 8px;font-size:11px;color:var(--muted)">'+d.label+'</td>'+
+      '<td style="padding:6px 8px;text-align:right;font-size:11px;font-weight:600" class="mono">'+d.val+'</td>'+
+      '<td style="padding:6px 8px;width:130px">'+st+'</td></tr>';
+  }).join('');
+
+  var vHtml='';
+  if(v&&v.score!=null){
+    var gg=v.growthGap, rq=v.requiredGrowth;
+    function row(lbl,mlt,rqv,gapv,sc){
+      var c=gapv>=0?'#22c55e':'#ef4444';
+      return '<tr style="border-bottom:1px solid var(--border2)"><td style="padding:7px 8px;font-size:12px;font-weight:600">'+lbl+'</td>'+
+        '<td style="padding:7px 8px;text-align:right;font-size:11px" class="mono">'+mlt.toFixed(1)+'x</td>'+
+        '<td style="padding:7px 8px;text-align:right;font-size:11px" class="mono">'+(rqv!=null?rqv.toFixed(1)+'%':'\u2014')+'</td>'+
+        '<td style="padding:7px 8px;text-align:right;font-size:12px;font-weight:800;color:'+c+'" class="mono">'+(gapv!=null?(gapv>=0?'+':'')+gapv.toFixed(1)+' pts':'\u2014')+'</td>'+
+        '<td style="padding:7px 8px;text-align:right;font-size:11px;color:var(--muted)" class="mono">'+(sc!=null?Math.round(sc):'\u2014')+'</td></tr>';
+    }
+    vHtml='<div style="margin-top:22px"><div style="font-size:14px;font-weight:800;color:'+col(v.score)+';margin-bottom:2px">Value / Expectations : '+v.score+'/100</div>'+
+      '<div style="font-size:11px;color:var(--muted);margin-bottom:12px">Croissance EPS <b style="color:var(--text)">attendue '+v.expectedCagr.toFixed(1)+'%/an</b> vs croissance <b style="color:var(--text)">exigée</b> par le cours pour obtenir '+v.targetReturn+'%/an sur '+v.horizon+' ans. Base EPS FY0 : '+v.epsBase.toFixed(2)+'</div>'+
+      '<table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid var(--border)">'+
+        '<th style="padding:6px 8px;text-align:left;font-size:10px;color:var(--muted)">SC\u00c9NARIO</th>'+
+        '<th style="padding:6px 8px;text-align:right;font-size:10px;color:var(--muted)">MULTIPLE</th>'+
+        '<th style="padding:6px 8px;text-align:right;font-size:10px;color:var(--muted)">CROISS. EXIG\u00c9E</th>'+
+        '<th style="padding:6px 8px;text-align:right;font-size:10px;color:var(--muted)">GROWTH GAP</th>'+
+        '<th style="padding:6px 8px;text-align:right;font-size:10px;color:var(--muted)">SCORE</th></tr></thead><tbody>'+
+      row('Bear',v.exitMultiple.bear,rq.bear,gg.bear,v.gapScores.bear)+
+      row('Base',v.exitMultiple.base,rq.base,gg.base,v.gapScores.base)+
+      row('Bull',v.exitMultiple.bull,rq.bull,gg.bull,v.gapScores.bull)+
+      '</tbody></table>'+
+      '<div style="font-size:10px;color:var(--muted2);margin-top:8px">Multiple normalis\u00e9 Valio = base sectorielle '+v.exitDetail.sectorBase+'x '+(v.exitDetail.growthAdj>=0?'+':'')+v.exitDetail.growthAdj.toFixed(1)+' (croissance) '+(v.exitDetail.qualityAdj>=0?'+':'')+v.exitDetail.qualityAdj+' (qualit\u00e9). Score = 65% Base + 35% Bear.</div></div>';
+  } else {
+    vHtml='<div style="margin-top:22px;padding:12px;background:rgba(245,158,11,.12);border-radius:8px;font-size:12px;color:#f59e0b">Value Score <b>non mesurable</b>'+((v&&v.reason)?' \u2014 '+v.reason:'')+'</div>';
+  }
+
+  var adjTxt=r.valuationAdjustment>0?'+'+r.valuationAdjustment:''+r.valuationAdjustment;
+  var covTxt=q.reliability==='ok'?'':q.reliability==='partial'
+    ?'<div style="margin-top:8px;font-size:11px;color:#f59e0b">\u26a0 Donn\u00e9es partielles \u2014 couverture '+q.coveragePct.toFixed(0)+'%</div>'
+    :'<div style="margin-top:8px;font-size:11px;color:#ef4444">\u26a0 Couverture insuffisante ('+q.coveragePct.toFixed(0)+'%) \u2014 score peu fiable</div>';
+
+  showModal('<div style="padding:24px">'+
+    '<div style="font-size:26px;font-weight:900;color:'+col(r.valioScore)+'">'+r.valioScore+'/100 <span style="font-size:14px;font-weight:600;color:var(--muted)">Valio Score</span></div>'+
+    '<div style="font-size:12px;color:var(--muted);margin-bottom:4px">Qualit\u00e9 <b style="color:var(--text)">'+q.score+'</b> '+adjTxt+' (ajustement valorisation) = <b style="color:'+col(r.valioScore)+'">'+r.valioScore+'</b></div>'+
+    covTxt+
+    '<div style="margin-top:20px;font-size:14px;font-weight:800;color:'+col(q.score)+'">Quality Score : '+q.score+'/100 <span style="font-size:11px;font-weight:400;color:var(--muted)">\u2014 ind\u00e9pendant du cours</span></div>'+
+    '<table style="width:100%;border-collapse:collapse;margin-top:8px"><tbody>'+bk+'</tbody></table>'+
+    '<div style="margin-top:14px;font-size:11px;color:var(--muted);font-weight:700">D\u00c9TAIL PAR CRIT\u00c8RE</div>'+
+    '<table style="width:100%;border-collapse:collapse;margin-top:4px"><tbody>'+det+'</tbody></table>'+
+    vHtml+
+    '<div style="font-size:10px;color:var(--muted2);margin-top:14px">'+r.versions.scoring+' \u00b7 Une faible valorisation ne transforme jamais une mauvaise entreprise en excellente : la valorisation ajuste le score de qualit\u00e9 de facon asym\u00e9trique (bonus max +10, malus max -20).</div>'+
+  '</div>','Valio Score');
+};
 
 async function renderCompanyDetail(ticker, name) {
   var pg = document.getElementById('page');
@@ -2660,7 +2879,8 @@ async function renderCompanyDetail(ticker, name) {
     var _moatRow = await loadAnalysis(ticker);
     if(_moatRow && _moatRow.data) _moatAnalysis = _moatRow.data;
   } catch(e){}
-  var _qualityBadge = renderQualityBadge(f, price, ticker, _moatAnalysis);
+  window._cdLastAnalysis = _moatAnalysis;
+  var _qualityBadge = '<div id="valio-score-badge">'+renderQualityBadge(f, price, ticker, _moatAnalysis)+'</div>';
   cd.innerHTML =
     // Layout 2 colonnes : gauche = ratios, droite = graphique
     '<div style="display:grid;grid-template-columns:minmax(320px,2fr) 3fr;gap:20px;align-items:start">' +
@@ -3495,7 +3715,12 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
       else cdValChart('cdchart-pfcf', fin.years, pfcfVals, curPFCF,          'P/FCF');
       if(pocfTS.length>=8) cdRatioTimeChart('cdchart-pocf','P/OCF',pocfTS, f&&f.pocf, _buyTs,_sellTs);
       else cdValChart('cdchart-pocf', fin.years, pocfVals, curPOCF,          'P/OCF');
-      try{ window._cdLastFin=fin; window._cdLastManual=manualData; window._cdLastNativePrice=curPrice; renderYieldMatrix(ticker, curPrice, f, fin); }catch(e){ var ym=document.getElementById('cd-yield-matrix'); if(ym) ym.innerHTML='<div style="color:var(--muted);font-size:12px">Données insuffisantes (EPS manquant).</div>'; }
+      try{ window._cdLastFin=fin; window._cdLastManual=manualData; window._cdLastNativePrice=curPrice; renderYieldMatrix(ticker, curPrice, f, fin);
+        // Les financials viennent d'arriver → ROIC et FCF Margin sont désormais
+        // calculables : on recalcule le Valio Score avec une couverture complète.
+        var _bEl=document.getElementById('valio-score-badge');
+        if(_bEl) _bEl.innerHTML=renderQualityBadge(f, window._cdLastPrice, ticker, window._cdLastAnalysis);
+      }catch(e){ var ym=document.getElementById('cd-yield-matrix'); if(ym) ym.innerHTML='<div style="color:var(--muted);font-size:12px">Données insuffisantes (EPS manquant).</div>'; }
       // Segments pie (données manuelles)
       // Breakdown card chart (segments ou géographie selon vue active)
       var _bkdRenderChart = function(view) {
