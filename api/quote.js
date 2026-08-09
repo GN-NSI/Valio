@@ -101,12 +101,12 @@ module.exports = async (req, res) => {
   if (type === 'fundamentals') {
     try {
       // Cache Supabase → réponse instantanée si données < 24h
-      const CACHE_V = 9; // v9 = + thisYear (trend0y = exercice fiscal en cours, ex: FY2026 GOOGL)
+      const CACHE_V = 10; // v10 = VALIO_SCORING_V2 : alias fy0/fy1, epsFY0/FY1, growth FY1
       const cached = await getCache(symbol);
       const cacheValid = cached
         && cached._v === CACHE_V
         && cached.grossMarginPct !== undefined
-        && cached.epsGrowthFwd1Y !== undefined;
+        && cached.epsFY0 !== undefined;
       if (cacheValid) return res.json({ ...cached, _fromCache: true });
 
       // Sinon : Yahoo Finance quoteSummary
@@ -258,6 +258,16 @@ module.exports = async (req, res) => {
         revenueGrowthYoY:   pct(fd.revenueGrowth),
         epsGrowth1Y:        pct(fd.earningsGrowth),
         epsGrowthFwd1Y,
+        // ── VALIO_SCORING_V2 : sémantique explicite FY0 / FY1 ────────────────
+        // FY0 = exercice fiscal EN COURS · FY1 = exercice SUIVANT.
+        // Évite l'ambiguïté du « forward PE » qui pouvait désigner l'un ou l'autre.
+        epsFY0: trend0y?.earningsEstimate?.avg?.raw ?? null,
+        epsFY1: trend1y?.earningsEstimate?.avg?.raw ?? null,
+        epsGrowthFY0: trend0y?.earningsEstimate?.growth?.raw != null ? trend0y.earningsEstimate.growth.raw*100 : null,
+        epsGrowthFY1: trend1y?.earningsEstimate?.growth?.raw != null ? trend1y.earningsEstimate.growth.raw*100 : null,
+        revenueFY0: trend0y?.revenueEstimate?.avg?.raw ?? null,
+        revenueFY1: trend1y?.revenueEstimate?.avg?.raw ?? null,
+        revenueGrowthFY1: trend1y?.revenueEstimate?.growth?.raw != null ? trend1y.revenueEstimate.growth.raw*100 : null,
         epsGrowthFwd5Y,
         revenueGrowthFwd1Y,
         freeCashflow: fcf, operatingCashFlow: ocf,
