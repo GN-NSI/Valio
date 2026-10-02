@@ -234,6 +234,60 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 }
 </style>
 
+
+<style id="valio-v2-layout-performance">
+/* ═══ VALIO V2 — PLEINE LARGEUR GLOBALE ═══ */
+#main{flex:1 1 0%;width:0;max-width:none!important;min-width:0!important}
+#page,#page-portfolio{width:100%!important;max-width:none!important;min-width:0!important;align-self:stretch!important}
+#page>* ,#page-portfolio>*{max-width:none!important;box-sizing:border-box}
+#page>div,#page-portfolio>div{width:100%!important;max-width:none!important}
+#page .card,#page-portfolio .card{max-width:none!important;box-sizing:border-box}
+#cd-content,#cd-content>div,#cdtab-ensemble,#cdtab-ratios,#cdtab-fin,#cdtab-mat,#cdtab-moat,#cdtab-analysts,#cdtab-sector{width:100%!important;max-width:none!important;min-width:0!important}
+.page-content,.friend-portfolio-wrap,.deposits-wrap{width:100%!important;max-width:none!important;min-width:0!important}
+
+/* Carte Performance = vrai point d'entrée vers le centre de performance */
+#kpi-performance-card{cursor:pointer}
+#kpi-performance-card:hover{border-color:rgba(38,197,222,.35)!important;box-shadow:0 10px 30px rgba(38,197,222,.16)}
+.kpi-perf-line{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:5px;font-size:11px;color:var(--muted)}
+.kpi-perf-line b{font-family:monospace;font-size:11px}
+
+/* Centre de performance */
+.modal.perf-detail-modal{width:min(1180px,calc(100vw - 72px));max-width:none!important;max-height:92vh;padding:26px 28px}
+.perf-detail-top{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}
+.perf-summary-card{background:var(--bg2);border:1px solid var(--border);border-radius:13px;padding:15px 16px;min-width:0}
+.perf-summary-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:6px}
+.perf-summary-value{font-size:24px;font-weight:800;font-family:var(--font-display);line-height:1.1}
+.perf-summary-sub{font-size:10px;color:var(--muted2);margin-top:5px;line-height:1.4}
+.perf-period-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;margin-bottom:16px}
+.perf-period-card{appearance:none;text-align:left;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:12px 13px;cursor:pointer;color:var(--text);transition:.15s;min-width:0}
+.perf-period-card:hover{transform:translateY(-1px);border-color:var(--border2)}
+.perf-period-card.active{border-color:rgba(99,75,228,.8);background:rgba(99,75,228,.11);box-shadow:0 0 0 1px rgba(99,75,228,.10) inset}
+.perf-period-name{font-size:10px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px}
+.perf-period-twr{font-size:19px;font-weight:850;font-family:var(--font-display);white-space:nowrap}
+.perf-period-extra{display:flex;justify-content:space-between;gap:6px;margin-top:7px;font-size:10px;color:var(--muted);white-space:nowrap}
+.perf-period-extra span:last-child{font-family:monospace;font-weight:700}
+.perf-chart-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px 18px}
+.perf-chart-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+.perf-chart-tabs{display:inline-flex;gap:3px;background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:3px}
+.perf-chart-tab{border:none;background:transparent;color:var(--muted);padding:6px 10px;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer}
+.perf-chart-tab.active{background:rgba(99,75,228,.2);color:var(--text)}
+.perf-detail-chart{height:340px;position:relative}
+.perf-detail-note{font-size:10px;color:var(--muted2);line-height:1.5;margin-top:12px}
+.perf-loading-inline{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:11px}
+
+@media(max-width:768px){
+  #main{width:100%!important}
+  .modal.perf-detail-modal{width:96vw!important;max-width:96vw!important;max-height:90dvh;padding:18px 14px}
+  .perf-detail-top{grid-template-columns:1fr 1fr;gap:8px}
+  .perf-detail-top .perf-summary-card:last-child{grid-column:1/-1}
+  .perf-summary-value{font-size:20px}
+  .perf-period-grid{display:flex;overflow-x:auto;gap:8px;padding-bottom:5px;scrollbar-width:none}
+  .perf-period-grid::-webkit-scrollbar{display:none}
+  .perf-period-card{flex:0 0 142px}
+  .perf-detail-chart{height:245px}
+}
+</style>
+
 </head>
 <body>
 <style>
@@ -1206,50 +1260,7 @@ async function renderPortfolio(){
       ${['Valeur totale','Montant investi','Plus-value latente','Performance'].map(l=>`<div class="kpi-card"><div class="kpi-label">${l}</div><div class="shimmer" style="width:130px;height:28px;margin-bottom:10px"></div><div class="shimmer" style="width:90px;height:16px"></div></div>`).join('')}
     </div>
 
-    <div class="pf-perf-card" id="pf-perf-card">
-      <div class="pf-perf-head">
-        <div>
-          <div class="pf-perf-title">Performance du portefeuille <span class="pf-perf-badge" title="Time-Weighted Return estimé à partir des transactions et des cours historiques">TWR estimé ⓘ</span></div>
-          <div style="font-size:11px;color:var(--muted);margin-top:4px">Rendement du portefeuille, indépendamment du montant investi.</div>
-        </div>
-        <div class="pf-perf-selected">
-          <div class="pf-perf-selected-label" id="pf-perf-selected-label">30 jours</div>
-          <div class="pf-perf-selected-value" id="pf-perf-selected-value">—</div>
-        </div>
-      </div>
-      <div class="pf-perf-periods" id="pf-perf-periods">
-        <button class="pf-perf-period" data-perf-period="1d" onclick="selectPortfolioPerfPeriod('1d')">
-          <span class="pf-perf-period-label">Jour</span>
-          <span class="pf-perf-period-value" id="pfperf-1d">—</span>
-          <span class="pf-perf-period-sub" id="pfperf-sub-1d">vs clôture préc.</span>
-        </button>
-        <button class="pf-perf-period" data-perf-period="1w" onclick="selectPortfolioPerfPeriod('1w')">
-          <span class="pf-perf-period-label">Semaine</span>
-          <span class="pf-perf-period-value" id="pfperf-1w">—</span>
-          <span class="pf-perf-period-sub">7 jours glissants</span>
-        </button>
-        <button class="pf-perf-period active" data-perf-period="1m" onclick="selectPortfolioPerfPeriod('1m')">
-          <span class="pf-perf-period-label">Mois</span>
-          <span class="pf-perf-period-value" id="pfperf-1m">—</span>
-          <span class="pf-perf-period-sub">30 jours glissants</span>
-        </button>
-        <button class="pf-perf-period" data-perf-period="ytd" onclick="selectPortfolioPerfPeriod('ytd')">
-          <span class="pf-perf-period-label">YTD</span>
-          <span class="pf-perf-period-value" id="pfperf-ytd">—</span>
-          <span class="pf-perf-period-sub">depuis le 1er janvier</span>
-        </button>
-        <button class="pf-perf-period" data-perf-period="1y" onclick="selectPortfolioPerfPeriod('1y')">
-          <span class="pf-perf-period-label">1 an</span>
-          <span class="pf-perf-period-value" id="pfperf-1y">—</span>
-          <span class="pf-perf-period-sub">12 mois glissants</span>
-        </button>
-      </div>
-      <div class="pf-perf-chart" id="pf-perf-chart-wrap">
-        <div class="pf-perf-loading" id="pf-perf-loading"><div class="spinner"></div></div>
-        <canvas id="pf-perf-chart"></canvas>
-      </div>
-      <div class="pf-perf-note">TWR estimé : Valio neutralise les effets des transactions en découpant la période en sous-périodes. Le « Jour » utilise la variation pondérée des positions actuelles. Pour égaler exactement un relevé IBKR, il faudra ensuite suivre aussi les dépôts/retraits et le cash de chaque compte.</div>
-    </div>
+    <!-- Le détail Performance est désormais ouvert depuis la carte KPI Performance -->
 
     <div class="pf-row">
       <div class="chart-card">
@@ -1419,11 +1430,22 @@ function updateKPIs(pos){
   const pnlLatent=tv-tc;
   const pnlRealized=S.realizedPnl||0;
   const pnlTotal=pnlLatent+pnlRealized;
-  // Coût total investi = coût résiduel + coût des positions soldées (pour le dénominateur de perf)
-  const tcTotal=pos.reduce((s,p)=>s+p.totalCostEur,0); // simplifié : coût positions actuelles
+  // Performance « simple » historique de Valio : P&L total / coût résiduel actuel.
+  // Elle reste affichée pour continuité avec l'ancienne carte ; le détail ajoute le TWR.
+  const tcTotal=pos.reduce((s,p)=>s+p.totalCostEur,0);
   const pct=tcTotal>0?(pnlLatent/tcTotal)*100:0;
   const pctTotal=tcTotal>0?(pnlTotal/tcTotal)*100:0;
   const sg=v=>v>=0?'+':'';
+
+  if(typeof _pfPerfState!=='undefined'&&_pfPerfState){
+    _pfPerfState.allSimple=pctTotal;
+    _pfPerfState.allPnlEur=pnlTotal;
+  }
+
+  const twrAll=(typeof _pfPerfState!=='undefined'&&_pfPerfState&&_pfPerfState.allTwr!=null)?_pfPerfState.allTwr:null;
+  const twrTxt=twrAll==null?'calcul…':_pfPerfFmt(twrAll);
+  const twrColor=twrAll==null?'var(--muted)':_pfPerfColor(twrAll);
+
   const el=document.getElementById('kpi-grid');if(!el)return;
   el.innerHTML=[
     {l:'Valeur totale',v:fE(tv),s:`sur ${fE(tcTotal)} investis`},
@@ -1432,9 +1454,10 @@ function updateKPIs(pos){
     {l:'PV réalisées',v:`<span class="${pnlRealized>=0?'c-green':'c-red'}">${sg(pnlRealized)}${fE(Math.abs(pnlRealized))}</span>`,
      s:`Gains/pertes actés sur ventes <span style="color:var(--cyan);font-size:11px">· voir détail →</span>`,
      onclick:`showRealizedDetail()`},
-    {l:'Performance',v:`<span class="${pctTotal>=0?'c-green':'c-red'}" style="font-size:28px">${sg(pctTotal)}${pctTotal.toFixed(2)}%</span>`,
-     s:ld.length<pos.length?`<span style="color:var(--yellow)">⏳ ${pos.length-ld.length} prix en cours…</span>`:'latent + réalisé vs investi actuel'}
-  ].map(k=>`<div class="kpi-card${k.onclick?' kpi-clickable':''}" ${k.onclick?`onclick="${k.onclick}" style="cursor:pointer"`:''}><div class="kpi-label">${k.l}</div><div class="kpi-value">${k.v}</div><div class="kpi-sub">${k.s}</div></div>`).join('');
+    {l:'Performance',id:'kpi-performance-card',v:`<span class="${pctTotal>=0?'c-green':'c-red'}" style="font-size:28px">${sg(pctTotal)}${pctTotal.toFixed(2)}%</span>`,
+     s:`<div class="kpi-perf-line"><span>Simple</span><span>·</span><span>TWR</span><b id="kpi-performance-twr" style="color:${twrColor}">${twrTxt}</b><span>·</span><b class="${pnlTotal>=0?'c-green':'c-red'}">${sg(pnlTotal)}${fE(pnlTotal)}</b><span style="color:var(--cyan)">· détail →</span></div>`,
+     onclick:`showPerformanceDetail()`}
+  ].map(k=>`<div ${k.id?`id="${k.id}"`:''} class="kpi-card${k.onclick?' kpi-clickable':''}" ${k.onclick?`onclick="${k.onclick}" style="cursor:pointer"`:''}><div class="kpi-label">${k.l}</div><div class="kpi-value">${k.v}</div><div class="kpi-sub">${k.s}</div></div>`).join('');
 }
 
 // ═══ DÉTAIL PV RÉALISÉES ═══════════════════════════════════════════════════
@@ -7003,18 +7026,30 @@ async function getFriendTransactions(friendId){
 
 
 
-// ═══ PERFORMANCE PORTEFEUILLE — SYNTHÈSE 1J / 1S / 1M / YTD / 1A ═════════
+// ═══ PERFORMANCE PORTEFEUILLE — CENTRE DE PERFORMANCE ═════════════════════
 var _pfPerfState={
   selected:'1m',
+  chartMode:'twr',
   lines:{},
-  metrics:{},
+  eurLines:{},
+  metrics:{},          // TWR % par période
+  simpleMetrics:{},    // rendement simple % par période
+  eurMetrics:{},       // P&L € par période
   dayMeta:null,
-  loading:false
+  loading:false,
+  loaded:false,
+  allTwr:null,
+  allSimple:null,
+  allPnlEur:null
 };
 
 function _pfPerfFmt(v){
   if(v==null||!isFinite(v)) return '—';
   return (v>=0?'+':'')+v.toFixed(2)+'%';
+}
+function _pfPerfMoney(v){
+  if(v==null||!isFinite(v)) return '—';
+  return (v>=0?'+':'')+fE(v);
 }
 function _pfPerfColor(v){
   if(v==null||!isFinite(v)) return 'var(--muted)';
@@ -7023,34 +7058,18 @@ function _pfPerfColor(v){
 function _pfPerfLast(line){
   return line&&line.length ? line[line.length-1].pct : null;
 }
-
-// Rebase multiplicativement une courbe TWR à une nouvelle date de départ.
-// Important : on ne soustrait PAS simplement les pourcentages.
-function _pfSliceRebase(line,startTs){
-  if(!line||line.length<2) return [];
-  var anchor=line[0];
-  for(var i=0;i<line.length;i++){
-    if(line[i].t<=startTs) anchor=line[i];
-    else break;
-  }
-  var base=1+(anchor.pct||0)/100;
-  if(!(base>0)) return [];
-  var pts=line.filter(function(p){return p.t>=startTs;});
-  if(!pts.length) return [];
-  var out=[{t:startTs,pct:0}];
-  pts.forEach(function(p){
-    var pct=((1+(p.pct||0)/100)/base-1)*100;
-    if(isFinite(pct)){
-      if(out.length&&Math.abs(out[out.length-1].t-p.t)<2) out[out.length-1]={t:p.t,pct:pct};
-      else out.push({t:p.t,pct:pct});
-    }
-  });
-  return out;
+function _pfHistoryRangeForStart(startTs){
+  var age=Math.max(0,Date.now()/1000-startTs);
+  if(age<=31*86400)return '1mo';
+  if(age<=183*86400)return '6mo';
+  if(age<=366*86400)return '1y';
+  if(age<=3*366*86400)return '3y';
+  if(age<=5*366*86400)return '5y';
+  if(age<=10*366*86400)return '10y';
+  return 'max';
 }
 
 // Performance de la dernière séance, pondérée par les valeurs actuelles.
-// On remonte la valeur de clôture précédente : V0 = V1 / (1+r).
-// C'est plus juste qu'une moyenne simple des variations des lignes.
 function _pfCalcDayReturn(pos){
   var cur=0, prev=0, covered=0, total=0;
   (pos||[]).forEach(function(p){
@@ -7064,40 +7083,49 @@ function _pfCalcDayReturn(pos){
     covered+=p.valueEur;
   });
   var pct=prev>0?(cur/prev-1)*100:null;
-  return {
-    pct:pct,
-    pnl:(cur>0&&prev>0)?cur-prev:null,
-    coverage:total>0?covered/total*100:0
-  };
+  return {pct:pct,pnl:(cur>0&&prev>0)?cur-prev:null,coverage:total>0?covered/total*100:0};
+}
+
+function _pfUpdateMainPerformanceKpi(){
+  var el=document.getElementById('kpi-performance-twr');
+  if(el){
+    el.textContent=_pfPerfState.allTwr==null?'calcul…':_pfPerfFmt(_pfPerfState.allTwr);
+    el.style.color=_pfPerfColor(_pfPerfState.allTwr);
+  }
 }
 
 function _pfUpdatePerfTiles(){
   var labels={ '1d':'Jour', '1w':'Semaine · 7 jours', '1m':'Mois · 30 jours', 'ytd':'YTD · depuis le 1er janvier', '1y':'1 an' };
   ['1d','1w','1m','ytd','1y'].forEach(function(k){
-    var el=document.getElementById('pfperf-'+k); if(!el) return;
-    var v=_pfPerfState.metrics[k];
-    el.textContent=_pfPerfFmt(v);
-    el.style.color=_pfPerfColor(v);
+    var twr=document.getElementById('pfperf-'+k);
+    var simple=document.getElementById('pfperf-simple-'+k);
+    var eur=document.getElementById('pfperf-eur-'+k);
+    var tv=_pfPerfState.metrics[k], sv=_pfPerfState.simpleMetrics[k], ev=_pfPerfState.eurMetrics[k];
+    if(twr){twr.textContent=_pfPerfFmt(tv);twr.style.color=_pfPerfColor(tv);}
+    if(simple){simple.textContent=_pfPerfFmt(sv);simple.style.color=_pfPerfColor(sv);}
+    if(eur){eur.textContent=_pfPerfMoney(ev);eur.style.color=_pfPerfColor(ev);}
   });
 
-  var dsub=document.getElementById('pfperf-sub-1d');
-  if(dsub&&_pfPerfState.dayMeta){
-    var m=_pfPerfState.dayMeta;
-    var bits=[];
-    if(m.pnl!=null) bits.push((m.pnl>=0?'+':'')+fE(m.pnl));
-    if(m.coverage<99.5) bits.push('couverture '+m.coverage.toFixed(0)+'%');
-    dsub.textContent=bits.length?bits.join(' · '):'vs clôture préc.';
-  }
+  var at=document.getElementById('pf-all-twr');
+  var as=document.getElementById('pf-all-simple');
+  var ae=document.getElementById('pf-all-eur');
+  if(at){at.textContent=_pfPerfFmt(_pfPerfState.allTwr);at.style.color=_pfPerfColor(_pfPerfState.allTwr);}
+  if(as){as.textContent=_pfPerfFmt(_pfPerfState.allSimple);as.style.color=_pfPerfColor(_pfPerfState.allSimple);}
+  if(ae){ae.textContent=_pfPerfMoney(_pfPerfState.allPnlEur);ae.style.color=_pfPerfColor(_pfPerfState.allPnlEur);}
 
   var sel=_pfPerfState.selected||'1m';
-  var lv=document.getElementById('pf-perf-selected-value');
   var ll=document.getElementById('pf-perf-selected-label');
-  if(lv){lv.textContent=_pfPerfFmt(_pfPerfState.metrics[sel]);lv.style.color=_pfPerfColor(_pfPerfState.metrics[sel]);}
   if(ll) ll.textContent=labels[sel]||sel;
-
   document.querySelectorAll('[data-perf-period]').forEach(function(b){
     b.classList.toggle('active',b.dataset.perfPeriod===sel);
   });
+  document.querySelectorAll('[data-perf-chartmode]').forEach(function(b){
+    b.classList.toggle('active',b.dataset.perfChartmode===_pfPerfState.chartMode);
+  });
+
+  var load=document.getElementById('pf-detail-loading');
+  if(load) load.style.display=_pfPerfState.loading?'inline-flex':'none';
+  _pfUpdateMainPerformanceKpi();
 }
 
 function selectPortfolioPerfPeriod(period){
@@ -7106,15 +7134,19 @@ function selectPortfolioPerfPeriod(period){
   _pfUpdatePerfTiles();
   _pfDrawPerformanceChart();
 }
+function setPortfolioPerfChartMode(mode){
+  if(!['twr','eur'].includes(mode))return;
+  _pfPerfState.chartMode=mode;
+  _pfUpdatePerfTiles();
+  _pfDrawPerformanceChart();
+}
 
 function _pfDrawPerformanceChart(){
   var cv=document.getElementById('pf-perf-chart');
-  var loading=document.getElementById('pf-perf-loading');
   if(!cv) return;
-  if(loading) loading.style.display=_pfPerfState.loading?'flex':'none';
-
   var period=_pfPerfState.selected||'1m';
-  var line=_pfPerfState.lines[period]||[];
+  var mode=_pfPerfState.chartMode||'twr';
+  var line=mode==='eur'?(_pfPerfState.eurLines[period]||[]):(_pfPerfState.lines[period]||[]);
   if(window._pfPerfChart){try{window._pfPerfChart.destroy();}catch(e){} window._pfPerfChart=null;}
   if(line.length<2) return;
 
@@ -7123,105 +7155,105 @@ function _pfDrawPerformanceChart(){
     if(p.label) return p.label;
     var d=new Date(p.t*1000);
     if(period==='1d') return i===0?'Clôture préc.':'Maintenant';
-    return short
-      ?d.toLocaleDateString('fr-FR',{day:'2-digit',month:'short'})
-      :d.toLocaleDateString('fr-FR',{month:'short',year:'2-digit'});
+    return short?d.toLocaleDateString('fr-FR',{day:'2-digit',month:'short'}):d.toLocaleDateString('fr-FR',{month:'short',year:'2-digit'});
   });
-  var finalPerf=_pfPerfLast(line);
-  var lineColor=finalPerf!=null&&finalPerf<0?'#ef4444':'#634BE4';
-  var fillColor=finalPerf!=null&&finalPerf<0?'rgba(239,68,68,.08)':'rgba(99,75,228,.10)';
+  var values=line.map(function(p){return mode==='eur'?p.eur:p.pct;});
+  var finalVal=values.length?values[values.length-1]:null;
+  var lineColor=finalVal!=null&&finalVal<0?'#ef4444':'#634BE4';
+  var fillColor=finalVal!=null&&finalVal<0?'rgba(239,68,68,.08)':'rgba(99,75,228,.10)';
 
   window._pfPerfChart=new Chart(cv,{
     type:'line',
-    data:{
-      labels:labels,
-      datasets:[{
-        label:'Portefeuille',
-        data:line.map(function(p){return p.pct;}),
-        borderColor:lineColor,
-        backgroundColor:fillColor,
-        borderWidth:2.5,
-        fill:true,
-        tension:.22,
-        pointRadius:0,
-        pointHoverRadius:4
-      }]
-    },
+    data:{labels:labels,datasets:[{label:mode==='eur'?'P&L':'TWR',data:values,borderColor:lineColor,backgroundColor:fillColor,borderWidth:2.5,fill:true,tension:.22,pointRadius:0,pointHoverRadius:4}]},
     options:{
-      responsive:true,maintainAspectRatio:false,animation:{duration:350},
-      interaction:{mode:'index',intersect:false},
-      plugins:{
-        legend:{display:false},
-        tooltip:{callbacks:{
-          label:function(ctx){
-            var v=ctx.raw;
-            return ' '+(v>=0?'+':'')+Number(v).toFixed(2)+'%';
-          }
-        }}
-      },
+      responsive:true,maintainAspectRatio:false,animation:{duration:300},interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:function(ctx){
+        var v=Number(ctx.raw);
+        return mode==='eur'?' '+_pfPerfMoney(v):' '+_pfPerfFmt(v);
+      }}}},
       scales:{
         x:{grid:{display:false},ticks:{color:'#6b6b8a',font:{size:10},maxTicksLimit:8,maxRotation:0}},
-        y:{
-          position:'right',
-          beginAtZero:true,
-          grid:{color:'rgba(255,255,255,.045)'},
-          ticks:{color:'#6b6b8a',font:{size:10},callback:function(v){return (v>=0?'+':'')+Number(v).toFixed(0)+'%';}}
-        }
+        y:{position:'right',grid:{color:'rgba(255,255,255,.045)'},ticks:{color:'#6b6b8a',font:{size:10},callback:function(v){
+          return mode==='eur'?Number(v).toLocaleString('fr-FR',{maximumFractionDigits:0})+' €':(Number(v)>=0?'+':'')+Number(v).toFixed(0)+'%';
+        }}}
       }
     }
   });
 }
 
-async function refreshPortfolioPerformance(){
-  var card=document.getElementById('pf-perf-card');
-  if(!card) return;
-  _pfPerfState.loading=true;
-  _pfPerfState.lines={};
-  _pfPerfState.metrics={};
-  _pfPerfState.dayMeta=null;
+function showPerformanceDetail(){
+  var html='<div class="modal-hd" style="margin-bottom:16px">'+
+    '<div><h2 style="font-size:19px">Performance du portefeuille</h2><div style="font-size:11px;color:var(--muted);margin-top:3px">TWR, rendement simple et gain/perte en euros</div></div>'+
+    '<div style="display:flex;align-items:center;gap:10px"><span id="pf-detail-loading" class="perf-loading-inline" style="display:none"><span class="spinner"></span> Calcul…</span><button class="modal-close" onclick="closeModal()">✕</button></div></div>'+
+    '<div class="perf-detail-top">'+
+      '<div class="perf-summary-card"><div class="perf-summary-label">TWR · depuis l’origine</div><div class="perf-summary-value" id="pf-all-twr">—</div><div class="perf-summary-sub">Neutralise l’effet du timing des achats et ventes.</div></div>'+
+      '<div class="perf-summary-card"><div class="perf-summary-label">Performance simple</div><div class="perf-summary-value" id="pf-all-simple">—</div><div class="perf-summary-sub">Même logique que la carte historique Valio, plus sensible aux flux.</div></div>'+
+      '<div class="perf-summary-card"><div class="perf-summary-label">P&L total</div><div class="perf-summary-value" id="pf-all-eur">—</div><div class="perf-summary-sub">Plus-values latentes + réalisées actuellement suivies par Valio.</div></div>'+
+    '</div>'+
+    '<div class="perf-period-grid">'+
+      [['1d','Jour'],['1w','Semaine'],['1m','Mois'],['ytd','YTD'],['1y','1 an']].map(function(x){var k=x[0];return '<button class="perf-period-card" data-perf-period="'+k+'" onclick="selectPortfolioPerfPeriod(\''+k+'\')">'+
+        '<div class="perf-period-name">'+x[1]+'</div><div class="perf-period-twr" id="pfperf-'+k+'">—</div>'+
+        '<div class="perf-period-extra"><span>Simple</span><span id="pfperf-simple-'+k+'">—</span></div>'+
+        '<div class="perf-period-extra"><span>P&L</span><span id="pfperf-eur-'+k+'">—</span></div></button>';}).join('')+
+    '</div>'+
+    '<div class="perf-chart-card"><div class="perf-chart-head"><div><div style="font-size:14px;font-weight:700" id="pf-perf-selected-label">Mois · 30 jours</div><div style="font-size:10px;color:var(--muted);margin-top:2px">Clique une période pour mettre à jour le graphique</div></div>'+
+      '<div class="perf-chart-tabs"><button class="perf-chart-tab" data-perf-chartmode="twr" onclick="setPortfolioPerfChartMode(\'twr\')">TWR %</button><button class="perf-chart-tab" data-perf-chartmode="eur" onclick="setPortfolioPerfChartMode(\'eur\')">P&L €</button></div></div>'+
+      '<div class="perf-detail-chart"><canvas id="pf-perf-chart"></canvas></div></div>'+
+    '<div class="perf-detail-note"><b>TWR</b> : mesure la performance de l’investissement en neutralisant autant que possible l’effet du moment et du montant des transactions. <b>Simple</b> : P&L de la période rapporté au capital mobilisé (valeur de départ + achats) ; il est donc plus sensible aux mouvements de portefeuille. Le P&L € retire les achats et réintègre les ventes pour isoler au mieux la création/perte de valeur sur la période. Les dividendes et le cash non enregistrés dans Valio ne sont pas encore inclus.</div>';
+  showModal(html);
+  document.getElementById('modal-content').classList.add('perf-detail-modal');
   _pfUpdatePerfTiles();
   _pfDrawPerformanceChart();
+  if(!_pfPerfState.loaded&&!_pfPerfState.loading) refreshPortfolioPerformance();
+}
+
+async function refreshPortfolioPerformance(){
+  _pfPerfState.loading=true;
+  _pfPerfState.lines={};_pfPerfState.eurLines={};_pfPerfState.metrics={};_pfPerfState.simpleMetrics={};_pfPerfState.eurMetrics={};_pfPerfState.dayMeta=null;
+  _pfUpdatePerfTiles();
+
+  function ingest(k,line){
+    _pfPerfState.lines[k]=line||[];
+    _pfPerfState.metrics[k]=_pfPerfLast(line||[]);
+    var m=line&&line._meta;
+    _pfPerfState.simpleMetrics[k]=m&&m.simplePct!=null?m.simplePct:null;
+    _pfPerfState.eurMetrics[k]=m&&m.pnlEur!=null?m.pnlEur:null;
+    _pfPerfState.eurLines[k]=m&&m.eurLine?m.eurLine:[];
+  }
 
   try{
     var now=Math.floor(Date.now()/1000);
     var pos=S.enrichedPos&&S.enrichedPos.length?S.enrichedPos:computePositions();
 
-    // 1J : données live (variation vs clôture précédente)
     var day=_pfCalcDayReturn(pos);
     _pfPerfState.dayMeta=day;
     _pfPerfState.metrics['1d']=day.pct;
-    if(day.pct!=null){
-      _pfPerfState.lines['1d']=[
-        {t:now-86400,pct:0,label:'Clôture préc.'},
-        {t:now,pct:day.pct,label:'Maintenant'}
-      ];
-    }
-    // Afficher le jour immédiatement, sans attendre les historiques 1M / 1A.
-    _pfUpdatePerfTiles();
-    _pfDrawPerformanceChart();
+    _pfPerfState.simpleMetrics['1d']=day.pct;
+    _pfPerfState.eurMetrics['1d']=day.pnl;
+    if(day.pct!=null) _pfPerfState.lines['1d']=[{t:now-86400,pct:0,label:'Clôture préc.'},{t:now,pct:day.pct,label:'Maintenant'}];
+    if(day.pnl!=null) _pfPerfState.eurLines['1d']=[{t:now-86400,eur:0,label:'Clôture préc.'},{t:now,eur:day.pnl,label:'Maintenant'}];
+    _pfUpdatePerfTiles();_pfDrawPerformanceChart();
 
-    // Deux historiques suffisent :
-    // 1 mois → on en dérive 7 jours ; 1 an → on en dérive YTD.
-    // Séquentiel volontaire : buildPortfolioLine limite déjà les requêtes par lots.
-    // Lancer 1M et 1A en parallèle doublerait inutilement la pression sur Yahoo.
-    var monthLine=await buildPortfolioLine(S.transactions||[],'1mo') || [];
-    var yearLine=await buildPortfolioLine(S.transactions||[],'1y') || [];
-
-    _pfPerfState.lines['1m']=monthLine;
-    _pfPerfState.metrics['1m']=_pfPerfLast(monthLine);
-
+    var monthStart=now-30*86400;
     var weekStart=now-7*86400;
-    var weekLine=_pfSliceRebase(monthLine,weekStart);
-    _pfPerfState.lines['1w']=weekLine;
-    _pfPerfState.metrics['1w']=_pfPerfLast(weekLine);
-
     var ytdStart=Math.floor(new Date(new Date().getFullYear(),0,1).getTime()/1000);
-    var ytdLine=_pfSliceRebase(yearLine,ytdStart);
-    _pfPerfState.lines['ytd']=ytdLine;
-    _pfPerfState.metrics['ytd']=_pfPerfLast(ytdLine);
+    var yearStart=now-365*86400;
 
-    _pfPerfState.lines['1y']=yearLine;
-    _pfPerfState.metrics['1y']=_pfPerfLast(yearLine);
+    // Les historiques sont cachés par fetchPriceHistory : les appels suivants réutilisent les mêmes données.
+    var monthLine=await buildPortfolioLine(S.transactions||[],'1mo',monthStart); ingest('1m',monthLine);
+    var weekLine=await buildPortfolioLine(S.transactions||[],'1mo',weekStart); ingest('1w',weekLine);
+    var yearLine=await buildPortfolioLine(S.transactions||[],'1y',yearStart); ingest('1y',yearLine);
+    var ytdLine=await buildPortfolioLine(S.transactions||[],'1y',ytdStart); ingest('ytd',ytdLine);
+
+    // TWR depuis l'origine : plage Yahoo choisie dynamiquement selon la première transaction.
+    var validTx=(S.transactions||[]).filter(function(t){return t.ticker&&t.transaction_date;});
+    if(validTx.length){
+      var firstTs=Math.min.apply(null,validTx.map(function(t){return Math.floor(new Date(t.transaction_date).getTime()/1000);}));
+      var allRange=_pfHistoryRangeForStart(firstTs);
+      var allLine=await buildPortfolioLine(S.transactions||[],allRange,firstTs);
+      _pfPerfState.allTwr=_pfPerfLast(allLine);
+    }
+    _pfPerfState.loaded=true;
   }catch(e){
     console.error('Performance portefeuille:',e);
   }finally{
@@ -7274,6 +7306,8 @@ async function buildPortfolioLine(transactions, range, windowStartOverride){
   // plus-value latente d'avant la fenêtre dans la 1ʳᵉ sous-période (TWR gonflé).
   function priceAt(tk,t){
     var pts=(hists[tk]||[]); if(!pts.length) return null;
+    // Pour le point final, préférer le cours live déjà chargé afin que le P&L € colle au portefeuille affiché.
+    if(t>=Math.floor(Date.now()/1000)-3600 && S.prices[tk] && S.prices[tk].price>0) return S.prices[tk].price;
     if(t < pts[0].t) return pts[0].c;        // back-fill marché, jamais le coût
     var v=null;
     for(var j=0;j<pts.length;j++){ if(pts[j].t<=t) v=pts[j].c; else break; }
@@ -7318,6 +7352,46 @@ async function buildPortfolioLine(transactions, range, windowStartOverride){
     ? Math.min(now-60,Math.floor(windowStartOverride))
     : now-windowSec;
 
+
+  // Flux de titres dans la période. Les achats sont des apports au sous-portefeuille titres,
+  // les ventes des retraits. Cela permet de calculer un P&L € indépendant des mouvements.
+  function tradeFlowsBetween(startT,endT){
+    var buys=0,sells=0;
+    txns.forEach(function(tx){
+      var tt=Math.floor(new Date(tx.transaction_date).getTime()/1000);
+      if(!(tt>startT&&tt<=endT)) return;
+      var ty=(tx.transaction_type||tx.type||'').toLowerCase();
+      var c=(tx.currency||cur(tx.ticker)||'EUR').toUpperCase();
+      var q=tx.quantity||0;
+      var gross=q*toEur(tx.price||0,c);
+      var fees=toEur(tx.fees||0,c)||0;
+      if(ty==='buy') buys+=gross+fees;
+      else if(ty==='sell') sells+=Math.max(0,gross-fees);
+    });
+    return {buys:buys,sells:sells};
+  }
+
+  function attachPerfMeta(line){
+    if(!line||!line.length) return line||[];
+    var v0=portfolioValueAt(windowStart);
+    var v1=portfolioValueAt(now);
+    var flows=tradeFlowsBetween(windowStart,now);
+    var pnl=(v1.val||0)-(v0.val||0)-flows.buys+flows.sells;
+    // « Simple » = P&L / capital mobilisé. Ce n'est pas un TWR : les flux influencent le ratio.
+    var capitalBase=(v0.val||0)+flows.buys;
+    var simplePct=capitalBase>0?pnl/capitalBase*100:null;
+    var eurLine=line.map(function(p){
+      var v=portfolioValueAt(p.t);
+      var f=tradeFlowsBetween(windowStart,p.t);
+      var e=(v.val||0)-(v0.val||0)-f.buys+f.sells;
+      return {t:p.t,eur:isFinite(e)?e:0,label:p.label};
+    });
+    // Garantir un départ exactement à 0 € pour la lecture du graphique.
+    if(eurLine.length) eurLine[0].eur=0;
+    line._meta={startValue:v0.val,endValue:v1.val,buys:flows.buys,sells:flows.sells,pnlEur:pnl,simplePct:simplePct,eurLine:eurLine};
+    return line;
+  }
+
   // Filtrer les transactions dans la fenêtre + la dernière avant la fenêtre (état initial)
   var txnsInWindow=txns.filter(function(tx){
     return Math.floor(new Date(tx.transaction_date).getTime()/1000)>=windowStart;
@@ -7346,7 +7420,7 @@ async function buildPortfolioLine(transactions, range, windowStartOverride){
     });
     if(out.length<2) return [];
     var base=out[0].pct;
-    return out.map(function(p){return {t:p.t,pct:p.pct-base};});
+    return attachPerfMeta(out.map(function(p){return {t:p.t,pct:p.pct-base};}));
   }
 
   // ── TWR avec sous-périodes ────────────────────────────────────────────────
@@ -7431,7 +7505,7 @@ async function buildPortfolioLine(transactions, range, windowStartOverride){
   if(out2.length<2) return [];
   // Rebasage à 0% au début de la fenêtre (courbes comparables visuellement)
   var base2=out2[0].pct;
-  return out2.map(function(p){return {t:p.t,pct:p.pct-base2};});
+  return attachPerfMeta(out2.map(function(p){return {t:p.t,pct:p.pct-base2};}));
 }
 
 // ── Performance indice
@@ -8101,8 +8175,8 @@ function renderAcctCard(a){
 }
 
 // ═══ MODALS ═══
-function showModal(h){document.getElementById('modal-content').innerHTML=h;document.getElementById('modal-overlay').classList.add('open');}
-function closeModal(){document.getElementById('modal-overlay').classList.remove('open');}
+function showModal(h){var m=document.getElementById('modal-content');m.className='modal';m.innerHTML=h;document.getElementById('modal-overlay').classList.add('open');}
+function closeModal(){document.getElementById('modal-overlay').classList.remove('open');var m=document.getElementById('modal-content');if(m)m.className='modal';}
 function closeModalOutside(e){if(e.target===document.getElementById('modal-overlay'))closeModal();}
 function openAddAccount(){showModal(`<div class="modal-hd"><h2>Créer un compte</h2><button class="modal-close" onclick="closeModal()">✕</button></div>
     <div class="form-group"><label class="form-label">Nom *</label><input type="text" id="m-name" class="form-input" placeholder="ex: PEA BoursoBank"></div>
