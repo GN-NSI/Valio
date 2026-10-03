@@ -353,27 +353,30 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 @media(max-width:900px){.risk-section-grid{grid-template-columns:1fr}.contrib-row{grid-template-columns:minmax(120px,1fr) 72px 72px}.contrib-row>*:last-child{display:none}}
 /* Risk X-Ray : une vue desktop dense mais qui remplit réellement l'écran */
 .risk-compact{min-height:calc(100vh - 78px);display:grid;grid-template-rows:auto auto minmax(0,1fr);align-content:stretch}
-.risk-compact .valio-head{margin-bottom:12px}
-.risk-compact .valio-head h2{font-size:20px}
-.risk-compact .valio-desc{font-size:11px;line-height:1.35}
-.risk-summary-strip{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:8px;margin-bottom:10px}
-.risk-summary-strip .metric-box{padding:11px 11px!important;min-height:78px!important}
-.risk-summary-strip .metric-box .mlabel{font-size:8.5px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.risk-summary-strip .metric-box .mvalue{font-size:20px!important;line-height:1.05}
-.risk-summary-strip .metric-box .msub{display:block!important;font-size:8px!important;line-height:1.15;margin-top:6px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.risk-compact .valio-head{margin-bottom:14px}
+.risk-compact .valio-head h2{font-size:22px}
+.risk-compact .valio-desc{font-size:12px;line-height:1.4}
+.risk-summary-strip{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.risk-summary-strip .metric-box{padding:14px 14px!important;min-height:98px!important}
+.risk-summary-strip .metric-box .mlabel{font-size:9.5px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.risk-summary-strip .metric-box .mvalue{font-size:26px!important;line-height:1.05}
+.risk-summary-strip .metric-box .msub{display:block!important;font-size:9px!important;line-height:1.25;margin-top:8px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .risk-compact .risk-section-grid{grid-template-columns:minmax(0,1.13fr) minmax(0,.87fr);gap:12px;margin-top:0;min-height:0;height:100%;align-items:stretch}
-.risk-compact .risk-panel{padding:14px 15px;height:100%;min-height:0;display:flex;flex-direction:column;box-sizing:border-box}
-.risk-compact .risk-panel-title{font-size:13px;margin-bottom:9px}
+.risk-compact .risk-panel{padding:16px 17px;height:100%;min-height:0;display:flex;flex-direction:column;box-sizing:border-box}
+.risk-compact .risk-panel-title{font-size:14px;margin-bottom:10px}
 .risk-compact .risk-matrix-wrap{overflow:visible;max-height:none;flex:1;display:flex;align-items:stretch;min-height:0}
-.risk-compact .risk-table{font-size:10px;width:100%;height:100%;table-layout:fixed}
-.risk-compact .risk-table th{font-size:8px;padding:5px 4px}
-.risk-compact .risk-table td{padding:5px 4px}
+.risk-compact .risk-table{font-size:10.8px;width:100%;height:100%;table-layout:fixed}
+.risk-compact .risk-table th{font-size:8.8px;padding:6px 5px}
+.risk-compact .risk-table td{padding:6px 5px}
 .risk-compact .risk-table th:first-child,.risk-compact .risk-table td:first-child{min-width:64px;width:80px}
-.risk-compact .risk-contrib-row{padding:7px 0;font-size:10px;flex:1;min-height:0}
-.risk-compact .risk-bar{height:6px}
-.corr-stats-line{margin-top:9px;padding-top:9px;border-top:1px solid rgba(255,255,255,.05);font-size:9.5px;color:var(--muted);line-height:1.55}
+.risk-compact .risk-contrib-row{padding:8px 0;font-size:10.6px;flex:1;min-height:0}
+.risk-compact .risk-bar{height:7px}
+.corr-stats-line{margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,.05);font-size:11px;color:var(--muted);line-height:1.65}
+.corr-stats-grid{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:12px;align-items:start}
+.corr-stat-card{padding:10px 12px;border:1px solid rgba(255,255,255,.05);border-radius:10px;background:rgba(255,255,255,.015)}
+.corr-stat-title{font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
 .corr-stat-main{color:var(--text);font-weight:750}.corr-high{color:#c4b5fd}.corr-low{color:var(--cyan)}
-@media(max-width:1300px){.risk-compact{display:block;min-height:auto}.risk-summary-strip{grid-template-columns:repeat(5,1fr)}.risk-summary-strip .metric-box .msub{display:block}.risk-compact .risk-section-grid{grid-template-columns:1fr;height:auto}.risk-compact .risk-panel{height:auto}.risk-compact .risk-matrix-wrap{display:block}}
+@media(max-width:1300px){.risk-compact{display:block;min-height:auto}.risk-summary-strip{grid-template-columns:repeat(5,1fr)}.risk-summary-strip .metric-box .msub{display:block}.risk-compact .risk-section-grid{grid-template-columns:1fr;height:auto}.risk-compact .risk-panel{height:auto}.risk-compact .risk-matrix-wrap{display:block}.corr-stats-grid{grid-template-columns:1fr}}
 
 .perf-subtabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}
 .perf-subtab{border:1px solid var(--border);background:var(--card2);color:var(--muted);border-radius:10px;padding:7px 12px;font-size:11px;font-weight:700;cursor:pointer;transition:all .14s ease}
@@ -8565,7 +8568,11 @@ async function renderRiskXray(){
       _riskMetricCard('Perf proxy',(r.trailRet>=0?'+':'')+_riskFmt(r.trailRet,1)+'%','1 an.','metric-cyan','proxy')+'</div>';
     var names=r.top10Positions.map(function(p){return p.ticker;});
     function corrList(arr,cls){return (arr||[]).map(function(x){return '<span class="'+cls+'"><b>'+x.name+'</b> '+x.avgCorrAll.toFixed(2)+'</span>';}).join(' · ');}
-    var corrSummary='<div class="corr-stats-line"><span class="corr-stat-main">Corrélation moyenne (toutes les paires) : '+(r.avgPairCorr==null?'—':r.avgPairCorr.toFixed(2))+'</span> · <span class="corr-stat-main">médiane : '+(r.medianPairCorr==null?'—':r.medianPairCorr.toFixed(2))+'</span><br><span>Plus corrélées au reste : '+corrList(r.corrHigh,'corr-high')+'</span><br><span>Moins corrélées au reste : '+corrList(r.corrLow,'corr-low')+'</span></div>';
+    var corrSummary='<div class="corr-stats-line"><div class="corr-stats-grid">'+
+      '<div class="corr-stat-card"><div class="corr-stat-title">Vue d’ensemble</div><div><span class="corr-stat-main">Corrélation moyenne : '+(r.avgPairCorr==null?'—':r.avgPairCorr.toFixed(2))+'</span><br><span class="corr-stat-main">Corrélation médiane : '+(r.medianPairCorr==null?'—':r.medianPairCorr.toFixed(2))+'</span></div></div>'+
+      '<div class="corr-stat-card"><div class="corr-stat-title">Plus corrélées au reste</div><div>'+corrList(r.corrHigh,'corr-high')+'</div></div>'+
+      '<div class="corr-stat-card"><div class="corr-stat-title">Moins corrélées au reste</div><div>'+corrList(r.corrLow,'corr-low')+'</div></div>'+
+      '</div></div>';
     var matrix='<div class="valio-card risk-panel"><div class="risk-panel-title"><span>Matrice de corrélation · Top '+r.top10Positions.length+'</span><button class="btn btn-ghost btn-sm" onclick="showCorrelationDetail(&quot;Repères&quot;,&quot;corrélation&quot;,null)">? Repères</button></div><div class="risk-matrix-wrap"><table class="risk-table"><thead><tr><th></th>'+names.map(function(n){return '<th>'+n+'</th>';}).join('')+'</tr></thead><tbody>'+r.top10Positions.map(function(pp,i){return '<tr><td><b>'+pp.ticker+'</b></td>'+r.corr[i].map(function(v,j){return '<td onclick="showCorrelationDetail(&quot;'+pp.ticker+'&quot;,&quot;'+r.top10Positions[j].ticker+'&quot;,'+(v==null?'null':v)+')" title="Cliquer pour le détail" style="cursor:pointer;background:'+_riskCorrBg(v)+'">'+(v==null?'—':v.toFixed(2))+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table></div><div style="font-size:9px;color:var(--muted);margin-top:7px"><b>Repères :</b> |r| &lt; 0,3 faible · 0,3–0,7 modérée · &gt; 0,7 forte. La moyenne et la médiane ci-dessous portent sur <b>toutes les paires du portefeuille</b>, pas seulement le Top 10.</div>'+corrSummary+'</div>';
     var maxRisk=Math.max.apply(null,r.contrib.map(function(x){return Math.max(0,x.riskPct);}).concat([1]));
     var visibleRisk=r.contrib.reduce(function(s,x){return s+x.riskPct;},0);
