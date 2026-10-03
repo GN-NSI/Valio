@@ -351,6 +351,41 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 .contrib-row{display:grid;grid-template-columns:minmax(140px,1.4fr) 90px 90px 80px;gap:10px;align-items:center;padding:9px 4px;border-top:1px solid rgba(255,255,255,.05);font-size:11px}.contrib-row:first-child{border-top:0}.contrib-row .num{text-align:right;font-family:monospace;font-weight:700}
 .risk-mini-link{display:inline-flex;align-items:center;gap:4px;color:var(--cyan);font-size:10px;cursor:pointer;margin-top:8px}.risk-mini-link:hover{text-decoration:underline}
 @media(max-width:900px){.risk-section-grid{grid-template-columns:1fr}.contrib-row{grid-template-columns:minmax(120px,1fr) 72px 72px}.contrib-row>*:last-child{display:none}}
+/* Risk X-Ray compact : garder l'essentiel sur un écran desktop */
+.risk-compact .valio-head{margin-bottom:9px}
+.risk-compact .valio-head h2{font-size:18px}
+.risk-compact .valio-desc{font-size:10.5px;line-height:1.3}
+.risk-compact .valio-metric-grid{gap:9px}
+.risk-compact .metric-box{padding:11px 13px;min-height:78px}
+.risk-compact .metric-box .mlabel{font-size:9px;margin-bottom:5px}
+.risk-compact .metric-box .mvalue{font-size:21px}
+.risk-compact .metric-box .msub{font-size:9px;margin-top:5px;line-height:1.2}
+.risk-compact .risk-section-grid{gap:10px;margin-top:10px}
+.risk-compact .risk-panel{padding:12px 14px}
+.risk-compact .risk-panel-title{font-size:12px;margin-bottom:7px}
+.risk-compact .risk-table{font-size:10px}
+.risk-compact .risk-table th{font-size:8.5px;padding:4px 4px}
+.risk-compact .risk-table td{padding:4px 4px}
+.risk-compact .risk-table th:first-child,.risk-compact .risk-table td:first-child{min-width:68px}
+.risk-compact .risk-matrix-wrap{max-height:none;overflow:auto}
+.risk-compact .risk-contrib-row{padding:5px 0;font-size:10px}
+.risk-compact .risk-bar{height:5px}
+
+.perf-subtabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}
+.perf-subtab{border:1px solid var(--border);background:var(--card2);color:var(--muted);border-radius:10px;padding:7px 12px;font-size:11px;font-weight:700;cursor:pointer;transition:all .14s ease}
+.perf-subtab:hover{border-color:rgba(38,197,222,.30);color:var(--text)}
+.perf-subtab.active{background:linear-gradient(135deg,rgba(99,75,228,.25),rgba(38,197,222,.13));border-color:rgba(99,75,228,.55);color:#fff;box-shadow:0 5px 18px rgba(99,75,228,.12)}
+.perf-tab-note{font-size:11px;color:var(--muted);line-height:1.55;margin:0 0 12px}
+.treemap-toolbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.treemap-mode{border:1px solid var(--border);background:var(--bg2);color:var(--muted);border-radius:999px;padding:5px 10px;font-size:10px;font-weight:700;cursor:pointer}
+.treemap-mode.active{color:#fff;border-color:rgba(38,197,222,.45);background:linear-gradient(135deg,rgba(99,75,228,.25),rgba(38,197,222,.15))}
+.perf-treemap{position:relative;height:470px;border-radius:14px;overflow:hidden;background:rgba(8,8,17,.45);border:1px solid rgba(255,255,255,.05)}
+.tm-tile{position:absolute;padding:8px;border:2px solid var(--card);overflow:hidden;cursor:pointer;transition:filter .14s ease,transform .14s ease;display:flex;flex-direction:column;justify-content:space-between}
+.tm-tile:hover{filter:brightness(1.13);z-index:3;transform:scale(.995)}
+.tm-name{font-weight:800;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tm-value{font-family:monospace;font-size:12px;font-weight:800}
+.tm-sub{font-size:9px;opacity:.8;margin-top:2px}
+@media(max-width:768px){.perf-treemap{height:520px}.risk-compact .metric-box{min-height:86px}}
 </style>
 
 </head>
@@ -7298,6 +7333,7 @@ function selectPortfolioPerfPeriod(period){
   _pfUpdatePerfTiles();
   _pfDrawPerformanceChart();
   if(document.getElementById('perf-page-contrib')) _perfPageRenderContrib();
+  if(document.getElementById('perf-treemap-wrap')&&_perfTreemapMode==='period') _renderPerfTreemap();
 }
 function setPortfolioPerfChartMode(mode){
   if(!['twr','eur'].includes(mode))return;
@@ -8263,33 +8299,88 @@ function _perfPagePeriodInfo(k){
   if(k==='ytd')return {start:Math.floor(new Date(d.getFullYear(),0,1).getTime()/1000),range:'1y',label:'YTD'};
   return {start:now-365*86400,range:'1y',label:'1 an'};
 }
+var _perfPageTab='overview';
+var _perfTreemapMode='period';
+function setPerformanceSubtab(tab){
+  if(!['overview','stocks','treemap'].includes(tab))return;
+  _perfPageTab=tab;
+  _renderPerformanceTab();
+}
+function setPerfTreemapMode(mode){
+  if(!['period','total','return'].includes(mode))return;
+  _perfTreemapMode=mode;
+  _renderPerfTreemap();
+}
 function renderPerformancePage(){
   var pg=document.getElementById('page'); if(!pg)return;
-  pg.innerHTML='<div class="valio-head"><div><div class="valio-kicker">Performance intelligence</div><h2>Performance du portefeuille</h2><div class="valio-desc">TWR, rendement simple, P&L et contribution des positions. Les contributions indiquent ce qui a créé ou détruit ta performance — pas la surperformance face à un indice.</div></div><button class="btn btn-ghost btn-sm" onclick="refreshPortfolioPerformance()">↻ Recalculer</button></div>'+
-    '<div class="perf-detail-top">'+
-      '<div class="perf-summary-card"><div class="perf-summary-label">TWR · depuis l’origine</div><div class="perf-summary-value" id="pf-all-twr">—</div><div class="perf-summary-sub">Performance chaînée, conçue pour neutraliser au mieux les flux.</div></div>'+
-      '<div class="perf-summary-card"><div class="perf-summary-label">Performance simple</div><div class="perf-summary-value" id="pf-all-simple">—</div><div class="perf-summary-sub">P&L total rapporté au capital investi actuellement suivi.</div></div>'+
-      '<div class="perf-summary-card"><div class="perf-summary-label">P&L total</div><div class="perf-summary-value" id="pf-all-eur">—</div><div class="perf-summary-sub">Plus-values latentes + réalisées enregistrées dans Valio.</div></div>'+
-    '</div>'+
-    '<div class="perf-period-grid">'+
-      [['1d','Jour'],['1w','Semaine'],['1m','Mois'],['ytd','YTD'],['1y','1 an']].map(function(x){var k=x[0];return '<button class="perf-period-card" data-perf-period="'+k+'" onclick="selectPortfolioPerfPeriod(\''+k+'\')"><div class="perf-period-name">'+x[1]+'</div><div class="perf-period-twr" id="pfperf-'+k+'">—</div><div class="perf-period-extra"><span>Simple</span><span id="pfperf-simple-'+k+'">—</span></div><div class="perf-period-extra"><span>P&L</span><span id="pfperf-eur-'+k+'">—</span></div></button>';}).join('')+
-    '</div>'+
-    '<div class="perf-chart-card"><div class="perf-chart-head"><div><div style="font-size:14px;font-weight:700" id="pf-perf-selected-label">Mois · 30 jours</div><div style="font-size:10px;color:var(--muted);margin-top:2px">Clique une période pour mettre à jour le graphique et les contributeurs.</div></div><div class="perf-chart-tabs"><button class="perf-chart-tab" data-perf-chartmode="twr" onclick="setPortfolioPerfChartMode(\'twr\')">TWR %</button><button class="perf-chart-tab" data-perf-chartmode="eur" onclick="setPortfolioPerfChartMode(\'eur\')">P&L €</button></div></div><div class="perf-detail-chart"><canvas id="pf-perf-chart"></canvas></div></div>'+
-    '<div id="perf-page-contrib" style="margin-top:16px"></div>'+
-    '<div class="perf-detail-note" style="margin-top:14px"><b>Contribution en points</b> = P&L estimé de la ligne sur la période / capital de base du portefeuille. Exemple : +2,0 pt signifie que la ligne a ajouté environ 2 points de performance au portefeuille sur cette période. <b>Ce n’est pas</b> +2 points par rapport au S&P 500 ou au Nasdaq.</div>';
-  _pfUpdatePerfTiles();_pfDrawPerformanceChart();
+  pg.innerHTML='<div class="valio-head"><div><div class="valio-kicker">Performance intelligence</div><h2>Performance du portefeuille</h2><div class="valio-desc">Vue globale, attribution par action et carte visuelle des gains/pertes. La contribution en points explique ta performance du portefeuille ; elle ne mesure pas la surperformance face à un indice.</div></div><button class="btn btn-ghost btn-sm" onclick="refreshPortfolioPerformance()">↻ Recalculer</button></div>'+ 
+    '<div class="perf-subtabs">'+
+      '<button class="perf-subtab" data-perf-tab="overview" onclick="setPerformanceSubtab(\'overview\')">Vue d’ensemble</button>'+ 
+      '<button class="perf-subtab" data-perf-tab="stocks" onclick="setPerformanceSubtab(\'stocks\')">Actions individuelles</button>'+ 
+      '<button class="perf-subtab" data-perf-tab="treemap" onclick="setPerformanceSubtab(\'treemap\')">Carte des performances</button>'+ 
+    '</div><div id="perf-tab-content"></div>';
+  _renderPerformanceTab();
   if(!_pfPerfState.loaded&&!_pfPerfState.loading) refreshPortfolioPerformance();
-  else _perfPageRenderContrib();
+}
+function _perfSetActiveTab(){
+  document.querySelectorAll('[data-perf-tab]').forEach(function(b){b.classList.toggle('active',b.dataset.perfTab===_perfPageTab);});
+}
+function _renderPerformanceTab(){
+  var el=document.getElementById('perf-tab-content');if(!el)return;_perfSetActiveTab();
+  if(_perfPageTab==='overview'){
+    el.innerHTML='<div class="perf-detail-top">'+
+      '<div class="perf-summary-card"><div class="perf-summary-label">TWR · depuis l’origine</div><div class="perf-summary-value" id="pf-all-twr">—</div><div class="perf-summary-sub">Performance chaînée, conçue pour neutraliser au mieux les flux.</div></div>'+ 
+      '<div class="perf-summary-card"><div class="perf-summary-label">Performance simple</div><div class="perf-summary-value" id="pf-all-simple">—</div><div class="perf-summary-sub">P&L total rapporté au capital investi actuellement suivi.</div></div>'+ 
+      '<div class="perf-summary-card"><div class="perf-summary-label">P&L total</div><div class="perf-summary-value" id="pf-all-eur">—</div><div class="perf-summary-sub">Plus-values latentes + réalisées enregistrées dans Valio.</div></div></div>'+ 
+      '<div class="perf-period-grid">'+[['1d','Jour'],['1w','Semaine'],['1m','Mois'],['ytd','YTD'],['1y','1 an']].map(function(x){var k=x[0];return '<button class="perf-period-card" data-perf-period="'+k+'" onclick="selectPortfolioPerfPeriod(\''+k+'\')"><div class="perf-period-name">'+x[1]+'</div><div class="perf-period-twr" id="pfperf-'+k+'">—</div><div class="perf-period-extra"><span>Simple</span><span id="pfperf-simple-'+k+'">—</span></div><div class="perf-period-extra"><span>P&L</span><span id="pfperf-eur-'+k+'">—</span></div></button>';}).join('')+'</div>'+ 
+      '<div class="perf-chart-card"><div class="perf-chart-head"><div><div style="font-size:14px;font-weight:700" id="pf-perf-selected-label">Mois · 30 jours</div><div style="font-size:10px;color:var(--muted);margin-top:2px">Clique une période pour mettre à jour le graphique.</div></div><div class="perf-chart-tabs"><button class="perf-chart-tab" data-perf-chartmode="twr" onclick="setPortfolioPerfChartMode(\'twr\')">TWR %</button><button class="perf-chart-tab" data-perf-chartmode="eur" onclick="setPortfolioPerfChartMode(\'eur\')">P&L €</button></div></div><div class="perf-detail-chart"><canvas id="pf-perf-chart"></canvas></div></div>';
+    _pfUpdatePerfTiles();_pfDrawPerformanceChart();return;
+  }
+  if(_perfPageTab==='stocks'){
+    el.innerHTML='<div class="perf-tab-note"><b>Contribution en points</b> : part approximative de la performance <b>simple</b> créée ou détruite par chaque ligne sur la période. Exemple : Nvidia +2,80 pt signifie qu’environ 2,80 points de la performance du portefeuille sur cette période viennent de Nvidia. Ce n’est ni une surperformance face au S&P, ni une attribution TWR exacte.</div><div id="perf-page-contrib"></div>';
+    _perfPageRenderContrib();return;
+  }
+  el.innerHTML='<div class="perf-tab-note">La taille d’un rectangle dépend de la métrique choisie. La couleur indique le signe : vert = gain, rouge = perte. Clique une case pour ouvrir la fiche de l’entreprise.</div>'+ 
+    '<div class="treemap-toolbar"><button class="treemap-mode" data-tm="period" onclick="setPerfTreemapMode(\'period\')">Contribution période</button><button class="treemap-mode" data-tm="total" onclick="setPerfTreemapMode(\'total\')">Plus-value latente €</button><button class="treemap-mode" data-tm="return" onclick="setPerfTreemapMode(\'return\')">Rendement %</button></div><div id="perf-treemap-wrap"><div class="valio-card" style="padding:30px;text-align:center"><div class="spinner"></div></div></div>';
+  _renderPerfTreemap();
 }
 async function _perfPageRenderContrib(){
   var el=document.getElementById('perf-page-contrib'); if(!el)return;
   var k=_pfPerfState.selected||'1m',info=_perfPagePeriodInfo(k);
   el.innerHTML='<div class="valio-card contrib-wrap"><div class="spinner"></div> <span style="font-size:11px;color:var(--muted)">Calcul des contributeurs…</span></div>';
   try{
-    var data=await _bmContributionRows(info.start,info.range),rows=data.rows.slice(0,12);
+    var data=await _bmContributionRows(info.start,info.range),rows=data.rows.slice(0,16);
     if(!rows.length){el.innerHTML='';return;}
-    el.innerHTML='<div class="valio-card contrib-wrap"><div class="contrib-head"><div><div class="valio-kicker">Contribution à la performance</div><div style="font-size:14px;font-weight:750">Principaux contributeurs · '+info.label+'</div></div><div style="font-size:10px;color:var(--muted);max-width:360px;text-align:right">P&L de la ligne, flux d’achats/ventes neutralisés autant que possible. Contribution = points de performance du portefeuille.</div></div>'+rows.map(function(r){var c=r.pnl>=0?'var(--green)':'var(--red)';return '<div class="contrib-row"><div class="cd-link" data-ticker="'+r.ticker+'" style="cursor:pointer"><b>'+r.name+'</b><div style="font-size:9px;color:var(--muted)">'+r.ticker+'</div></div><div class="num" style="color:'+c+'">'+_pfPerfMoney(r.pnl)+'</div><div class="num" style="color:'+c+'">'+(r.contrib==null?'—':(r.contrib>=0?'+':'')+r.contrib.toFixed(2)+' pt')+'</div><div class="num" style="color:var(--muted)">'+r.weight.toFixed(1)+'%</div></div>';}).join('')+'<div style="display:grid;grid-template-columns:minmax(140px,1.4fr) 90px 90px 80px;gap:10px;padding:8px 4px 0;font-size:9px;color:var(--muted2);text-transform:uppercase"><span>Position</span><span style="text-align:right">P&L</span><span style="text-align:right">Contribution</span><span style="text-align:right">Poids actuel</span></div></div>';
+    el.innerHTML='<div class="valio-card contrib-wrap"><div class="contrib-head"><div><div class="valio-kicker">Attribution simple</div><div style="font-size:14px;font-weight:750">Actions individuelles · '+info.label+'</div></div><div style="font-size:10px;color:var(--muted);max-width:420px;text-align:right">Contribution = P&L estimé de la ligne / capital de base. Les points s’additionnent approximativement pour expliquer la performance simple.</div></div>'+rows.map(function(r){var c=r.pnl>=0?'var(--green)':'var(--red)';return '<div class="contrib-row"><div class="cd-link" data-ticker="'+r.ticker+'" style="cursor:pointer"><b>'+r.name+'</b><div style="font-size:9px;color:var(--muted)">'+r.ticker+'</div></div><div class="num" style="color:'+c+'">'+_pfPerfMoney(r.pnl)+'</div><div class="num" style="color:'+c+'">'+(r.contrib==null?'—':(r.contrib>=0?'+':'')+r.contrib.toFixed(2)+' pt')+'</div><div class="num" style="color:var(--muted)">'+r.weight.toFixed(1)+'%</div></div>';}).join('')+'<div style="display:grid;grid-template-columns:minmax(140px,1.4fr) 90px 90px 80px;gap:10px;padding:8px 4px 0;font-size:9px;color:var(--muted2);text-transform:uppercase"><span>Position</span><span style="text-align:right">P&L</span><span style="text-align:right">Contribution simple</span><span style="text-align:right">Poids actuel</span></div></div>';
   }catch(e){el.innerHTML='<div class="valio-card contrib-wrap" style="font-size:11px;color:var(--muted)">Contribution indisponible : '+(e.message||e)+'</div>';}
+}
+function _tmLayout(items,x,y,w,h,out){
+  if(!items.length)return;if(items.length===1){out.push({item:items[0],x:x,y:y,w:w,h:h});return;}
+  var total=items.reduce(function(s,a){return s+a.size;},0),half=total/2,acc=0,cut=1;
+  for(var i=0;i<items.length-1;i++){acc+=items[i].size;if(acc>=half){cut=i+1;break;}}
+  var a=items.slice(0,cut),b=items.slice(cut),sa=a.reduce(function(s,z){return s+z.size;},0),ratio=total>0?sa/total:.5;
+  if(w>=h){var wa=w*ratio;_tmLayout(a,x,y,wa,h,out);_tmLayout(b,x+wa,y,w-wa,h,out);}else{var ha=h*ratio;_tmLayout(a,x,y,w,ha,out);_tmLayout(b,x,y+ha,w,h-ha,out);}
+}
+function _tmColor(v){if(v>=0){var a=Math.min(.72,.18+Math.abs(v)*.018);return 'rgba(0,230,118,'+a+')';}var a2=Math.min(.72,.18+Math.abs(v)*.018);return 'rgba(239,68,68,'+a2+')';}
+async function _renderPerfTreemap(){
+  var wrap=document.getElementById('perf-treemap-wrap');if(!wrap)return;
+  document.querySelectorAll('[data-tm]').forEach(function(b){b.classList.toggle('active',b.dataset.tm===_perfTreemapMode);});
+  wrap.innerHTML='<div class="valio-card" style="padding:30px;text-align:center"><div class="spinner"></div></div>';
+  try{
+    var rows=[];
+    if(_perfTreemapMode==='period'){
+      var k=_pfPerfState.selected||'ytd',info=_perfPagePeriodInfo(k),d=await _bmContributionRows(info.start,info.range);
+      rows=d.rows.map(function(r){return {ticker:r.ticker,name:r.name,size:Math.max(.0001,Math.abs(r.contrib||0)),value:r.contrib||0,sub:_pfPerfMoney(r.pnl)};});
+    }else{
+      var pos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return (p.valueEur||0)>0;});
+      rows=pos.map(function(p){var val=_perfTreemapMode==='total'?(p.pnlEur||0):(p.pnlPct||0);return {ticker:p.ticker,name:p.name||p.ticker,size:Math.max(.0001,Math.abs(val)),value:val,sub:_perfTreemapMode==='total'?_pfPerfMoney(val):((val>=0?'+':'')+val.toFixed(1)+'%')};});
+    }
+    rows=rows.filter(function(r){return r.size>0.0001;}).sort(function(a,b){return b.size-a.size;}).slice(0,24);
+    if(!rows.length){wrap.innerHTML='<div class="valio-card" style="padding:30px;color:var(--muted)">Aucune donnée disponible.</div>';return;}
+    var rects=[];_tmLayout(rows,0,0,100,100,rects);
+    var unit=_perfTreemapMode==='total'?'€':(_perfTreemapMode==='return'?'%':'pt');
+    wrap.innerHTML='<div class="perf-treemap">'+rects.map(function(r){var it=r.item,disp=_perfTreemapMode==='total'?_pfPerfMoney(it.value):((_perfTreemapMode==='return'&&it.value>=0?'+':it.value>=0?'+':'')+it.value.toFixed(2)+' '+unit);return '<div class="tm-tile cd-link" data-ticker="'+it.ticker+'" style="left:'+r.x+'%;top:'+r.y+'%;width:'+r.w+'%;height:'+r.h+'%;background:'+_tmColor(it.value)+'" title="'+it.name+' · '+disp+'"><div><div class="tm-name">'+it.name+'</div><div class="tm-sub">'+it.ticker+'</div></div><div><div class="tm-value">'+disp+'</div><div class="tm-sub">'+it.sub+'</div></div></div>';}).join('')+'</div>';
+  }catch(e){wrap.innerHTML='<div class="valio-card" style="padding:20px;color:var(--red)">'+(e.message||e)+'</div>';}
 }
 
 var _riskAnalyticsCache={t:0,data:null};
@@ -8423,7 +8514,7 @@ async function renderRiskXray(){
     var maxRisk=Math.max.apply(null,r.contrib.map(function(x){return Math.max(0,x.riskPct);}).concat([1]));
     var visibleRisk=r.contrib.reduce(function(s,x){return s+x.riskPct;},0);
     var contrib='<div class="valio-card risk-panel"><div class="risk-panel-title"><span>Contribution au risque · Top 10</span><button class="btn btn-ghost btn-sm" onclick="showRiskContributionHelp()">? Comment lire</button></div><div style="font-size:10px;color:var(--muted);margin-bottom:8px">Ces 10 lignes représentent '+r.top10Weight.toFixed(1)+'% du capital et '+visibleRisk.toFixed(1)+'% de la contribution totale au risque mesurée.</div>'+r.contrib.slice().sort(function(a,b){return b.riskPct-a.riskPct;}).map(function(x){var w=Math.max(0,Math.min(100,x.riskPct/maxRisk*100));return '<div class="risk-contrib-row" onclick="showRiskContributionDetail(\''+x.ticker+'\')" style="cursor:pointer"><div><b>'+x.name+'</b><div style="font-size:9px;color:var(--muted)">'+x.ticker+'</div></div><div class="mono" style="text-align:right;color:var(--muted)">'+x.weight.toFixed(1)+'%</div><div class="mono" style="text-align:right;color:'+(x.riskPct>x.weight?'var(--yellow)':'var(--cyan)')+'">'+x.riskPct.toFixed(1)+'%</div><div class="risk-bar"><span style="width:'+w+'%"></span></div></div>';}).join('')+'<div style="display:grid;grid-template-columns:minmax(105px,1.1fr) 62px 62px minmax(90px,1.2fr);gap:9px;margin-top:8px;font-size:9px;color:var(--muted2);text-transform:uppercase"><span>Position</span><span style="text-align:right">Poids</span><span style="text-align:right">Risque</span><span></span></div></div>';
-    pg.innerHTML='<div class="valio-head"><div><div class="valio-kicker">Risk intelligence</div><h2>Portfolio X-Ray</h2><div class="valio-desc">Composition actuelle · 1 an. Clique sur chaque carte, cellule ou ligne pour voir l’explication, la formule et les repères.</div></div><button class="btn btn-ghost btn-sm" onclick="_riskAnalyticsCache={t:0,data:null};renderRiskXray()">↻ Recalculer</button></div>'+conc+metrics+'<div class="risk-section-grid">'+matrix+contrib+'</div>';
+    pg.innerHTML='<div class="risk-compact"><div class="valio-head"><div><div class="valio-kicker">Risk intelligence</div><h2>Portfolio X-Ray</h2><div class="valio-desc">Composition actuelle · 1 an. Clique sur chaque carte, cellule ou ligne pour voir l’explication, la formule et les repères.</div></div><button class="btn btn-ghost btn-sm" onclick="_riskAnalyticsCache={t:0,data:null};renderRiskXray()">↻ Recalculer</button></div>'+conc+metrics+'<div class="risk-section-grid">'+matrix+contrib+'</div></div>';
   }catch(e){pg.innerHTML='<div class="valio-head"><div><div class="valio-kicker">Risk intelligence</div><h2>Portfolio X-Ray</h2></div></div><div class="valio-card" style="padding:20px;color:var(--red)">'+(e.message||e)+'</div>';}
 }
 async function loadRiskMetrics(){
@@ -8872,6 +8963,15 @@ async function _cmpFetchPRatio(ticker, perShareField) {
 }
 
 // ── Aligner données annuelles ─────────────────────────────────────────────
+function _cmpLiveGrowth(d,metricId){
+  var f=d&&d._fund;if(!f)return null;
+  if(metricId==='revenueGrowth')return f.revenueGrowthYoY!=null?f.revenueGrowthYoY:null;
+  if(metricId==='epsGrowth')return f.epsGrowth1Y!=null?f.epsGrowth1Y:null;
+  if(metricId==='netIncomeGrowth'){
+    var a=d&&d.netIncome;if(a&&a.length>=2&&a[a.length-2]!=null&&a[a.length-2]!==0&&a[a.length-1]!=null)return (a[a.length-1]/a[a.length-2]-1)*100;
+  }
+  return null;
+}
 function _cmpAlignAnnual(metric) {
   var allYears = {};
   _cmpState.tickers.forEach(function(t){
@@ -8881,14 +8981,20 @@ function _cmpAlignAnnual(metric) {
   var labels=Object.keys(allYears).sort();
   var now=new Date().getFullYear();
   if(_cmpState.range!=='MAX'){ var minY=now-parseInt(_cmpState.range)-1; labels=labels.filter(function(y){return parseInt(y.replace('FY',''))>=minY;}); }
+  var isGrowth=['revenueGrowth','epsGrowth','netIncomeGrowth'].includes(metric.id);
+  if(isGrowth){
+    var hasLive=_cmpState.tickers.some(function(t){return _cmpLiveGrowth(_cmpDataCache[t.ticker],metric.id)!=null;});
+    if(hasLive)labels.push('TTM');
+  }
   var datasets=_cmpState.tickers.map(function(t,i){
     var d=_cmpDataCache[t.ticker], color=CMP_COLORS[i%CMP_COLORS.length];
     var vals=labels.map(function(y){
+      if(y==='TTM')return _cmpLiveGrowth(d,metric.id);
       if(!d||!d.years)return null;
       var idx=d.years.indexOf(y); if(idx<0)return null;
       var arr=d[metric.field]; return(arr&&arr[idx]!=null)?arr[idx]:null;
     });
-    return{label:t.name||t.ticker,data:vals,backgroundColor:metric.chartType==='bar'?color+'bb':undefined,borderColor:color,borderWidth:2,pointRadius:metric.chartType==='line'?3:0,fill:false,tension:0.3};
+    return{label:t.name||t.ticker,data:vals,backgroundColor:metric.chartType==='bar'?color+'bb':undefined,borderColor:color,borderWidth:2,pointRadius:metric.chartType==='line'?4:0,pointHoverRadius:6,fill:false,tension:0.3,spanGaps:true};
   });
   return{labels,datasets};
 }
@@ -9092,7 +9198,7 @@ function renderCompare() {
         '<select id="cmp-metric-select" class="form-input" style="padding:6px 10px;font-size:12px;min-width:200px;width:auto" onchange="_cmpSetMetric(this.value)">'+metricOpts+'</select>'+
         '<div style="display:flex;gap:4px">'+rangeBtns+'</div>'+
         (_cmpState.tickers.length>0?'<span style="font-size:10px;color:var(--muted)">'+_cmpState.tickers.length+' titre'+(_cmpState.tickers.length>1?'s':'')+' sélectionné'+(_cmpState.tickers.length>1?'s':'')+'</span>':'')+
-      '</div>'+
+      '</div><div style="font-size:10px;color:var(--muted);margin-top:9px">Données financières : Yahoo Finance via Valio. Les graphiques de croissance utilisent l’historique annuel GAAP et ajoutent le point TTM actuel quand Yahoo le fournit ; aucune saisie manuelle n’est nécessaire pour le CA/croissance standard.</div>'+
     '</div>'+
     '<div id="cmp-snapshot" class="valio-card" style="padding:16px;margin-bottom:14px"></div>'+
     '<div id="cmp-chart-wrap" style="height:460px;position:relative;padding:16px;width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--border);border-radius:12px;transition:opacity .2s">'+
