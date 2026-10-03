@@ -351,40 +351,29 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 .contrib-row{display:grid;grid-template-columns:minmax(140px,1.4fr) 90px 90px 80px;gap:10px;align-items:center;padding:9px 4px;border-top:1px solid rgba(255,255,255,.05);font-size:11px}.contrib-row:first-child{border-top:0}.contrib-row .num{text-align:right;font-family:monospace;font-weight:700}
 .risk-mini-link{display:inline-flex;align-items:center;gap:4px;color:var(--cyan);font-size:10px;cursor:pointer;margin-top:8px}.risk-mini-link:hover{text-decoration:underline}
 @media(max-width:900px){.risk-section-grid{grid-template-columns:1fr}.contrib-row{grid-template-columns:minmax(120px,1fr) 72px 72px}.contrib-row>*:last-child{display:none}}
-/* Risk X-Ray compact : garder l'essentiel sur un écran desktop */
-.risk-compact .valio-head{margin-bottom:9px}
-.risk-compact .valio-head h2{font-size:18px}
-.risk-compact .valio-desc{font-size:10.5px;line-height:1.3}
-.risk-compact .valio-metric-grid{gap:9px}
-.risk-compact .metric-box{padding:11px 13px;min-height:78px}
-.risk-compact .metric-box .mlabel{font-size:9px;margin-bottom:5px}
-.risk-compact .metric-box .mvalue{font-size:21px}
-.risk-compact .metric-box .msub{font-size:9px;margin-top:5px;line-height:1.2}
-.risk-compact .risk-section-grid{gap:10px;margin-top:10px}
-.risk-compact .risk-panel{padding:12px 14px}
-.risk-compact .risk-panel-title{font-size:12px;margin-bottom:7px}
-.risk-compact .risk-table{font-size:10px}
-.risk-compact .risk-table th{font-size:8.5px;padding:4px 4px}
-.risk-compact .risk-table td{padding:4px 4px}
-.risk-compact .risk-table th:first-child,.risk-compact .risk-table td:first-child{min-width:68px}
-.risk-compact .risk-matrix-wrap{max-height:none;overflow:auto}
-.risk-compact .risk-contrib-row{padding:4px 0;font-size:9.5px}
-.risk-compact .risk-bar{height:5px}
-.risk-summary-strip{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:7px;margin-bottom:8px}
-.risk-summary-strip .metric-box{padding:9px 10px!important;min-height:67px!important}
-.risk-summary-strip .metric-box .mlabel{font-size:8px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.risk-summary-strip .metric-box .mvalue{font-size:18px!important}
-.risk-summary-strip .metric-box .msub{display:none}
-.risk-compact .risk-section-grid{grid-template-columns:minmax(0,1.12fr) minmax(0,.88fr);align-items:start}
-.risk-compact .risk-panel{padding:10px 12px}
-.risk-compact .risk-table{font-size:9px}
-.risk-compact .risk-table th{font-size:7.5px;padding:3px}
-.risk-compact .risk-table td{padding:3px}
-.risk-compact .risk-table th:first-child,.risk-compact .risk-table td:first-child{min-width:58px}
-.risk-compact .risk-matrix-wrap{overflow:visible;max-height:none}
-.corr-stats-line{margin-top:7px;padding-top:7px;border-top:1px solid rgba(255,255,255,.05);font-size:9px;color:var(--muted);line-height:1.5}
+/* Risk X-Ray : une vue desktop dense mais qui remplit réellement l'écran */
+.risk-compact{min-height:calc(100vh - 78px);display:grid;grid-template-rows:auto auto minmax(0,1fr);align-content:stretch}
+.risk-compact .valio-head{margin-bottom:12px}
+.risk-compact .valio-head h2{font-size:20px}
+.risk-compact .valio-desc{font-size:11px;line-height:1.35}
+.risk-summary-strip{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:8px;margin-bottom:10px}
+.risk-summary-strip .metric-box{padding:11px 11px!important;min-height:78px!important}
+.risk-summary-strip .metric-box .mlabel{font-size:8.5px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.risk-summary-strip .metric-box .mvalue{font-size:20px!important;line-height:1.05}
+.risk-summary-strip .metric-box .msub{display:block!important;font-size:8px!important;line-height:1.15;margin-top:6px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.risk-compact .risk-section-grid{grid-template-columns:minmax(0,1.13fr) minmax(0,.87fr);gap:12px;margin-top:0;min-height:0;height:100%;align-items:stretch}
+.risk-compact .risk-panel{padding:14px 15px;height:100%;min-height:0;display:flex;flex-direction:column;box-sizing:border-box}
+.risk-compact .risk-panel-title{font-size:13px;margin-bottom:9px}
+.risk-compact .risk-matrix-wrap{overflow:visible;max-height:none;flex:1;display:flex;align-items:stretch;min-height:0}
+.risk-compact .risk-table{font-size:10px;width:100%;height:100%;table-layout:fixed}
+.risk-compact .risk-table th{font-size:8px;padding:5px 4px}
+.risk-compact .risk-table td{padding:5px 4px}
+.risk-compact .risk-table th:first-child,.risk-compact .risk-table td:first-child{min-width:64px;width:80px}
+.risk-compact .risk-contrib-row{padding:7px 0;font-size:10px;flex:1;min-height:0}
+.risk-compact .risk-bar{height:6px}
+.corr-stats-line{margin-top:9px;padding-top:9px;border-top:1px solid rgba(255,255,255,.05);font-size:9.5px;color:var(--muted);line-height:1.55}
 .corr-stat-main{color:var(--text);font-weight:750}.corr-high{color:#c4b5fd}.corr-low{color:var(--cyan)}
-@media(max-width:1300px){.risk-summary-strip{grid-template-columns:repeat(5,1fr)}.risk-summary-strip .metric-box .msub{display:block}.risk-compact .risk-section-grid{grid-template-columns:1fr}}
+@media(max-width:1300px){.risk-compact{display:block;min-height:auto}.risk-summary-strip{grid-template-columns:repeat(5,1fr)}.risk-summary-strip .metric-box .msub{display:block}.risk-compact .risk-section-grid{grid-template-columns:1fr;height:auto}.risk-compact .risk-panel{height:auto}.risk-compact .risk-matrix-wrap{display:block}}
 
 .perf-subtabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}
 .perf-subtab{border:1px solid var(--border);background:var(--card2);color:var(--muted);border-radius:10px;padding:7px 12px;font-size:11px;font-weight:700;cursor:pointer;transition:all .14s ease}
@@ -399,6 +388,10 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 .contrib-table-wrap{overflow-x:auto;border:1px solid rgba(255,255,255,.05);border-radius:12px}
 .contrib-detail-table{width:100%;border-collapse:collapse;min-width:1080px;font-size:10.5px}
 .contrib-detail-table th{padding:8px 9px;text-align:right;color:var(--muted2);font-size:8.5px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border2);white-space:nowrap}
+.contrib-detail-table th.sortable{cursor:pointer;user-select:none;transition:color .12s ease,background .12s ease}
+.contrib-detail-table th.sortable:hover{color:var(--cyan);background:rgba(38,197,222,.035)}
+.contrib-detail-table th.sort-active{color:#c4b5fd}
+.contrib-sort-arrow{display:inline-block;margin-left:4px;font-size:8px;opacity:.9}
 .contrib-detail-table th:first-child,.contrib-detail-table th:nth-child(2){text-align:left}
 .contrib-detail-table td{padding:8px 9px;text-align:right;border-bottom:1px solid rgba(255,255,255,.045);font-family:monospace;white-space:nowrap}
 .contrib-detail-table td:first-child,.contrib-detail-table td:nth-child(2){text-align:left;font-family:var(--font)}
@@ -409,6 +402,8 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 .treemap-mode.active{color:#fff;border-color:rgba(38,197,222,.45);background:linear-gradient(135deg,rgba(99,75,228,.25),rgba(38,197,222,.15))}
 .perf-treemap{position:relative;height:470px;border-radius:14px;overflow:hidden;background:rgba(8,8,17,.45);border:1px solid rgba(255,255,255,.05)}
 .tm-tile{position:absolute;padding:8px;border:2px solid var(--card);overflow:hidden;cursor:pointer;transition:filter .14s ease,transform .14s ease;display:flex;flex-direction:column;justify-content:space-between}
+.tm-tile.tm-sold{border-color:rgba(38,197,222,.34);box-shadow:inset 0 0 0 1px rgba(7,18,28,.35)}
+.tm-sold-pill{display:inline-flex;align-items:center;width:max-content;margin-top:4px;padding:2px 5px;border-radius:999px;background:rgba(6,182,212,.16);border:1px solid rgba(38,197,222,.28);color:#8be8f6;font-size:7.5px;font-weight:800;letter-spacing:.04em}
 .tm-tile:hover{filter:brightness(1.13);z-index:3;transform:scale(.995)}
 .tm-name{font-weight:800;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tm-value{font-family:monospace;font-size:12px;font-weight:800}
@@ -8329,7 +8324,8 @@ function _perfPagePeriodInfo(k){
   var now=Math.floor(Date.now()/1000),d=new Date();
   if(k==='1d')return {start:now-86400,range:'1mo',label:'Jour'};
   if(k==='1w')return {start:now-7*86400,range:'1mo',label:'Semaine · 7 jours'};
-  if(k==='1m')return {start:now-30*86400,range:'1mo',label:'Mois · 30 jours'};
+  if(k==='mtd')return {start:Math.floor(new Date(d.getFullYear(),d.getMonth(),1).getTime()/1000),range:'1mo',label:'MTD · depuis le 1er du mois'};
+  if(k==='1m')return {start:now-30*86400,range:'1mo',label:'1 mois glissant'};
   if(k==='ytd')return {start:Math.floor(new Date(d.getFullYear(),0,1).getTime()/1000),range:'1y',label:'YTD'};
   return {start:now-365*86400,range:'1y',label:'1 an'};
 }
@@ -8337,9 +8333,18 @@ var _perfPageTab='overview';
 var _perfTreemapMode='period';
 var _perfStocksPeriod='ytd';
 var _perfTreemapPeriod='ytd';
-function _perfPeriodPills(current,fn){return '<div class="perf-period-toolbar"><div style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase">Période de référence</div><div class="perf-period-pills">'+[['1d','1J'],['1w','1S'],['1m','1M'],['ytd','YTD'],['1y','1A']].map(function(x){return '<button class="perf-period-pill'+(current===x[0]?' active':'')+'" onclick="'+fn+'(\''+x[0]+'\')">'+x[1]+'</button>';}).join('')+'</div></div>'; }
-function setPerfStocksPeriod(k){if(!['1d','1w','1m','ytd','1y'].includes(k))return;_perfStocksPeriod=k;_renderPerformanceTab();}
-function setPerfTreemapPeriod(k){if(!['1d','1w','1m','ytd','1y'].includes(k))return;_perfTreemapPeriod=k;_renderPerformanceTab();}
+var _perfStocksSort={col:'pnl',dir:'desc'};
+function setPerfStocksSort(col){
+  var allowed=['startValue','buys','sells','endValue','pnl','returnPct','contrib','weight'];
+  if(!allowed.includes(col))return;
+  if(_perfStocksSort.col===col)_perfStocksSort.dir=_perfStocksSort.dir==='desc'?'asc':'desc';
+  else{_perfStocksSort.col=col;_perfStocksSort.dir='desc';}
+  _perfPageRenderContrib();
+}
+function _perfSortTh(label,col){var active=_perfStocksSort.col===col,arrow=active?(_perfStocksSort.dir==='desc'?'▼':'▲'):'↕';return '<th class="sortable'+(active?' sort-active':'')+'" onclick="setPerfStocksSort(\''+col+'\')">'+label+'<span class="contrib-sort-arrow">'+arrow+'</span></th>'; }
+function _perfPeriodPills(current,fn){return '<div class="perf-period-toolbar"><div style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase">Période de référence</div><div class="perf-period-pills">'+[['1d','1J'],['1w','1S'],['mtd','MTD'],['1m','1M'],['ytd','YTD'],['1y','1A']].map(function(x){return '<button class="perf-period-pill'+(current===x[0]?' active':'')+'" onclick="'+fn+'(\''+x[0]+'\')">'+x[1]+'</button>';}).join('')+'</div></div>'; }
+function setPerfStocksPeriod(k){if(!['1d','1w','mtd','1m','ytd','1y'].includes(k))return;_perfStocksPeriod=k;_renderPerformanceTab();}
+function setPerfTreemapPeriod(k){if(!['1d','1w','mtd','1m','ytd','1y'].includes(k))return;_perfTreemapPeriod=k;_renderPerformanceTab();}
 function setPerformanceSubtab(tab){
   if(!['overview','stocks','treemap'].includes(tab))return;
   _perfPageTab=tab;
@@ -8376,11 +8381,11 @@ function _renderPerformanceTab(){
     _pfUpdatePerfTiles();_pfDrawPerformanceChart();return;
   }
   if(_perfPageTab==='stocks'){
-    el.innerHTML='<div class="perf-tab-note"><b>Contribution en points</b> : part approximative de la performance <b>simple</b> créée ou détruite par chaque ligne sur la période. Exemple : Nvidia +2,80 pt signifie qu’environ 2,80 points de la performance du portefeuille sur cette période viennent de Nvidia. Ce n’est ni une surperformance face au S&P, ni une attribution TWR exacte.</div><div id="perf-page-contrib"></div>';
+    el.innerHTML='<div class="perf-tab-note"><b>Contribution en points</b> : part approximative de la performance <b>simple</b> créée ou détruite par chaque ligne sur la période. Exemple : Nvidia +2,80 pt signifie qu’environ 2,80 points de la performance du portefeuille sur cette période viennent de Nvidia. Ce n’est ni une surperformance face au S&P, ni une attribution TWR exacte.</div>'+_perfPeriodPills(_perfStocksPeriod,'setPerfStocksPeriod')+'<div id="perf-page-contrib"></div>';
     _perfPageRenderContrib();return;
   }
-  el.innerHTML='<div class="perf-tab-note">La taille d’un rectangle dépend de la métrique choisie. La couleur indique le signe : vert = gain, rouge = perte. Clique une case pour ouvrir la fiche de l’entreprise.</div>'+ 
-    '<div class="treemap-toolbar"><button class="treemap-mode" data-tm="period" onclick="setPerfTreemapMode(\'period\')">Contribution période</button><button class="treemap-mode" data-tm="total" onclick="setPerfTreemapMode(\'total\')">Plus-value latente €</button><button class="treemap-mode" data-tm="return" onclick="setPerfTreemapMode(\'return\')">Rendement %</button></div><div id="perf-treemap-wrap"><div class="valio-card" style="padding:30px;text-align:center"><div class="spinner"></div></div></div>';
+  el.innerHTML='<div class="perf-tab-note">La taille d’un rectangle dépend de la métrique choisie. La couleur indique le signe : vert = gain, rouge = perte. Les positions vendues utilisent une teinte plus sombre. Clique une case pour ouvrir la fiche de l’entreprise.</div>'+_perfPeriodPills(_perfTreemapPeriod,'setPerfTreemapPeriod')+ 
+    '<div class="treemap-toolbar"><button class="treemap-mode" data-tm="period" onclick="setPerfTreemapMode(\'period\')">Contribution période</button><button class="treemap-mode" data-tm="total" onclick="setPerfTreemapMode(\'total\')">P&L période €</button><button class="treemap-mode" data-tm="return" onclick="setPerfTreemapMode(\'return\')">Rendement période %</button></div><div id="perf-treemap-wrap"><div class="valio-card" style="padding:30px;text-align:center"><div class="spinner"></div></div></div>';
   _renderPerfTreemap();
 }
 async function _perfPageRenderContrib(){
@@ -8389,13 +8394,14 @@ async function _perfPageRenderContrib(){
   el.innerHTML='<div class="valio-card contrib-wrap"><div class="spinner"></div> <span style="font-size:11px;color:var(--muted)">Calcul des contributeurs…</span></div>';
   try{
     var data=await _bmContributionRows(info.start,info.range),rows=data.rows;
+    rows=rows.slice().sort(function(a,b){var av=a[_perfStocksSort.col],bv=b[_perfStocksSort.col];av=(av==null||!isFinite(av))?-Infinity:av;bv=(bv==null||!isFinite(bv))?-Infinity:bv;return _perfStocksSort.dir==='desc'?bv-av:av-bv;});
     if(!rows.length){el.innerHTML='<div class="valio-card contrib-wrap" style="color:var(--muted)">Aucune contribution disponible sur cette période.</div>';return;}
     var sumPnl=rows.reduce(function(s,r){return s+(r.pnl||0);},0),sumC=rows.reduce(function(s,r){return s+(r.contrib||0);},0);
     var body=rows.map(function(r){
       var c=r.pnl>=0?'var(--green)':'var(--red)',sold=r.sold?'<span class="sold-badge">VENDU</span>':'<span style="font-size:8px;color:var(--muted2)">DÉTENU</span>';
       return '<tr><td><span class="cd-link" data-ticker="'+r.ticker+'" style="cursor:pointer;font-weight:700">'+r.name+'</span><div style="font-size:8.5px;color:var(--muted)">'+r.ticker+'</div></td><td>'+sold+'</td><td>'+fE(r.startValue||0)+'</td><td>'+fE(r.buys||0)+'</td><td>'+fE(r.sells||0)+'</td><td>'+fE(r.endValue||0)+'</td><td style="color:'+c+';font-weight:800">'+_pfPerfMoney(r.pnl)+'</td><td style="color:'+_pfPerfColor(r.returnPct)+';font-weight:800">'+_pfPerfFmt(r.returnPct)+'</td><td style="color:'+c+';font-weight:800">'+(r.contrib==null?'—':(r.contrib>=0?'+':'')+r.contrib.toFixed(2)+' pt')+'</td><td style="color:var(--muted)">'+r.weight.toFixed(1)+'%</td></tr>';
     }).join('');
-    el.innerHTML='<div class="valio-card contrib-wrap"><div class="contrib-head"><div><div class="valio-kicker">Attribution simple</div><div style="font-size:14px;font-weight:750">Actions individuelles · '+info.label+'</div></div><div style="font-size:10px;color:var(--muted);max-width:520px;text-align:right">P&L = valeur fin − valeur début − achats + ventes. Rendement ligne = P&L / (valeur début + achats). Contribution = P&L / capital de base du portefeuille. Les ventes sont donc conservées dans l’historique.</div></div><div class="contrib-table-wrap"><table class="contrib-detail-table"><thead><tr><th>Position</th><th>Statut</th><th>Valeur début</th><th>Achats</th><th>Ventes</th><th>Valeur fin</th><th>P&L période</th><th>Rdt ligne</th><th>Contribution</th><th>Poids actuel</th></tr></thead><tbody>'+body+'<tr style="background:rgba(99,75,228,.05)"><td><b>Total affiché</b></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td style="color:'+_pfPerfColor(sumPnl)+';font-weight:800">'+_pfPerfMoney(sumPnl)+'</td><td>—</td><td style="color:'+_pfPerfColor(sumC)+';font-weight:800">'+(sumC>=0?'+':'')+sumC.toFixed(2)+' pt</td><td>—</td></tr></tbody></table></div><div style="font-size:9.5px;color:var(--muted2);margin-top:9px;line-height:1.5">* Le rendement de ligne est un ratio simple sur le capital mobilisé de la ligne ; ce n’est pas un TWR individuel. Pour une position vendue, « valeur fin » et « poids actuel » valent 0, mais la vente et le P&L réalisé restent comptés.</div></div>';
+    el.innerHTML='<div class="valio-card contrib-wrap"><div class="contrib-head"><div><div class="valio-kicker">Attribution simple</div><div style="font-size:14px;font-weight:750">Actions individuelles · '+info.label+'</div></div><div style="font-size:10px;color:var(--muted);max-width:520px;text-align:right">P&L = valeur fin − valeur début − achats + ventes. Rendement ligne = P&L / (valeur début + achats). Contribution = P&L / capital de base du portefeuille. Les ventes sont donc conservées dans l’historique.</div></div><div class="contrib-table-wrap"><table class="contrib-detail-table"><thead><tr><th>Position</th><th>Statut</th>'+_perfSortTh('Valeur début','startValue')+_perfSortTh('Achats','buys')+_perfSortTh('Ventes','sells')+_perfSortTh('Valeur fin','endValue')+_perfSortTh('P&L période','pnl')+_perfSortTh('Rdt ligne','returnPct')+_perfSortTh('Contribution','contrib')+_perfSortTh('Poids actuel','weight')+'</tr></thead><tbody>'+body+'<tr style="background:rgba(99,75,228,.05)"><td><b>Total affiché</b></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td style="color:'+_pfPerfColor(sumPnl)+';font-weight:800">'+_pfPerfMoney(sumPnl)+'</td><td>—</td><td style="color:'+_pfPerfColor(sumC)+';font-weight:800">'+(sumC>=0?'+':'')+sumC.toFixed(2)+' pt</td><td>—</td></tr></tbody></table></div><div style="font-size:9.5px;color:var(--muted2);margin-top:9px;line-height:1.5">* Le rendement de ligne est un ratio simple sur le capital mobilisé de la ligne ; ce n’est pas un TWR individuel. Pour une position vendue, « valeur fin » et « poids actuel » valent 0, mais la vente et le P&L réalisé restent comptés.</div></div>';
   }catch(e){el.innerHTML='<div class="valio-card contrib-wrap" style="font-size:11px;color:var(--muted)">Contribution indisponible : '+(e.message||e)+'</div>';}
 }
 
@@ -8406,7 +8412,7 @@ function _tmLayout(items,x,y,w,h,out){
   var a=items.slice(0,cut),b=items.slice(cut),sa=a.reduce(function(s,z){return s+z.size;},0),ratio=total>0?sa/total:.5;
   if(w>=h){var wa=w*ratio;_tmLayout(a,x,y,wa,h,out);_tmLayout(b,x+wa,y,w-wa,h,out);}else{var ha=h*ratio;_tmLayout(a,x,y,w,ha,out);_tmLayout(b,x,y+ha,w,h-ha,out);}
 }
-function _tmColor(v){if(v>=0){var a=Math.min(.72,.18+Math.abs(v)*.018);return 'rgba(0,230,118,'+a+')';}var a2=Math.min(.72,.18+Math.abs(v)*.018);return 'rgba(239,68,68,'+a2+')';}
+function _tmColor(v,sold){var a=Math.min(.78,.24+Math.abs(v)*.018);if(v>=0)return sold?'rgba(4,120,87,'+a+')':'rgba(0,230,118,'+a+')';return sold?'rgba(153,27,27,'+a+')':'rgba(239,68,68,'+a+')';}
 async function _renderPerfTreemap(){
   var wrap=document.getElementById('perf-treemap-wrap');if(!wrap)return;
   document.querySelectorAll('[data-tm]').forEach(function(b){b.classList.toggle('active',b.dataset.tm===_perfTreemapMode);});
@@ -8422,7 +8428,7 @@ async function _renderPerfTreemap(){
     if(!rows.length){wrap.innerHTML='<div class="valio-card" style="padding:30px;color:var(--muted)">Aucune donnée disponible.</div>';return;}
     var rects=[];_tmLayout(rows,0,0,100,100,rects);
     var unit=_perfTreemapMode==='total'?'€':(_perfTreemapMode==='return'?'%':'pt');
-    wrap.innerHTML='<div class="perf-treemap">'+rects.map(function(r){var it=r.item,disp=_perfTreemapMode==='total'?_pfPerfMoney(it.value):((it.value>=0?'+':'')+it.value.toFixed(2)+' '+unit);return '<div class="tm-tile cd-link" data-ticker="'+it.ticker+'" style="left:'+r.x+'%;top:'+r.y+'%;width:'+r.w+'%;height:'+r.h+'%;background:'+_tmColor(it.value)+'" title="'+it.name+' · '+disp+'"><div><div class="tm-name">'+it.name+'</div><div class="tm-sub">'+it.ticker+'</div></div><div><div class="tm-value">'+disp+'</div><div class="tm-sub">'+it.sub+'</div></div></div>';}).join('')+'</div>';
+    wrap.innerHTML='<div class="perf-treemap">'+rects.map(function(r){var it=r.item,disp=_perfTreemapMode==='total'?_pfPerfMoney(it.value):((it.value>=0?'+':'')+it.value.toFixed(2)+' '+unit);return '<div class="tm-tile cd-link'+(it.sold?' tm-sold':'')+'" data-ticker="'+it.ticker+'" style="left:'+r.x+'%;top:'+r.y+'%;width:'+r.w+'%;height:'+r.h+'%;background:'+_tmColor(it.value,it.sold)+'" title="'+it.name+' · '+disp+'"><div><div class="tm-name">'+it.name+'</div><div class="tm-sub">'+it.ticker+'</div>'+(it.sold?'<div class="tm-sold-pill">VENDU</div>':'')+'</div><div><div class="tm-value">'+disp+'</div><div class="tm-sub">'+it.sub+'</div></div></div>';}).join('')+'</div>';
   }catch(e){wrap.innerHTML='<div class="valio-card" style="padding:20px;color:var(--red)">'+(e.message||e)+'</div>';}
 }
 
