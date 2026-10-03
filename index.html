@@ -426,6 +426,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
         <!-- Screener retiré: accès via clic sur entreprise dans Ratios -->
         <div class="nav-item" id="nav-watchlist" onclick="navigate('watchlist')"><span class="nav-icon">🎯</span><span>Cibles d'achat</span></div>
         <div class="nav-item" id="nav-journal" onclick="navigate('journal')"><span class="nav-icon">📓</span><span>Journal</span></div>
+        <div class="nav-item" id="nav-performance" onclick="navigate('performance')"><span class="nav-icon">⚡</span><span>Performance</span></div>
         <div class="nav-item" id="nav-compare" onclick="navigate('compare')"><span class="nav-icon">📊</span><span>Comparer</span></div>
         <div class="nav-item" id="nav-risk" onclick="navigate('risk')"><span class="nav-icon">🛡️</span><span>Risque</span></div>
         <div class="nav-section">Social</div>
@@ -1269,7 +1270,7 @@ function navigate(page){
   S.page=page;
   document.querySelectorAll('.nav-item:not(.disabled)').forEach(e=>e.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes',ratios:'Screener',watchlist:'Cibles d\u0027achat',screener:'Screener',amis:'Amis',benchmark:'Benchmark',leaderboard:'Classement',journal:'Journal',compare:'Comparer',risk:'Risque X-Ray'}[page]||page;
+  document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes',ratios:'Screener',watchlist:'Cibles d\u0027achat',screener:'Screener',amis:'Amis',benchmark:'Benchmark',leaderboard:'Classement',journal:'Journal',performance:'Performance',compare:'Comparer',risk:'Risque X-Ray'}[page]||page;
   const pfDiv=document.getElementById('page-portfolio');
   const pgDiv=document.getElementById('page');
   if(page==='portfolio'){
@@ -1289,6 +1290,7 @@ function navigate(page){
     else if(page==='journal')renderJournal();
     else if(page==='deposits')renderDeposits();
     else if(page==='liquidity')renderLiquidity();
+    else if(page==='performance')renderPerformancePage();
     else if(page==='compare')renderCompare();
     else if(page==='risk')renderRiskXray();
   }
@@ -7295,6 +7297,7 @@ function selectPortfolioPerfPeriod(period){
   _pfPerfState.selected=period;
   _pfUpdatePerfTiles();
   _pfDrawPerformanceChart();
+  if(document.getElementById('perf-page-contrib')) _perfPageRenderContrib();
 }
 function setPortfolioPerfChartMode(mode){
   if(!['twr','eur'].includes(mode))return;
@@ -7422,6 +7425,7 @@ async function refreshPortfolioPerformance(){
     _pfPerfState.loading=false;
     _pfUpdatePerfTiles();
     _pfDrawPerformanceChart();
+    if(document.getElementById('perf-page-contrib')) _perfPageRenderContrib();
   }
 }
 
@@ -7735,8 +7739,7 @@ async function renderBenchmark(){
     }).join('')+'</div>'+
     '<div id="bm-insights" class="bm-insight-grid"><div class="valio-card bm-insight-card"><div class="shimmer" style="width:120px;height:12px"></div><div class="shimmer" style="width:90px;height:28px;margin-top:10px"></div></div></div>'+
     '<div class="card"><div id="bm-chart-wrap" style="position:relative;height:380px">'+
-    '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted)">Sélectionne des éléments à comparer</div></div></div>'+
-    '<div id="bm-contrib"></div>';
+    '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted)">Sélectionne des éléments à comparer</div></div></div>';
 
   // Default period = YTD
   window._bmPeriodKey='ytd'; window._bmItems=[];
@@ -7942,8 +7945,6 @@ async function refreshBmChart(){
       }
     }
   });
-  if(items.some(function(x){return x.id==='__me__';})) _bmRenderContributions(periodKey,startOverride,range);
-  else {var _ce=document.getElementById('bm-contrib');if(_ce)_ce.innerHTML='';}
 }
 
 
@@ -8252,6 +8253,45 @@ window.expandPanel=function(id){
 };
 
 // ═══ RISQUE PORTEFEUILLE — X-RAY V8 ════════════════════════════════════════
+
+// ═══ PAGE PERFORMANCE ═══════════════════════════════════════════════════════
+function _perfPagePeriodInfo(k){
+  var now=Math.floor(Date.now()/1000),d=new Date();
+  if(k==='1d')return {start:now-86400,range:'1mo',label:'Jour'};
+  if(k==='1w')return {start:now-7*86400,range:'1mo',label:'Semaine · 7 jours'};
+  if(k==='1m')return {start:now-30*86400,range:'1mo',label:'Mois · 30 jours'};
+  if(k==='ytd')return {start:Math.floor(new Date(d.getFullYear(),0,1).getTime()/1000),range:'1y',label:'YTD'};
+  return {start:now-365*86400,range:'1y',label:'1 an'};
+}
+function renderPerformancePage(){
+  var pg=document.getElementById('page'); if(!pg)return;
+  pg.innerHTML='<div class="valio-head"><div><div class="valio-kicker">Performance intelligence</div><h2>Performance du portefeuille</h2><div class="valio-desc">TWR, rendement simple, P&L et contribution des positions. Les contributions indiquent ce qui a créé ou détruit ta performance — pas la surperformance face à un indice.</div></div><button class="btn btn-ghost btn-sm" onclick="refreshPortfolioPerformance()">↻ Recalculer</button></div>'+
+    '<div class="perf-detail-top">'+
+      '<div class="perf-summary-card"><div class="perf-summary-label">TWR · depuis l’origine</div><div class="perf-summary-value" id="pf-all-twr">—</div><div class="perf-summary-sub">Performance chaînée, conçue pour neutraliser au mieux les flux.</div></div>'+
+      '<div class="perf-summary-card"><div class="perf-summary-label">Performance simple</div><div class="perf-summary-value" id="pf-all-simple">—</div><div class="perf-summary-sub">P&L total rapporté au capital investi actuellement suivi.</div></div>'+
+      '<div class="perf-summary-card"><div class="perf-summary-label">P&L total</div><div class="perf-summary-value" id="pf-all-eur">—</div><div class="perf-summary-sub">Plus-values latentes + réalisées enregistrées dans Valio.</div></div>'+
+    '</div>'+
+    '<div class="perf-period-grid">'+
+      [['1d','Jour'],['1w','Semaine'],['1m','Mois'],['ytd','YTD'],['1y','1 an']].map(function(x){var k=x[0];return '<button class="perf-period-card" data-perf-period="'+k+'" onclick="selectPortfolioPerfPeriod(\''+k+'\')"><div class="perf-period-name">'+x[1]+'</div><div class="perf-period-twr" id="pfperf-'+k+'">—</div><div class="perf-period-extra"><span>Simple</span><span id="pfperf-simple-'+k+'">—</span></div><div class="perf-period-extra"><span>P&L</span><span id="pfperf-eur-'+k+'">—</span></div></button>';}).join('')+
+    '</div>'+
+    '<div class="perf-chart-card"><div class="perf-chart-head"><div><div style="font-size:14px;font-weight:700" id="pf-perf-selected-label">Mois · 30 jours</div><div style="font-size:10px;color:var(--muted);margin-top:2px">Clique une période pour mettre à jour le graphique et les contributeurs.</div></div><div class="perf-chart-tabs"><button class="perf-chart-tab" data-perf-chartmode="twr" onclick="setPortfolioPerfChartMode(\'twr\')">TWR %</button><button class="perf-chart-tab" data-perf-chartmode="eur" onclick="setPortfolioPerfChartMode(\'eur\')">P&L €</button></div></div><div class="perf-detail-chart"><canvas id="pf-perf-chart"></canvas></div></div>'+
+    '<div id="perf-page-contrib" style="margin-top:16px"></div>'+
+    '<div class="perf-detail-note" style="margin-top:14px"><b>Contribution en points</b> = P&L estimé de la ligne sur la période / capital de base du portefeuille. Exemple : +2,0 pt signifie que la ligne a ajouté environ 2 points de performance au portefeuille sur cette période. <b>Ce n’est pas</b> +2 points par rapport au S&P 500 ou au Nasdaq.</div>';
+  _pfUpdatePerfTiles();_pfDrawPerformanceChart();
+  if(!_pfPerfState.loaded&&!_pfPerfState.loading) refreshPortfolioPerformance();
+  else _perfPageRenderContrib();
+}
+async function _perfPageRenderContrib(){
+  var el=document.getElementById('perf-page-contrib'); if(!el)return;
+  var k=_pfPerfState.selected||'1m',info=_perfPagePeriodInfo(k);
+  el.innerHTML='<div class="valio-card contrib-wrap"><div class="spinner"></div> <span style="font-size:11px;color:var(--muted)">Calcul des contributeurs…</span></div>';
+  try{
+    var data=await _bmContributionRows(info.start,info.range),rows=data.rows.slice(0,12);
+    if(!rows.length){el.innerHTML='';return;}
+    el.innerHTML='<div class="valio-card contrib-wrap"><div class="contrib-head"><div><div class="valio-kicker">Contribution à la performance</div><div style="font-size:14px;font-weight:750">Principaux contributeurs · '+info.label+'</div></div><div style="font-size:10px;color:var(--muted);max-width:360px;text-align:right">P&L de la ligne, flux d’achats/ventes neutralisés autant que possible. Contribution = points de performance du portefeuille.</div></div>'+rows.map(function(r){var c=r.pnl>=0?'var(--green)':'var(--red)';return '<div class="contrib-row"><div class="cd-link" data-ticker="'+r.ticker+'" style="cursor:pointer"><b>'+r.name+'</b><div style="font-size:9px;color:var(--muted)">'+r.ticker+'</div></div><div class="num" style="color:'+c+'">'+_pfPerfMoney(r.pnl)+'</div><div class="num" style="color:'+c+'">'+(r.contrib==null?'—':(r.contrib>=0?'+':'')+r.contrib.toFixed(2)+' pt')+'</div><div class="num" style="color:var(--muted)">'+r.weight.toFixed(1)+'%</div></div>';}).join('')+'<div style="display:grid;grid-template-columns:minmax(140px,1.4fr) 90px 90px 80px;gap:10px;padding:8px 4px 0;font-size:9px;color:var(--muted2);text-transform:uppercase"><span>Position</span><span style="text-align:right">P&L</span><span style="text-align:right">Contribution</span><span style="text-align:right">Poids actuel</span></div></div>';
+  }catch(e){el.innerHTML='<div class="valio-card contrib-wrap" style="font-size:11px;color:var(--muted)">Contribution indisponible : '+(e.message||e)+'</div>';}
+}
+
 var _riskAnalyticsCache={t:0,data:null};
 function _riskMean(a){return a.length?a.reduce(function(s,x){return s+x;},0)/a.length:0;}
 function _riskStd(a){if(a.length<2)return 0;var m=_riskMean(a);return Math.sqrt(a.reduce(function(s,x){return s+(x-m)*(x-m);},0)/(a.length-1));}
@@ -8284,53 +8324,106 @@ async function _riskAnalytics(pos,force){
   var spx=await fetchPriceHistory('^GSPC','1y')||[]; if(spx.length<40)throw new Error('Historique S&P indisponible');
   var maps={};tickers.forEach(function(tk){maps[tk]=_riskReturnMap(hists[tk]||[]);});var smap=_riskReturnMap(spx);
   var weights={};pos.forEach(function(p){weights[p.ticker]=(p.valueEur||0)/total;});
-  // Portefeuille à poids actuels constants — mesure le risque de la composition actuelle, pas l'historique des flux.
-  var pmap={};Object.keys(smap).forEach(function(day){var s=0,w=0;pos.forEach(function(p){var r=maps[p.ticker]&&maps[p.ticker][day];if(r!=null){s+=weights[p.ticker]*r;w+=weights[p.ticker];}});if(w>=.72)pmap[day]=s/w;});
+  var pmap={};Object.keys(smap).forEach(function(day){var s=0,w=0;pos.forEach(function(p){var rr=maps[p.ticker]&&maps[p.ticker][day];if(rr!=null){s+=weights[p.ticker]*rr;w+=weights[p.ticker];}});if(w>=.72)pmap[day]=s/w;});
   var days=Object.keys(pmap).filter(function(k){return smap[k]!=null;}).sort(), rp=days.map(function(k){return pmap[k];}),rs=days.map(function(k){return smap[k];});
   if(rp.length<40)throw new Error('Pas assez de points communs');
   var mp=_riskMean(rp),ms=_riskMean(rs),vol=_riskStd(rp)*Math.sqrt(252),sv=_riskStd(rs),cov=0;
   for(var j=0;j<rp.length;j++)cov+=(rp[j]-mp)*(rs[j]-ms);cov/=(rp.length-1);
   var beta=sv>0?cov/(sv*sv):null,rf=.03,retAnn=mp*252,retS=ms*252,sharpe=vol>0?(retAnn-rf)/vol:null;
   var alpha=beta!=null?((mp-(rf/252)-beta*(ms-rf/252))*252):null;
-  var wealth=1,peak=1,maxDD=0;rp.forEach(function(r){wealth*=1+r;if(wealth>peak)peak=wealth;var dd=wealth/peak-1;if(dd<maxDD)maxDD=dd;});
+  var wealth=1,peak=1,maxDD=0;rp.forEach(function(rr){wealth*=1+rr;if(wealth>peak)peak=wealth;var dd=wealth/peak-1;if(dd<maxDD)maxDD=dd;});
   var trailRet=wealth-1;
-  var top10=pos.slice(0,10), topTotal=top10.reduce(function(s,p){return s+(p.valueEur||0);},0), n=top10.length;
-  var corr=[],covm=[];
-  for(var a=0;a<n;a++){corr[a]=[];covm[a]=[];for(var b=0;b<n;b++){corr[a][b]=a===b?1:_riskCorrMaps(maps[top10[a].ticker],maps[top10[b].ticker]);covm[a][b]=_riskCovMaps(maps[top10[a].ticker],maps[top10[b].ticker]);}}
-  var wt=top10.map(function(p){return (p.valueEur||0)/topTotal;}), sw=new Array(n).fill(0),portVar=0;
-  for(var a=0;a<n;a++){for(var b=0;b<n;b++)sw[a]+=covm[a][b]*wt[b];portVar+=wt[a]*sw[a];}
-  var contributions=top10.map(function(p,i){var rc=portVar>0?wt[i]*sw[i]/portVar:0;return {ticker:p.ticker,name:p.name||p.ticker,weight:(p.valueEur||0)/total*100,riskPct:rc*100,value:p.valueEur||0};});
-  var conc=function(k){return pos.slice(0,k).reduce(function(s,p){return s+(p.valueEur||0);},0)/total*100;};
-  var hhi=pos.reduce(function(s,p){var w=(p.valueEur||0)/total;return s+w*w;},0),effective=hhi>0?1/hhi:null;
-  var data={beta:beta,vol:vol*100,sharpe:sharpe,alpha:alpha*100,maxDD:maxDD*100,trailRet:trailRet*100,retAnn:retAnn*100,spRetAnn:retS*100,top3:conc(3),top5:conc(5),top10:conc(10),effective:effective,top10:top10,corr:corr,contrib:contributions,days:rp.length};
+
+  // Matrice Top 10 pour la lisibilité
+  var top10Positions=pos.slice(0,10), nTop=top10Positions.length, corr=[];
+  for(var a=0;a<nTop;a++){corr[a]=[];for(var b=0;b<nTop;b++)corr[a][b]=a===b?1:_riskCorrMaps(maps[top10Positions[a].ticker],maps[top10Positions[b].ticker]);}
+
+  // Contribution au risque calculée sur TOUT le portefeuille, pas seulement le Top 10.
+  // RC_i = w_i * (Sigma w)_i / (w' Sigma w), et la somme des RC_i = 100% (hors erreurs numériques).
+  var n=pos.length, fullW=pos.map(function(pp){return (pp.valueEur||0)/total;}),covm=[],sw=new Array(n).fill(0),portVar=0;
+  for(var aa=0;aa<n;aa++){covm[aa]=[];for(var bb=0;bb<n;bb++)covm[aa][bb]=_riskCovMaps(maps[pos[aa].ticker],maps[pos[bb].ticker]);}
+  for(var aa2=0;aa2<n;aa2++){for(var bb2=0;bb2<n;bb2++)sw[aa2]+=covm[aa2][bb2]*fullW[bb2];portVar+=fullW[aa2]*sw[aa2];}
+  var allContrib=pos.map(function(pp,ii){
+    var rc=portVar>0?fullW[ii]*sw[ii]/portVar:0;
+    var indivVol=_riskStd(Object.values(maps[pp.ticker]||{}))*Math.sqrt(252)*100;
+    var corrNum=0,corrDen=0;
+    pos.forEach(function(other,jj){if(jj===ii)return;var cc=_riskCorrMaps(maps[pp.ticker],maps[other.ticker]);if(cc!=null){corrNum+=cc*fullW[jj];corrDen+=fullW[jj];}});
+    return {ticker:pp.ticker,name:pp.name||pp.ticker,weight:fullW[ii]*100,riskPct:rc*100,value:pp.valueEur||0,vol:indivVol,avgCorr:corrDen>0?corrNum/corrDen:null};
+  });
+  var topSet={};top10Positions.forEach(function(pp){topSet[pp.ticker]=1;});
+  var contributions=allContrib.filter(function(x){return topSet[x.ticker];});
+  var conc=function(k){return pos.slice(0,k).reduce(function(s,pp){return s+(pp.valueEur||0);},0)/total*100;};
+  var hhi=pos.reduce(function(s,pp){var w=(pp.valueEur||0)/total;return s+w*w;},0),effective=hhi>0?1/hhi:null;
+  var data={beta:beta,vol:vol*100,sharpe:sharpe,alpha:alpha*100,maxDD:maxDD*100,trailRet:trailRet*100,retAnn:retAnn*100,spRetAnn:retS*100,rf:rf*100,top3Weight:conc(3),top5Weight:conc(5),top10Weight:conc(10),effective:effective,top10Positions:top10Positions,corr:corr,contrib:contributions,allContrib:allContrib,days:rp.length,totalPositions:pos.length};
   _riskAnalyticsCache={t:Date.now(),data:data};return data;
 }
 function _riskFmt(v,d){return v==null||!isFinite(v)?'—':(+v).toFixed(d==null?1:d);}
-function _riskMetricCard(label,value,sub,cls){return '<div class="valio-card metric-box"><div class="mlabel">'+label+'</div><div class="mvalue '+(cls||'')+'">'+value+'</div><div class="msub">'+sub+'</div></div>';}
+function _riskMetricCard(label,value,sub,cls,kind){return '<div class="valio-card metric-box'+(kind?' valio-interactive':'')+'" '+(kind?'onclick="showRiskDetail(\''+kind+'\')" style="cursor:pointer"':'')+'><div class="mlabel">'+label+(kind?' <span style="float:right;color:var(--cyan);font-size:10px">détail ↗</span>':'')+'</div><div class="mvalue '+(cls||'')+'">'+value+'</div><div class="msub">'+sub+'</div></div>';}
 function _riskCorrBg(v){if(v==null)return 'transparent';var a=Math.min(.58,.08+Math.abs(v)*.48);return v>=0?'rgba(99,75,228,'+a+')':'rgba(38,197,222,'+a+')';}
+function _riskCorrLabel(v){
+  if(v==null)return 'données insuffisantes';
+  if(v>=.7)return 'forte corrélation positive';
+  if(v>=.3)return 'corrélation positive modérée';
+  if(v>-.3)return 'corrélation faible / proche de zéro';
+  if(v>-.7)return 'corrélation négative modérée';
+  return 'forte corrélation négative';
+}
+function _riskListHtml(k){
+  var r=_riskAnalyticsCache.data;if(!r)return '';
+  var arr=(r.top10Positions||[]).slice(0,k),tot=arr.reduce(function(s,p){return s+(p.valueEur||0);},0),all=(S.enrichedPos||[]).reduce(function(s,p){return s+(p.valueEur||0);},0);
+  return arr.map(function(p,i){var w=all>0?(p.valueEur||0)/all*100:0;return '<div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--border2)"><span><b>'+(i+1)+'. '+(p.name||p.ticker)+'</b><span style="color:var(--muted);font-size:10px"> · '+p.ticker+'</span></span><b>'+w.toFixed(1)+'%</b></div>';}).join('');
+}
+function showRiskDetail(kind){
+  var r=_riskAnalyticsCache.data;if(!r)return;
+  var d={title:'',simple:'',formula:'',scale:''};
+  if(kind==='top3'||kind==='top5'||kind==='top10'){
+    var k=kind==='top3'?3:kind==='top5'?5:10,wt=kind==='top3'?r.top3Weight:kind==='top5'?r.top5Weight:r.top10Weight;
+    d.title='Concentration · Top '+k;d.simple='Addition du poids de tes '+k+' plus grosses positions. Plus le chiffre est élevé, plus quelques lignes dominent le portefeuille.';d.formula='Top '+k+' = Σ poids des '+k+' plus grosses positions';d.scale='Dans ton portefeuille : '+wt.toFixed(1)+'%. Les lignes qui composent ce chiffre sont affichées ci-dessous.';
+    return showModal('<div class="modal-hd"><h2>'+d.title+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="font-size:13px;line-height:1.6;color:var(--muted);margin-bottom:12px">'+d.simple+'</div><div style="padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg2);font-family:monospace;font-size:12px;margin-bottom:12px">'+d.formula+'</div><div style="font-size:12px;color:var(--cyan);margin-bottom:10px">'+d.scale+'</div>'+_riskListHtml(k));
+  }
+  if(kind==='effective'){d={title:'Positions effectives',simple:'Mesure la concentration réelle. Un portefeuille de 20 lignes très inégales peut se comporter comme seulement 8 ou 10 positions équipondérées.',formula:'N effectif = 1 / Σ(wᵢ²)',scale:'Si toutes les positions avaient exactement le même poids, le nombre effectif serait égal au nombre réel de positions. Ici : '+_riskFmt(r.effective,1)+' pour '+r.totalPositions+' positions.'};}
+  if(kind==='beta'){d={title:'Bêta vs S&P 500',simple:'Mesure la sensibilité de ta composition actuelle aux variations du S&P 500.',formula:'β = Cov(Rₚ, Rₘ) / Var(Rₘ)',scale:'Ordres de grandeur : β ≈ 1 = sensibilité proche du marché ; 0,5 = environ moitié moins sensible ; 1,5 = environ 50% plus sensible. Ton β : '+_riskFmt(r.beta,2)+'.'};}
+  if(kind==='vol'){d={title:'Volatilité annualisée',simple:'Mesure l’amplitude habituelle des variations, pas la probabilité de perdre définitivement de l’argent.',formula:'Vol annualisée = écart-type des rendements journaliers × √252',scale:'Repères très approximatifs pour un portefeuille actions : <15% plutôt faible ; 15–25% modérée ; 25–35% élevée ; >35% très élevée. Ici : '+_riskFmt(r.vol,1)+'%.'};}
+  if(kind==='sharpe'){d={title:'Ratio de Sharpe',simple:'Compare le rendement obtenu au risque pris. Le « rf 3% » est le taux sans risque supposé par Valio : ici 3% par an.',formula:'Sharpe = (Rendement annualisé − Rf) / Volatilité annualisée',scale:'Repères usuels : <0 = rendement inférieur au sans-risque ; 0–0,5 faible ; 0,5–1 correct ; 1–2 fort ; >2 exceptionnel sur la période. Ici : '+_riskFmt(r.sharpe,2)+'.'};}
+  if(kind==='drawdown'){d={title:'Max Drawdown',simple:'La pire baisse entre un sommet et le creux suivant sur la période. C’est souvent plus intuitif que la volatilité pour ressentir le risque.',formula:'Drawdownₜ = Valeurₜ / plus haut historiqueₜ − 1',scale:'Repères indicatifs : −10% = correction ; −20% = baisse importante ; −30% et au-delà = choc sévère. Ici : '+_riskFmt(r.maxDD,1)+'%.'};}
+  if(kind==='alpha'){d={title:'Alpha de Jensen',simple:'À ne pas confondre avec la simple surperformance. « Portefeuille +20%, indice +10% » = +10 points de surperformance brute. L’alpha de Jensen corrige cette performance du bêta pris face au marché.',formula:'α = Rₚ − [Rf + β × (Rₘ − Rf)]',scale:'α > 0 : rendement supérieur à celui attendu par le CAPM pour le bêta pris. α < 0 : inférieur. Ici : '+(r.alpha>=0?'+':'')+_riskFmt(r.alpha,1)+'% annualisé.'};}
+  if(kind==='proxy'){d={title:'Performance proxy 1 an',simple:'Backtest de tes positions actuelles comme si tu avais conservé leurs poids actuels pendant toute l’année. Ce n’est donc pas ta performance personnelle réelle.',formula:'Rₚ,t = Σ(wᵢ actuel × Rᵢ,t), puis chaînage des rendements',scale:'Utile pour étudier le profil de risque de la composition actuelle. Performance proxy : '+(r.trailRet>=0?'+':'')+_riskFmt(r.trailRet,1)+'%.'};}
+  showModal('<div class="modal-hd"><h2>'+d.title+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="font-size:13px;line-height:1.65;color:var(--muted);margin-bottom:14px">'+d.simple+'</div><div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg2);font-family:monospace;font-size:12px;margin-bottom:14px">'+d.formula+'</div><div style="font-size:12px;line-height:1.6;color:var(--cyan)">'+d.scale+'</div>');
+}
+function showCorrelationDetail(a,b,v){
+  var lab=_riskCorrLabel(v),abs=Math.abs(v==null?0:v);var note=v==null?'Pas assez de points communs pour une estimation fiable.':(abs<.3?'Les deux lignes ont peu de relation linéaire stable sur cette période.':v>0?'Elles ont eu tendance à monter et baisser dans le même sens.':'Elles ont eu tendance à évoluer en sens opposé.');
+  showModal('<div class="modal-hd"><h2>Corrélation · '+a+' / '+b+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="font-size:32px;font-weight:800;color:'+(v!=null&&v<0?'var(--cyan)':'var(--blue)')+';margin-bottom:8px">'+(v==null?'—':v.toFixed(2))+'</div><div style="font-size:13px;font-weight:700;margin-bottom:10px">'+lab+'</div><div style="font-size:12px;color:var(--muted);line-height:1.6">'+note+'<br><br><b>Repères :</b> +0,7 à +1 forte positive · +0,3 à +0,7 modérée positive · −0,3 à +0,3 faible/proche de zéro · −0,7 à −0,3 modérée négative · −1 à −0,7 forte négative.<br><br>La corrélation mesure une relation linéaire observée sur la période ; elle peut changer dans le temps et ne signifie pas causalité.</div>');
+}
+function showRiskContributionHelp(){
+  showModal('<div class="modal-hd"><h2>Contribution au risque</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="font-size:13px;color:var(--muted);line-height:1.65">Elle mesure quelle part de la <b>variance totale du portefeuille</b> est attribuable à chaque position en combinant trois choses : son poids, sa volatilité et sa covariance/corrélation avec les autres positions.<br><br>Le calcul est fait sur <b>tout le portefeuille</b>. La somme des contributions de toutes les positions vaut environ 100%. La table n’affiche que les 10 plus grosses lignes, donc les pourcentages visibles n’ont pas besoin de totaliser 100%. Une contribution peut même être négative si une ligne réduit la variance grâce à son effet de diversification.</div><div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg2);font-family:monospace;font-size:12px;margin-top:14px">RCᵢ = wᵢ × (Σw)ᵢ / (w′Σw)</div>');
+}
+function showRiskContributionDetail(ticker){
+  var r=_riskAnalyticsCache.data;if(!r)return;var x=(r.allContrib||[]).find(function(z){return z.ticker===ticker;});if(!x)return;
+  showModal('<div class="modal-hd"><h2>'+x.name+' · contribution au risque</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px"><div class="perf-summary-card"><div class="perf-summary-label">Poids</div><div class="perf-summary-value" style="font-size:22px">'+x.weight.toFixed(1)+'%</div></div><div class="perf-summary-card"><div class="perf-summary-label">Contribution risque</div><div class="perf-summary-value" style="font-size:22px">'+x.riskPct.toFixed(1)+'%</div></div><div class="perf-summary-card"><div class="perf-summary-label">Volatilité 1A</div><div class="perf-summary-value" style="font-size:22px">'+_riskFmt(x.vol,1)+'%</div></div></div><div style="font-size:12px;color:var(--muted);line-height:1.65">Corrélation moyenne pondérée avec le reste du portefeuille : <b style="color:var(--text)">'+(x.avgCorr==null?'—':x.avgCorr.toFixed(2))+'</b>.<br><br>Si la contribution au risque est nettement supérieure au poids, la ligne apporte proportionnellement plus de variance que de capital. Cela peut venir d’une forte volatilité, de corrélations positives avec les autres grosses lignes, ou des deux.</div>');
+}
 async function renderRiskXray(){
-  var pg=document.getElementById('page');
-  pg.innerHTML='<div class="valio-head"><div><div class="valio-kicker">Risk intelligence</div><h2>Portfolio X-Ray</h2><div class="valio-desc">Concentration, volatilité, drawdown, corrélations et contribution au risque. Valio mesure le risque ; le choix de l’accepter reste le tien.</div></div><button class="btn btn-ghost btn-sm" onclick="_riskAnalyticsCache={t:0,data:null};renderRiskXray()">↻ Recalculer</button></div><div style="text-align:center;padding:60px"><div class="spinner"></div></div>';
+  var pg=document.getElementById('page'),pos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return p.quantity>1e-7&&(p.valueEur||0)>0;});
+  pg.innerHTML='<div class="valio-head"><div><div class="valio-kicker">Risk intelligence</div><h2>Portfolio X-Ray</h2><div class="valio-desc">Composition actuelle · 1 an. Clique sur chaque carte ou cellule pour comprendre le calcul et les ordres de grandeur.</div></div><button class="btn btn-ghost btn-sm" onclick="_riskAnalyticsCache={t:0,data:null};renderRiskXray()">↻ Recalculer</button></div><div style="text-align:center;padding:60px"><div class="spinner"></div></div>';
   try{
-    var pos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return p.quantity>1e-7&&(p.valueEur||0)>0;});
     var r=await _riskAnalytics(pos);
-    var conc='<div class="metric-grid">'+
-      _riskMetricCard('Top 3 positions',_riskFmt(r.top3,1)+'%','Poids cumulé des 3 plus grosses lignes.','metric-purple')+
-      _riskMetricCard('Top 5 positions',_riskFmt(r.top5,1)+'%','Poids cumulé des 5 plus grosses lignes.','metric-cyan')+
-      _riskMetricCard('Top 10 positions',_riskFmt(r.top10,1)+'%','Couverture du portefeuille par la matrice ci-dessous.','metric-green')+
-      _riskMetricCard('Positions effectives',_riskFmt(r.effective,1),'1 / Σ poids² : concentration réelle du portefeuille.','metric-purple')+'</div>';
-    var metrics='<div class="metric-grid" style="margin-top:12px">'+
-      _riskMetricCard('Bêta vs S&P 500',_riskFmt(r.beta,2),'Sensibilité de la composition actuelle au marché.','metric-purple')+
-      _riskMetricCard('Volatilité annualisée',_riskFmt(r.vol,1)+'%','Écart-type annualisé des rendements journaliers.','metric-cyan')+
-      _riskMetricCard('Sharpe · rf 3%',_riskFmt(r.sharpe,2),'Rendement excédentaire annualisé / volatilité.','metric-green')+
-      _riskMetricCard('Max drawdown 1A',_riskFmt(r.maxDD,1)+'%','Pire baisse pic → creux de la composition actuelle.','')+
-      _riskMetricCard('Alpha vs S&P',(_riskFmt(r.alpha,1)==='—'?'—':(r.alpha>=0?'+':'')+_riskFmt(r.alpha,1)+'%'),'Jensen alpha annualisé sur la période observée.','metric-purple')+
-      _riskMetricCard('Perf. proxy 1A',(r.trailRet>=0?'+':'')+_riskFmt(r.trailRet,1)+'%','Backtest de la composition actuelle à poids constants.','metric-cyan')+'</div>';
-    var names=r.top10.map(function(p){return p.ticker;});
-    var matrix='<div class="valio-card risk-panel"><div class="risk-panel-title"><span>Matrice de corrélation · Top '+r.top10.length+'</span><span style="font-size:10px;color:var(--muted)">1 an · rendements journaliers</span></div><div class="risk-matrix-wrap"><table class="risk-table"><thead><tr><th></th>'+names.map(function(n){return '<th>'+n+'</th>';}).join('')+'</tr></thead><tbody>'+r.top10.map(function(p,i){return '<tr><td><b>'+p.ticker+'</b></td>'+r.corr[i].map(function(v,j){return '<td title="'+p.ticker+' / '+r.top10[j].ticker+'" style="background:'+_riskCorrBg(v)+'">'+(v==null?'—':v.toFixed(2))+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table></div><div style="font-size:10px;color:var(--muted);margin-top:10px">Violet = corrélation positive. Turquoise = corrélation négative. Une corrélation élevée n’est pas un problème en soi : elle indique simplement quels risques ont tendance à bouger ensemble.</div></div>';
+    var conc='<div class="valio-metric-grid concentration-grid">'+
+      _riskMetricCard('Top 3 positions',_riskFmt(r.top3Weight,1)+'%','Poids cumulé des 3 plus grosses lignes.','metric-purple','top3')+
+      _riskMetricCard('Top 5 positions',_riskFmt(r.top5Weight,1)+'%','Poids cumulé des 5 plus grosses lignes.','metric-cyan','top5')+
+      _riskMetricCard('Top 10 positions',_riskFmt(r.top10Weight,1)+'%','Part du portefeuille couverte par les 10 plus grosses lignes.','metric-green','top10')+
+      _riskMetricCard('Positions effectives',_riskFmt(r.effective,1),'Concentration réelle : 1 / Σ poids².','metric-purple','effective')+'</div>';
+    var metrics='<div class="valio-metric-grid risk-metric-grid">'+
+      _riskMetricCard('Bêta vs S&P 500',_riskFmt(r.beta,2),'Sensibilité de la composition actuelle au marché.','metric-purple','beta')+
+      _riskMetricCard('Volatilité annualisée',_riskFmt(r.vol,1)+'%','Amplitude annualisée des rendements journaliers.','metric-cyan','vol')+
+      _riskMetricCard('Sharpe · rf 3%',_riskFmt(r.sharpe,2),'Rendement excédentaire / volatilité.','metric-green','sharpe')+
+      _riskMetricCard('Max drawdown 1A',_riskFmt(r.maxDD,1)+'%','Pire baisse pic → creux.','','drawdown')+
+      _riskMetricCard('Alpha de Jensen vs S&P',(_riskFmt(r.alpha,1)==='—'?'—':(r.alpha>=0?'+':'')+_riskFmt(r.alpha,1)+'%'),'Surperformance corrigée du bêta via le CAPM.','metric-purple','alpha')+
+      _riskMetricCard('Perf. proxy 1A',(r.trailRet>=0?'+':'')+_riskFmt(r.trailRet,1)+'%','Backtest des poids actuels.','metric-cyan','proxy')+'</div>';
+    var names=r.top10Positions.map(function(p){return p.ticker;});
+    var matrix='<div class="valio-card risk-panel"><div class="risk-panel-title"><span>Matrice de corrélation · Top '+r.top10Positions.length+'</span><button class="btn btn-ghost btn-sm" onclick="showCorrelationDetail(\'Repères\',\'corrélation\',null)">? Repères</button></div><div class="risk-matrix-wrap"><table class="risk-table"><thead><tr><th></th>'+names.map(function(n){return '<th>'+n+'</th>';}).join('')+'</tr></thead><tbody>'+r.top10Positions.map(function(pp,i){return '<tr><td><b>'+pp.ticker+'</b></td>'+r.corr[i].map(function(v,j){return '<td onclick="showCorrelationDetail(\''+pp.ticker+'\',\''+r.top10Positions[j].ticker+'\','+(v==null?'null':v)+')" title="Cliquer pour le détail" style="cursor:pointer;background:'+_riskCorrBg(v)+'">'+(v==null?'—':v.toFixed(2))+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table></div><div style="font-size:10px;color:var(--muted);margin-top:10px"><b>Repères rapides :</b> |r| &lt; 0,3 = faible · 0,3–0,7 = modérée · &gt; 0,7 = forte. Le signe indique si les mouvements sont dans le même sens (+) ou l’opposé (−).</div></div>';
     var maxRisk=Math.max.apply(null,r.contrib.map(function(x){return Math.max(0,x.riskPct);}).concat([1]));
-    var contrib='<div class="valio-card risk-panel"><div class="risk-panel-title"><span>Contribution au risque · Top 10</span><span style="font-size:10px;color:var(--muted)">variance marginale</span></div>'+r.contrib.slice().sort(function(a,b){return b.riskPct-a.riskPct;}).map(function(x){var w=Math.max(0,Math.min(100,x.riskPct/maxRisk*100));return '<div class="risk-contrib-row"><div><b>'+x.name+'</b><div style="font-size:9px;color:var(--muted)">'+x.ticker+'</div></div><div class="mono" style="text-align:right;color:var(--muted)">'+x.weight.toFixed(1)+'%</div><div class="mono" style="text-align:right;color:'+(x.riskPct>x.weight?'var(--yellow)':'var(--cyan)')+'">'+x.riskPct.toFixed(1)+'%</div><div class="risk-bar"><span style="width:'+w+'%"></span></div></div>';}).join('')+'<div style="display:grid;grid-template-columns:minmax(105px,1.1fr) 62px 62px minmax(90px,1.2fr);gap:9px;margin-top:8px;font-size:9px;color:var(--muted2);text-transform:uppercase"><span>Position</span><span style="text-align:right">Poids</span><span style="text-align:right">Risque</span><span></span></div><div style="font-size:10px;color:var(--muted);margin-top:10px">La contribution au risque dépend à la fois de la volatilité de la ligne, de son poids et de ses corrélations avec le reste du Top 10.</div></div>';
-    pg.innerHTML='<div class="valio-head"><div><div class="valio-kicker">Risk intelligence</div><h2>Portfolio X-Ray</h2><div class="valio-desc">Composition actuelle · 1 an. Les métriques ne disent pas quel risque prendre : elles rendent explicite le risque que tu prends déjà.</div></div><button class="btn btn-ghost btn-sm" onclick="_riskAnalyticsCache={t:0,data:null};renderRiskXray()">↻ Recalculer</button></div>'+conc+metrics+'<div class="risk-section-grid">'+matrix+contrib+'</div>';
+    var visibleRisk=r.contrib.reduce(function(s,x){return s+x.riskPct;},0);
+    var contrib='<div class="valio-card risk-panel"><div class="risk-panel-title"><span>Contribution au risque · Top 10</span><button class="btn btn-ghost btn-sm" onclick="showRiskContributionHelp()">? Comment lire</button></div><div style="font-size:10px;color:var(--muted);margin-bottom:8px">Ces 10 lignes représentent '+r.top10Weight.toFixed(1)+'% du capital et '+visibleRisk.toFixed(1)+'% de la contribution totale au risque mesurée.</div>'+r.contrib.slice().sort(function(a,b){return b.riskPct-a.riskPct;}).map(function(x){var w=Math.max(0,Math.min(100,x.riskPct/maxRisk*100));return '<div class="risk-contrib-row" onclick="showRiskContributionDetail(\''+x.ticker+'\')" style="cursor:pointer"><div><b>'+x.name+'</b><div style="font-size:9px;color:var(--muted)">'+x.ticker+'</div></div><div class="mono" style="text-align:right;color:var(--muted)">'+x.weight.toFixed(1)+'%</div><div class="mono" style="text-align:right;color:'+(x.riskPct>x.weight?'var(--yellow)':'var(--cyan)')+'">'+x.riskPct.toFixed(1)+'%</div><div class="risk-bar"><span style="width:'+w+'%"></span></div></div>';}).join('')+'<div style="display:grid;grid-template-columns:minmax(105px,1.1fr) 62px 62px minmax(90px,1.2fr);gap:9px;margin-top:8px;font-size:9px;color:var(--muted2);text-transform:uppercase"><span>Position</span><span style="text-align:right">Poids</span><span style="text-align:right">Risque</span><span></span></div></div>';
+    pg.innerHTML='<div class="valio-head"><div><div class="valio-kicker">Risk intelligence</div><h2>Portfolio X-Ray</h2><div class="valio-desc">Composition actuelle · 1 an. Clique sur chaque carte, cellule ou ligne pour voir l’explication, la formule et les repères.</div></div><button class="btn btn-ghost btn-sm" onclick="_riskAnalyticsCache={t:0,data:null};renderRiskXray()">↻ Recalculer</button></div>'+conc+metrics+'<div class="risk-section-grid">'+matrix+contrib+'</div>';
   }catch(e){pg.innerHTML='<div class="valio-head"><div><div class="valio-kicker">Risk intelligence</div><h2>Portfolio X-Ray</h2></div></div><div class="valio-card" style="padding:20px;color:var(--red)">'+(e.message||e)+'</div>';}
 }
 async function loadRiskMetrics(){
@@ -8634,12 +8727,15 @@ async function _cmpFetch(ticker) {
   if (_cmpDataCache[ticker]) return _cmpDataCache[ticker];
   try {
     // Fetch financials + fundamentals en parallèle
-    var [finRes, fundRes] = await Promise.all([
+    var [finRes, fundRes, qRes] = await Promise.all([
       fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=financials',{signal:AbortSignal.timeout(12000)}),
-      fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=fundamentals',{signal:AbortSignal.timeout(8000)})
+      fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=fundamentals',{signal:AbortSignal.timeout(8000)}),
+      fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=financials_quarterly',{signal:AbortSignal.timeout(12000)}).catch(function(){return null;})
     ]);
     var d = await finRes.json();
     var fund = null; try{ fund=await fundRes.json(); }catch(e2){}
+    var quarterly = null; try{ if(qRes)quarterly=await qRes.json(); }catch(e3){}
+    d._fund=fund||null; d._quarterly=quarterly||null;
     if(!d||d.error) return null;
 
     // Shares outstanding pour EPS fallback (MSFT et autres sans dilutedEps dans Yahoo)
@@ -8722,9 +8818,22 @@ async function _cmpFetchPE(ticker) {
     var range = _cmpState.range==='1Y'?'1y':_cmpState.range==='3Y'?'3y':'5y';
     var [hist, fin] = await Promise.all([fetchPriceHistory(ticker, range), _cmpFetch(ticker)]);
     if(!hist||!fin||hist.length<10) return [];
-    var knots = _ttmKnots(fin, [], 'eps_diluted', 'eps', null, null);
-    var peTS  = _ratioTimeSeries(hist, knots, function(px,ttm){ return ttm>0?Math.round(px/ttm*10)/10:null; }, true);
-    _cmpPECache[ticker] = peTS;
+    var knots = _ttmKnots(fin, [], 'eps_diluted', 'eps', null, null) || [];
+    // Raffinement récent : TTM EPS = somme des 4 derniers trimestres disponibles.
+    var q=fin._quarterly;
+    if(q&&q.quarters&&q.eps&&q.quarters.length>=4){
+      function qTs(label){var m=(label||'').match(/^Q([1-4])'(\d{2})$/);if(!m)return null;var qq=+m[1],yy=2000+(+m[2]),month=qq*3;return Math.floor(new Date(Date.UTC(yy,month,0,23,59,59)).getTime()/1000);}
+      for(var qi=3;qi<q.eps.length;qi++){
+        var vals=q.eps.slice(qi-3,qi+1);if(vals.some(function(v){return v==null||!isFinite(v);}))continue;
+        var t=qTs(q.quarters[qi]);var ttm=vals.reduce(function(s,v){return s+(+v||0);},0);if(t&&ttm>0)knots.push({t:t,v:ttm});
+      }
+    }
+    knots=knots.filter(function(k){return k&&k.t&&k.v>0;}).sort(function(a,b){return a.t-b.t;});
+    var peTS=_ratioTimeSeries(hist,knots,function(px,ttm){return ttm>0?Math.round(px/ttm*10)/10:null;},true)||[];
+    // Le dernier point est forcé sur le trailing P/E courant de la même source que les fiches Valio.
+    var live=fin._fund&&fin._fund.trailingPE;
+    if(live!=null&&isFinite(live)&&live>0){var now=Math.floor(Date.now()/1000);peTS.push({t:now,v:Math.round(live*10)/10});}
+    _cmpPECache[ticker]=peTS;
     return peTS;
   } catch(e){ return []; }
 }
@@ -8888,6 +8997,27 @@ function _cmpSetRange(r) {
   });
 }
 
+async function _cmpRenderSnapshot(){
+  var el=document.getElementById('cmp-snapshot');if(!el)return;
+  if(!_cmpState.tickers.length){el.innerHTML='';return;}
+  el.innerHTML='<div class="spinner"></div>';
+  await Promise.all(_cmpState.tickers.map(function(t){return _cmpFetch(t.ticker);}));
+  var rows=[
+    ['Cours',function(d,tk){var p=S.prices[tk]&&S.prices[tk].price;return p!=null?fN(p):'—';}],
+    ['P/E trailing',function(d){return d&&d._fund&&d._fund.trailingPE!=null?d._fund.trailingPE.toFixed(1)+'x':'—';}],
+    ['P/E forward',function(d){return d&&d._fund&&d._fund.forwardPE!=null?d._fund.forwardPE.toFixed(1)+'x':'—';}],
+    ['Croissance CA',function(d){var v=d&&d._fund&&d._fund.revenueGrowthYoY;return v!=null?(v>=0?'+':'')+v.toFixed(1)+'%':'—';}],
+    ['Croissance EPS',function(d){var v=d&&d._fund&&d._fund.epsGrowth1Y;return v!=null?(v>=0?'+':'')+v.toFixed(1)+'%':'—';}],
+    ['Marge brute',function(d){var v=d&&d._fund&&d._fund.grossMarginPct;return v!=null?v.toFixed(1)+'%':'—';}],
+    ['Marge opé.',function(d){var v=d&&d._fund&&d._fund.operatingMarginPct;return v!=null?v.toFixed(1)+'%':'—';}],
+    ['Marge nette',function(d){var v=d&&d._fund&&d._fund.profitMarginPct;return v!=null?v.toFixed(1)+'%':'—';}],
+    ['ROE',function(d){var v=d&&d._fund&&d._fund.returnOnEquity;return v!=null?v.toFixed(1)+'%':'—';}],
+    ['P/FCF',function(d){var v=d&&d._fund&&d._fund.pfcf;return v!=null?v.toFixed(1)+'x':'—';}]
+  ];
+  var heads=_cmpState.tickers.map(function(t,i){return '<th style="padding:9px 12px;color:'+CMP_COLORS[i%CMP_COLORS.length]+';text-align:right;white-space:nowrap">'+t.ticker+'</th>';}).join('');
+  el.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div><div class="valio-kicker">Comparaison actuelle</div><div style="font-size:12px;color:var(--muted)">Valeurs live / fondamentaux Yahoo. « — » signifie que la source ne fournit pas la donnée.</div></div><div style="font-size:10px;color:var(--cyan)">historique ci-dessous ↘</div></div><div class="tbl-wrap"><table style="min-width:620px"><thead><tr><th style="text-align:left;padding:9px 12px">Métrique</th>'+heads+'</tr></thead><tbody>'+rows.map(function(row){return '<tr><td style="text-align:left;padding:8px 12px;color:var(--muted)">'+row[0]+'</td>'+_cmpState.tickers.map(function(t){var d=_cmpDataCache[t.ticker];return '<td style="text-align:right;padding:8px 12px;font-family:monospace;font-weight:700">'+row[1](d,t.ticker)+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table></div>';
+}
+
 // ── Page Comparer ─────────────────────────────────────────────────────────
 function renderCompare() {
   var pg=document.getElementById('page'); if(!pg)return;
@@ -8964,6 +9094,7 @@ function renderCompare() {
         (_cmpState.tickers.length>0?'<span style="font-size:10px;color:var(--muted)">'+_cmpState.tickers.length+' titre'+(_cmpState.tickers.length>1?'s':'')+' sélectionné'+(_cmpState.tickers.length>1?'s':'')+'</span>':'')+
       '</div>'+
     '</div>'+
+    '<div id="cmp-snapshot" class="valio-card" style="padding:16px;margin-bottom:14px"></div>'+
     '<div id="cmp-chart-wrap" style="height:460px;position:relative;padding:16px;width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--border);border-radius:12px;transition:opacity .2s">'+
       (_cmpState.tickers.length===0?
         '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted)"><div style="font-size:48px;margin-bottom:12px">📈</div><div style="font-size:15px;font-weight:600;color:var(--text)">Ajoute des entreprises pour comparer</div><div style="font-size:12px;margin-top:6px">Utilise la barre de recherche ou clique sur ton portefeuille</div></div>':
@@ -8971,7 +9102,7 @@ function renderCompare() {
     '</div>'+
     '</div>';
 
-  if(_cmpState.tickers.length>0)setTimeout(_cmpRenderChart,100);
+  if(_cmpState.tickers.length>0){setTimeout(_cmpRenderChart,100);setTimeout(_cmpRenderSnapshot,120);}else _cmpRenderSnapshot();
 }
 
 window._cmpAdd    = _cmpAdd;
