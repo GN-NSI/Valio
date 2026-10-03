@@ -91,6 +91,10 @@ nav{flex:1;padding:10px 8px;overflow-y:auto}
 .legend-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
 .legend-pct{color:var(--muted);font-family:monospace;font-size:11px}
 .legend-clickable{cursor:pointer;border-radius:4px;padding:2px 4px;transition:background .1s}.legend-clickable:hover{background:var(--card2)}
+.repartition-layout{display:grid;grid-template-columns:320px minmax(0,1fr);gap:18px;align-items:center;min-height:280px;margin-top:10px}
+.repartition-chart-wrap{position:relative;height:260px;min-height:260px;margin:0}
+.repartition-chart-wrap canvas{position:absolute;inset:0}
+.repartition-legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 12px;align-content:start;max-height:260px;overflow-y:auto;padding:4px 2px}
 .breadcrumb{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;flex-wrap:wrap;min-height:18px;margin-top:6px}
 .bc-link{cursor:pointer;color:var(--blue);text-decoration:underline}.bc-sep{color:var(--muted2)}
 .right-panel{display:flex;flex-direction:column;gap:12px}
@@ -209,6 +213,9 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
   canvas{max-width:100%!important}
   .chart-wrap{height:230px!important;min-height:0!important;flex:none!important}
   #bm-chart-wrap{height:280px!important}
+  .repartition-layout{grid-template-columns:1fr!important;min-height:0!important}
+  .repartition-chart-wrap{height:260px!important;min-height:260px!important}
+  .repartition-legend{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))!important;max-height:none!important}
 
   /* Tableaux : défilement horizontal de leur carte au lieu d'être coupés
      (on garde la structure <table> pour ne pas désaligner les colonnes) */
@@ -459,7 +466,7 @@ const META_OVERRIDE={
 const TICKER_COUNTRY={
   NVDA:'US',GOOGL:'US',GOOG:'US',MSFT:'US',AMZN:'US',META:'US',AAPL:'US',
   TSLA:'US',COIN:'US',RDDT:'US',BKNG:'US',SPGI:'US',VRT:'US',UBER:'US',
-  V:'US',MA:'US',LYFT:'US',NVTS:'US',JPM:'US',BAC:'US',HOOD:'US',
+  V:'US',MA:'US',LYFT:'US',NVTS:'US',JPM:'US',BAC:'US',HOOD:'US',APP:'US',FICO:'US',AXT:'US',
   // Asie
   TSM:'TW',TSMC:'TW',ATEYY:'JP',SMNG:'KR','SMSN.L':'KR',
   // Europe
@@ -467,7 +474,7 @@ const TICKER_COUNTRY={
   // ETFs (exposition économique, pas domicile)
   'ESE.PA':'US',ESE:'US','PAASI.PA':'CN',PAASI:'CN',CW8:'US',
   // Actions françaises
-  'GTT.PA':'FR','AI.PA':'FR','OR.PA':'FR','MC.PA':'FR','TTE.PA':'FR',
+  'GTT.PA':'FR','AI.PA':'FR','OR.PA':'FR','MC.PA':'FR','TTE.PA':'FR','RMS.PA':'FR',HESAF:'FR',HESAY:'FR',
   'SAN.PA':'FR','BNP.PA':'FR','ACA.PA':'FR','VIE.PA':'FR',
   // ETFs européens/émergents
   'UTI.PA':'EU','PAEEM.PA':'EM','EXA1.DE':'EU',
@@ -478,7 +485,7 @@ const TICKER_COUNTRY={
 const TICKER_SECTOR={
   // Communication Services
   GOOGL:'Communication Services',GOOG:'Communication Services',
-  META:'Communication Services',RDDT:'Communication Services',
+  META:'Communication Services',RDDT:'Communication Services',APP:'Communication Services',
   NFLX:'Communication Services',NETFLIX:'Communication Services',
   // Ajouts Technology
   LITE:'Information Technology',LUMENTUM:'Information Technology',
@@ -486,7 +493,7 @@ const TICKER_SECTOR={
   // Consumer Discretionary
   AMZN:'Consumer Discretionary',BKNG:'Consumer Discretionary',
   // Financials
-  SPGI:'Financials',V:'Financials',MA:'Financials',JPM:'Financials',
+  SPGI:'Financials',V:'Financials',MA:'Financials',JPM:'Financials',FICO:'Financials',
   COIN:'Financials',HOOD:'Financials',
   'ADYEN.AS':'Financials',ADYEN:'Financials',  // Adyen (paiements)
   // Technology / IT
@@ -502,6 +509,8 @@ const TICKER_SECTOR={
   NBIS:'Information Technology',  // Nebius (IA/cloud)
   // Industrials
   VRT:'Industrials',
+  // Materials
+  AXT:'Materials',
   // Consumer Discretionary
   UBER:'Consumer Discretionary',LYFT:'Consumer Discretionary',
   'EDEN.PA':'Consumer Discretionary','STLAP.PA':'Consumer Discretionary',  // Edenred, Stellantis
@@ -511,7 +520,7 @@ const TICKER_SECTOR={
   'WPEA.PA':'ETF','WPAL.PA':'ETF',
   // Actions françaises
   'GTT.PA':'Industrials','AI.PA':'Materials',
-  'OR.PA':'Consumer Staples','MC.PA':'Consumer Discretionary',
+  'OR.PA':'Consumer Staples','MC.PA':'Consumer Discretionary','RMS.PA':'Consumer Discretionary',HESAF:'Consumer Discretionary',HESAY:'Consumer Discretionary',
   'TTE.PA':'Energy','SAN.PA':'Health Care',
   'BNP.PA':'Financials','ACA.PA':'Financials',
   'VIE.PA':'Utilities','ENGI.PA':'Utilities',
@@ -521,6 +530,15 @@ const TICKER_SECTOR={
   // ETFs européens
   'UTI.PA':'ETF','PAEEM.PA':'ETF','EXA1.DE':'ETF',
   'IWDA.AS':'ETF','SWDA.L':'ETF','VWCE.DE':'ETF',
+};
+
+const NAME_SECTOR_HINTS={
+  'APPLOVIN':'Communication Services',
+  'HERMES':'Consumer Discretionary',
+  'HERMÈS':'Consumer Discretionary',
+  'FAIR ISAAC':'Financials',
+  'FICO':'Financials',
+  'AXT':'Materials'
 };
 
 // ═══ COMPOSITION DES ETFs (pour répartition sectorielle et géographique précise) ═══
@@ -837,6 +855,10 @@ const TICKER_SUBSECTOR={
   LITE:'Photonique & Lasers (IA)','LITE.US':'Photonique & Lasers (IA)',
   LUMENTUM:'Photonique & Lasers (IA)',
   PENG:'Mémoires (HBM / DRAM)','PENG.US':'Mémoires (HBM / DRAM)',
+  APP:'Publicité digitale & AdTech',APPLV:'Publicité digitale & AdTech',
+  FICO:'Credit Scoring & Data',
+  AXT:'Matériaux semi-conducteurs',
+  'RMS.PA':'Luxe',HESAF:'Luxe',HESAY:'Luxe',
   NFLX:'Streaming & Contenu',NETFLIX:'Streaming & Contenu',
   ORCL:'Cloud & Logiciels',ORACLE:'Cloud & Logiciels',
   // Semiconducteurs
@@ -924,8 +946,13 @@ function getProfile(ticker){
   // ETF = ne pas utiliser le suffixe de bourse comme pays d'exposition
   // PUST.PA est listé à Paris mais exposé au NASDAQ US, pas à la France
   const autoC=_isEtfTicker(ticker)?null:_autoCountry(ticker);
+  const rawName=((base.name||base.shortName||px.name||px.shortName||ticker||'')+'').toUpperCase();
+  const hintedSector=(function(){
+    for(const k in NAME_SECTOR_HINTS){ if(rawName.indexOf(k)>=0) return NAME_SECTOR_HINTS[k]; }
+    return null;
+  })();
   const country=override.country||TICKER_COUNTRY[ticker]||base.country||px.country||autoC||null;
-  const sector=override.sector||TICKER_SECTOR[ticker]||base.sector||px.sector||null;
+  const sector=override.sector||TICKER_SECTOR[ticker]||hintedSector||base.sector||px.sector||null;
   const mktCap=base.mktCap||px.mktCap||null;
   return{country,sector,mktCap};
 }
@@ -1286,8 +1313,7 @@ async function renderPortfolio(){
             <div class="breadcrumb" id="chart-bc"></div>
           </div>
         </div>
-        <div class="chart-wrap"><canvas id="donut-chart"></canvas></div>
-        <div class="chart-legend" id="chart-legend"></div>
+        <div class="repartition-layout"><div class="repartition-chart-wrap"><canvas id="donut-chart"></canvas></div><div class="chart-legend repartition-legend" id="chart-legend"></div></div>
       </div>
       <div class="right-panel">
         <div class="panel-card"><div class="panel-title">Mes comptes</div>${acctsMini}</div>
@@ -1766,7 +1792,7 @@ function renderLegend(){
     const click=clickable?`onclick="handleDrill('${l.replace(/'/g,"\\'")}')"` :'';
     return`<div class="${cls}" ${click} style="display:flex;align-items:center;gap:6px;padding:2px 4px">
       <div style="width:9px;height:9px;border-radius:50%;background:${colors[i]};flex-shrink:0"></div>
-      <span style="font-size:12px;white-space:nowrap">${l}</span>
+      <span style="font-size:12px;white-space:normal;overflow-wrap:anywhere;line-height:1.25">${l}</span>
       <span style="font-size:11px;color:var(--muted)">${pct}%</span>
     </div>`;
   }).join('');
@@ -5998,7 +6024,9 @@ async function getMyName(){
 // ═══ PAGE DÉPÔTS & ÉVOLUTION DU SOLDE ════════════════════════════════════
 var _depSort={col:'date',asc:false}; // tri par défaut: date décroissante
 var _depFilter=null; // filtre compte (null = tous)
+var _depChartRange='max'; // 1m | ytd | 1y | max
 
+function _depPill(label,active,onclick){return '<button onclick="'+onclick+'" style="padding:4px 10px;font-size:11px;border-radius:999px;border:1px solid '+(active?'rgba(99,75,228,.45)':'var(--border2)')+';background:'+(active?'rgba(99,75,228,.14)':'transparent')+';color:'+(active?'#c4b5fd':'var(--muted)')+';cursor:pointer;white-space:nowrap">'+label+'</button>'; }
 async function renderDeposits(){
   var pg=document.getElementById('page');
   pg.innerHTML='<div style="text-align:center;padding:60px"><div class="spinner"></div></div>';
@@ -6087,7 +6115,17 @@ function _renderDepositsUI(deposits){
         '</div></div>';
     })()+
     '<div class="card" style="margin-bottom:16px">'+
-      '<div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-bottom:12px">Évolution du solde vs dépôts cumulés</div>'+
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px">'+
+        '<div><div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase">Évolution du solde vs dépôts cumulés</div><div style="font-size:12px;color:var(--muted);margin-top:6px">Filtre la période et l\'enveloppe affichées sur le graphique.</div></div>'+
+        '<div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;max-width:100%">'+
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
+            [_depPill('1M',_depChartRange==='1m','setDepositChartRange(\'1m\')'),_depPill('YTD',_depChartRange==='ytd','setDepositChartRange(\'ytd\')'),_depPill('1A',_depChartRange==='1y','setDepositChartRange(\'1y\')'),_depPill('MAX',_depChartRange==='max','setDepositChartRange(\'max\')')].join('')+
+          '</div>'+
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
+            [_depPill('Toutes enveloppes',!_depFilter,'filterDeposits(null)'), acctNames.map(function(n){return _depPill(n,_depFilter===n,'filterDeposits(\''+n.replace(/'/g,"\\'")+"\')");}).join('')].join('')+
+          '</div>'+
+        '</div>'+
+      '</div>'+
       '<div style="position:relative;height:300px"><canvas id="deposit-chart"></canvas></div>'+
     '</div>'+
     '<div class="card">'+
@@ -6213,6 +6251,24 @@ async function _drawDepositChart(allDeposits, totalVal){
     });
   }catch(e){console.warn('_drawDepositChart error:',e);}
 
+  // ── Filtre de période du graphique ──
+  var pointDates=sorted.map(function(d){return new Date(d.deposit_date);});
+  pointDates.push(new Date());
+  var startMs=null, nowMs=Date.now();
+  if(_depChartRange==='1m') startMs=nowMs-30*86400*1000;
+  else if(_depChartRange==='1y') startMs=nowMs-365*86400*1000;
+  else if(_depChartRange==='ytd') startMs=new Date(new Date().getFullYear(),0,1).getTime();
+  if(startMs!=null){
+    var keepFrom=0;
+    for(var i=0;i<pointDates.length;i++){
+      if(pointDates[i].getTime()>=startMs){ keepFrom=Math.max(0,i-1); break; }
+      keepFrom=i;
+    }
+    depLabels=depLabels.slice(keepFrom);
+    depSeries=depSeries.slice(keepFrom);
+    ptfSeries=ptfSeries.slice(keepFrom);
+  }
+
   var sfx=_depFilter?(' · '+_depFilter):'';
   if(window._depChart){try{window._depChart.destroy();}catch(e){}}
   window._depChart=new Chart(cv,{type:'line',
@@ -6234,6 +6290,7 @@ window.sortDeposits=function(col){
   renderDeposits();
 };
 window.filterDeposits=function(name){_depFilter=name;renderDeposits();};
+window.setDepositChartRange=function(range){_depChartRange=range||'max';renderDeposits();};
 
 function openAddDeposit(type){
   var isRetrait=type==='retrait';
@@ -7354,6 +7411,15 @@ async function buildPortfolioLine(transactions, range, windowStartOverride){
     ? Math.min(now-60,Math.floor(windowStartOverride))
     : now-windowSec;
 
+  // Pour la vue « depuis l'origine », éviter un point de départ trop ancien,
+  // mal pricé ou correspondant à une micro-position qui gonfle artificiellement le TWR.
+  if(windowStartOverride!=null&&isFinite(windowStartOverride)){
+    for(var _guard=0; _guard<120 && windowStart<now-86400; _guard++){
+      var _startCheck=portfolioValueAt(windowStart+3600);
+      if(_startCheck.hasPrice && _startCheck.val>=100) break;
+      windowStart+=86400;
+    }
+  }
 
   // Flux de titres dans la période. Les achats sont des apports au sous-portefeuille titres,
   // les ventes des retraits. Cela permet de calculer un P&L € indépendant des mouvements.
