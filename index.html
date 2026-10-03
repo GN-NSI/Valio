@@ -5742,110 +5742,115 @@ function _perProjeteHtml(ticker, price, eps0, f, fin, cSym){
 
 var _dcfState={};
 function _dcfLastNN(arr){if(!arr)return null;for(var i=arr.length-1;i>=0;i--){if(arr[i]!=null&&isFinite(arr[i]))return arr[i];}return null;}
-function _dcfHistCagr(fin){
-  var a=(fin&&fin.freeCF)||[], vals=[];
-  a.forEach(function(v,i){if(v!=null&&v>0)vals.push({i:i,v:v});});
-  if(vals.length<2)return null;
-  var fst=vals[0],lst=vals[vals.length-1],n=Math.max(1,lst.i-fst.i);
-  var g=(Math.pow(lst.v/fst.v,1/n)-1)*100;
-  return isFinite(g)?g:null;
-}
-function _dcfValue(fcfps,g,r,gt,n){
-  n=n||5; g=g/100;r=r/100;gt=gt/100;
-  if(!(fcfps>0)||r<=gt) return null;
+function _dcfMedian(a){var x=(a||[]).filter(function(v){return v!=null&&isFinite(v);}).sort(function(a,b){return a-b;});if(!x.length)return null;var m=Math.floor(x.length/2);return x.length%2?x[m]:(x[m-1]+x[m])/2;}
+function _dcfValuePath(fcfps,growths,r,gt){
+  if(!(fcfps>0)||!growths||!growths.length)return null;
+  r=r/100;gt=gt/100;if(r<=gt)return null;
   var pv=0,cf=fcfps;
-  for(var i=1;i<=n;i++){cf*=1+g;pv+=cf/Math.pow(1+r,i);}
-  var tv=cf*(1+gt)/(r-gt);
-  pv+=tv/Math.pow(1+r,n);
-  return {fair:pv,terminal:tv/Math.pow(1+r,n),fcf5:cf};
+  for(var i=0;i<growths.length;i++){cf*=1+growths[i]/100;pv+=cf/Math.pow(1+r,i+1);}
+  var tv=cf*(1+gt)/(r-gt),tvPv=tv/Math.pow(1+r,growths.length);pv+=tvPv;
+  return {fair:pv,terminal:tvPv,fcfN:cf};
 }
-function _dcfImpliedReturn(price,fcfps,g,gt,n){
-  if(!(price>0&&fcfps>0))return null;
-  var lo=Math.max(gt/100+0.001,0.005),hi=1.5;
-  function pv(rate){var x=_dcfValue(fcfps,g,rate*100,gt,n);return x?x.fair:null;}
-  var vlo=pv(lo),vhi=pv(hi); if(vlo==null||vhi==null||price>vlo||price<vhi)return null;
-  for(var i=0;i<70;i++){var mid=(lo+hi)/2,vm=pv(mid);if(vm>price)lo=mid;else hi=mid;}
+function _dcfImpliedReturnPath(price,fcfps,growths,gt){
+  if(!(price>0&&fcfps>0&&growths&&growths.length))return null;
+  var lo=Math.max(gt/100+.001,.005),hi=1.50;
+  function pv(rate){var x=_dcfValuePath(fcfps,growths,rate*100,gt);return x?x.fair:null;}
+  var vlo=pv(lo),vhi=pv(hi);if(vlo==null||vhi==null||price>vlo||price<vhi)return null;
+  for(var i=0;i<80;i++){var mid=(lo+hi)/2,vm=pv(mid);if(vm>price)lo=mid;else hi=mid;}
   return (lo+hi)/2*100;
 }
-function _dcfMedian(a){var x=(a||[]).filter(function(v){return v!=null&&isFinite(v);}).sort(function(a,b){return a-b;});if(!x.length)return null;var m=Math.floor(x.length/2);return x.length%2?x[m]:(x[m-1]+x[m])/2;}
+function _dcfSectorRate(f,growth0){
+  var sec=_valuationSectorKey(f)||'';
+  var map={
+    'Information Technology':10.5,'Communication Services':10.0,'Consumer Discretionary':9.5,
+    'Consumer Staples':8.5,'Healthcare':9.0,'Financials':10.0,'Industrials':9.5,
+    'Materials':10.0,'Energy':10.5,'Utilities':8.0,'Real Estate':8.5
+  };
+  var r=map[sec]||10.0;
+  if(growth0!=null&&growth0>30)r+=.5;
+  if(f&&f.mktCap>5e11)r-=.3;
+  if(f&&f.mktCap>0&&f.mktCap<2e10)r+=.7;
+  return Math.max(7.5,Math.min(13.0,r));
+}
+function _dcfGrowthPath(f,epsFallback){
+  var p=_epsPath3y(f,epsFallback),out=[];
+  if(p&&p.growths&&p.growths.length){out=p.growths.slice(0,5);var g=out.length?out[out.length-1]:10;while(out.length<5){g=Math.max(5,Math.min(20,g*(p.fade||.82)));out.push(g);}}
+  if(!out.length){
+    var g=(f&&f.epsGrowthFwd5Y!=null&&f.epsGrowthFwd5Y>0)?f.epsGrowthFwd5Y:(f&&f.revenueGrowthFwd1Y!=null?f.revenueGrowthFwd1Y:10);
+    g=Math.max(4,Math.min(30,g||10));for(var i=0;i<5;i++){out.push(g);g=Math.max(5,g*.82);}
+  }
+  return {growths:out,path:p};
+}
 function _dcfCashProfile(price,f,fin){
-  var shares=f&&f.sharesOutstanding;
-  if(!(shares>0))return null;
+  var shares=f&&f.sharesOutstanding;if(!(shares>0))return null;
   var fcfTtm=(f&&f.freeCashflow>0)?f.freeCashflow/shares:null;
   var ocfTtm=(f&&f.operatingCashFlow>0)?f.operatingCashFlow/shares:null;
-  var annF=_dcfLastNN(fin&&fin.freeCF),annO=_dcfLastNN(fin&&fin.operatingCF);
+  var annF=_dcfLastNN(fin&&fin.freeCF),annO=_dcfLastNN(fin&&fin.operatingCF),annNI=_dcfLastNN(fin&&fin.netIncome);
   var fcfAnn=(annF>0)?annF*1e9/shares:null,ocfAnn=(annO>0)?annO*1e9/shares:null;
-  var conv=[];
-  if(fin&&fin.freeCF&&fin.operatingCF){
-    for(var i=0;i<Math.min(fin.freeCF.length,fin.operatingCF.length);i++){
-      var ff=fin.freeCF[i],oo=fin.operatingCF[i];if(ff>0&&oo>0&&ff/oo>0&&ff/oo<1.25)conv.push(ff/oo);
-    }
-  }
-  var histConv=_dcfMedian(conv),targetConv=Math.max(.45,Math.min(.78,histConv!=null?histConv:.60));
-  var ocfBase=ocfTtm||ocfAnn;
-  var normFromOcf=ocfBase>0?ocfBase*targetConv:null;
-  var reported=fcfTtm||fcfAnn;
   var epsTtm=(f&&f.trailingPE>0&&price>0)?price/f.trailingPE:null;
-  var currentConv=(fcfTtm>0&&ocfTtm>0)?fcfTtm/ocfTtm:null;
-  var cashVsEps=(fcfTtm>0&&epsTtm>0)?fcfTtm/epsTtm:null;
-  var ocfVsEps=(ocfTtm>0&&epsTtm>0)?ocfTtm/epsTtm:null;
-  var reasons=[];
-  if(currentConv!=null&&currentConv<Math.max(.38,(histConv||.60)*.58))reasons.push('conversion FCF/OCF anormalement faible');
-  if(cashVsEps!=null&&ocfVsEps!=null&&cashVsEps<.42&&ocfVsEps>.72)reasons.push('FCF très inférieur aux bénéfices alors que l’OCF reste solide');
-  if(fcfTtm>0&&fcfAnn>0&&fcfTtm<fcfAnn*.55)reasons.push('FCF TTM très inférieur au dernier exercice annuel');
-  var distorted=reasons.length>0;
-  var candidates=[fcfAnn,normFromOcf].filter(function(v){return v>0;});
-  var normalized=candidates.length?_dcfMedian(candidates):normFromOcf;
+  var convFO=[],convFN=[];
+  if(fin&&fin.freeCF&&fin.operatingCF){for(var i=0;i<Math.min(fin.freeCF.length,fin.operatingCF.length);i++){var ff=fin.freeCF[i],oo=fin.operatingCF[i];if(ff>0&&oo>0&&ff/oo>.05&&ff/oo<1.25)convFO.push(ff/oo);}}
+  if(fin&&fin.freeCF&&fin.netIncome){for(var j=0;j<Math.min(fin.freeCF.length,fin.netIncome.length);j++){var f2=fin.freeCF[j],ni=fin.netIncome[j];if(f2>0&&ni>0&&f2/ni>.10&&f2/ni<1.60)convFN.push(f2/ni);}}
+  var histFO=_dcfMedian(convFO),histFN=_dcfMedian(convFN);
+  var targetFO=Math.max(.35,Math.min(.85,histFO!=null?histFO:.60));
+  var targetFN=Math.max(.45,Math.min(1.15,histFN!=null?histFN:.80));
+  var ocfBase=ocfTtm||ocfAnn,normOcf=ocfBase>0?ocfBase*targetFO:null,normEps=epsTtm>0?epsTtm*targetFN:null;
+  var reported=fcfTtm||fcfAnn;
+  var candidates=[fcfAnn,normOcf,normEps].filter(function(v){return v>0;});
+  var normalized=candidates.length?_dcfMedian(candidates):reported;
   if(!(normalized>0))normalized=reported;
-  var autoMode=(distorted&&normalized>0&&(!reported||normalized>reported*1.12))?'normalized':'reported';
-  var autoBase=autoMode==='normalized'?normalized:reported;
-  return {reported:reported,normalized:normalized,autoBase:autoBase,autoMode:autoMode,fcfTtm:fcfTtm,ocfTtm:ocfTtm,fcfAnn:fcfAnn,ocfAnn:ocfAnn,histConv:histConv,targetConv:targetConv,currentConv:currentConv,epsTtm:epsTtm,reasons:reasons};
+  var currentConv=(fcfTtm>0&&ocfTtm>0)?fcfTtm/ocfTtm:null;
+  var reasons=[];
+  if(reported>0&&normalized>0&&reported<normalized*.68)reasons.push('FCF courant nettement sous le niveau normalisé');
+  if(currentConv!=null&&currentConv<Math.max(.30,targetFO*.60))reasons.push('conversion FCF/OCF inhabituellement faible');
+  if(fcfTtm>0&&fcfAnn>0&&fcfTtm<fcfAnn*.60)reasons.push('FCF TTM très inférieur au dernier exercice');
+  var distorted=reasons.length>0;
+  var autoMode=(distorted&&normalized>reported*1.08)?'normalized':'reported';
+  return {reported:reported,normalized:normalized,autoMode:autoMode,fcfTtm:fcfTtm,ocfTtm:ocfTtm,fcfAnn:fcfAnn,ocfAnn:ocfAnn,epsTtm:epsTtm,targetFO:targetFO,targetFN:targetFN,histFO:histFO,histFN:histFN,reasons:reasons};
 }
 function _dcfHtml(ticker,price,f,fin,cSym){
   if(!(price>0))return '';
-  var st=_dcfState[ticker]||{}, prof=_dcfCashProfile(price,f,fin);
+  var st=_dcfState[ticker]||{},prof=_dcfCashProfile(price,f,fin);
   if(!prof||(!(prof.reported>0)&&!(prof.normalized>0)))return '<div style="margin:16px 0;padding:14px 16px;border:1px solid var(--border);border-radius:10px;color:var(--muted)"><b style="color:var(--text)">💵 DCF cash-flow</b> — cash-flow/action indisponible ou négatif : le DCF simplifié n’est pas pertinent ici.</div>';
-  var mode=st.mode||'auto';
-  var effectiveMode=mode==='auto'?prof.autoMode:mode;
-  var autoSelected=(effectiveMode==='normalized'&&prof.normalized>0)?prof.normalized:prof.reported;
-  if(!(autoSelected>0))autoSelected=prof.normalized||prof.reported;
-  var base=st.fcfps!=null?st.fcfps:autoSelected;
-  var hist=_dcfHistCagr(fin), g5=(f&&f.epsGrowthFwd5Y!=null&&f.epsGrowthFwd5Y>0)?f.epsGrowthFwd5Y:null;
-  var capG=effectiveMode==='normalized'?25:35;
-  var defG=g5!=null?Math.min(capG,g5):(hist!=null?Math.max(0,Math.min(effectiveMode==='normalized'?22:30,hist)):(f&&f.revenueGrowthFwd1Y!=null?Math.max(0,Math.min(20,f.revenueGrowthFwd1Y)):10));
-  var g=st.g!=null?st.g:Math.round(defG*10)/10;
-  var r=st.r!=null?st.r:(effectiveMode==='normalized'?17:15);
-  var gt=st.gt!=null?st.gt:(effectiveMode==='normalized'?2.5:3);
-  var val=_dcfValue(base,g,r,gt,5); if(!val)return '';
-  var upside=(val.fair/price-1)*100, irr=_dcfImpliedReturn(price,base,g,gt,5);
-  var terminalPct=val.fair>0?val.terminal/val.fair*100:null,warnTerminal=terminalPct!=null&&terminalPct>75;
-  var group=_valuationSectorKey(f), finWarn=group==='Financials';
+  var mode=st.mode||'auto',effectiveMode=mode==='auto'?prof.autoMode:mode;
+  var autoBase=effectiveMode==='normalized'?prof.normalized:prof.reported;if(!(autoBase>0))autoBase=prof.normalized||prof.reported;
+  var base=st.fcfps!=null?st.fcfps:autoBase;
+  var epsFallback=(prof.epsTtm>0)?prof.epsTtm:null,gp=_dcfGrowthPath(f,epsFallback),growths=gp.growths.slice();
+  if(st.g!=null){var g0=st.g;growths=[];for(var gi=0;gi<5;gi++){growths.push(g0);g0=Math.max(5,g0*.82);}}
+  var autoRate=_dcfSectorRate(f,growths[0]),r=st.r!=null?st.r:autoRate,gt=st.gt!=null?st.gt:3.0,target=15;
+  var val=_dcfValuePath(base,growths,r,gt);if(!val)return '';
+  var targetVal=_dcfValuePath(base,growths,target,gt),irr=_dcfImpliedReturnPath(price,base,growths,gt);
+  var upside=(val.fair/price-1)*100,targetUpside=targetVal?(targetVal.fair/price-1)*100:null;
+  var terminalPct=val.fair>0?val.terminal/val.fair*100:null;
   function col(v){return v>=20?'#16a34a':v>=0?'#22c55e':v>=-20?'#f59e0b':'#ef4444';}
-  function sens(rate,tg){var x=_dcfValue(base,g,rate,tg,5);return x?x.fair:null;}
-  var rates=[Math.max(gt+1,r-4),Math.max(gt+1,r-2),r,r+2,r+4],tgs=[Math.max(0,gt-1),Math.max(0,gt-.5),gt,Math.min(5,gt+.5),Math.min(5,gt+1)];
+  function sens(rate,tg){var x=_dcfValuePath(base,growths,rate,tg);return x?x.fair:null;}
+  var rates=[Math.max(gt+1,r-2),Math.max(gt+1,r-1),r,r+1,r+2],tgs=[Math.max(0,gt-1),Math.max(0,gt-.5),gt,Math.min(5,gt+.5),Math.min(5,gt+1)];
   var table='<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:10px" class="mono"><tr><th style="padding:5px 7px;color:var(--muted)">r \\ g∞</th>'+tgs.map(function(x){return '<th style="padding:5px 7px;color:var(--muted)">'+x.toFixed(1)+'%</th>';}).join('')+'</tr>'+rates.map(function(rr){return '<tr><td style="padding:5px 7px;color:var(--muted);font-weight:700">'+rr.toFixed(1)+'%</td>'+tgs.map(function(tg){var fv=sens(rr,tg),u=fv?(fv/price-1)*100:null;return '<td style="padding:5px 7px;text-align:right;color:'+(u==null?'var(--muted)':col(u))+';background:'+(Math.abs(rr-r)<.1&&Math.abs(tg-gt)<.1?'rgba(99,75,228,.12)':'transparent')+'">'+(fv?cSym+fN(fv):'—')+'</td>';}).join('')+'</tr>';}).join('')+'</table></div>';
   var t=ticker.replace(/'/g,"\\'");
-  var modeLabel=effectiveMode==='normalized'?'FCF normalisé via OCF':'FCF reporté';
-  var sourceDetail=effectiveMode==='normalized'?('OCF/action × conversion normalisée '+(prof.targetConv*100).toFixed(0)+'%'):(prof.fcfTtm?'Yahoo FCF TTM':'dernier FCF annuel');
-  var caution=effectiveMode==='normalized'?'<div style="margin:0 0 12px;padding:10px 12px;border:1px solid rgba(245,158,11,.30);background:rgba(245,158,11,.08);border-radius:9px;font-size:10px;color:var(--muted);line-height:1.55"><b style="color:#f59e0b">⚠ FCF temporairement déprimé détecté.</b> '+(prof.reasons.length?prof.reasons.join(' · ')+'. ':'')+'Valio n’utilise <b>pas</b> l’OCF brut : il applique une conversion prudente OCF→FCF ('+(prof.targetConv*100).toFixed(0)+'%) puis relève le taux exigé à '+r.toFixed(1)+'% en mode automatique. Tu peux forcer le FCF reporté pour comparer.</div>':'';
+  var modeLabel=effectiveMode==='normalized'?'FCF normalisé':'FCF reporté';
+  var sourceDetail=effectiveMode==='normalized'?'médiane FCF annuel / OCF normalisé / conversion bénéfices':'cash-flow après capex déclaré';
+  var caution=effectiveMode==='normalized'?'<div style="margin:0 0 12px;padding:10px 12px;border:1px solid rgba(245,158,11,.30);background:rgba(245,158,11,.08);border-radius:9px;font-size:10px;color:var(--muted);line-height:1.55"><b style="color:#f59e0b">⚠ FCF courant possiblement déprimé.</b> '+(prof.reasons.length?prof.reasons.join(' · ')+'. ':'')+'La normalisation croise le FCF annuel, la conversion historique FCF/OCF et la conversion FCF/bénéfice ; l’OCF brut n’est jamais valorisé à 100%.</div>':'';
+  var gTxt=growths.map(function(g){return Math.round(g)+'%';}).join(' → ');
   return '<div style="margin:18px 0;padding:16px 18px;border:1px solid rgba(38,197,222,.28);border-radius:12px;background:linear-gradient(135deg,rgba(38,197,222,.06),rgba(99,75,228,.05))">'+
-    '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px"><div><div style="font-size:14px;font-weight:800">💵 DCF cash-flow — '+modeLabel+'</div><div style="font-size:10px;color:var(--muted);margin-top:3px">Contrôle croisé de la matrice EPS/P-E. Le DCF valorise le cash distribuable ; la matrice valorise les bénéfices et le multiple de sortie.</div></div><div style="text-align:right"><div style="font-size:9px;color:var(--muted)">Valeur intrinsèque</div><div style="font-size:22px;font-weight:900;color:'+col(upside)+'" class="mono">'+cSym+fN(val.fair)+'</div><div style="font-size:10px;color:'+col(upside)+'">'+(upside>=0?'+':'')+upside.toFixed(1)+'% vs cours</div></div></div>'+
+    '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px"><div><div style="font-size:14px;font-weight:800">💵 DCF cash-flow — '+modeLabel+'</div><div style="font-size:10px;color:var(--muted);margin-top:3px">Le DCF utilise maintenant une trajectoire de croissance cohérente avec le consensus EPS et un taux d’actualisation économique distinct de ton objectif de rendement de 15%.</div></div><div style="text-align:right"><div style="font-size:9px;color:var(--muted)">Valeur intrinsèque estimée</div><div style="font-size:22px;font-weight:900;color:'+col(upside)+'" class="mono">'+cSym+fN(val.fair)+'</div><div style="font-size:10px;color:'+col(upside)+'">'+(upside>=0?'+':'')+upside.toFixed(1)+'% vs cours</div></div></div>'+
     '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"><button class="btn btn-ghost btn-sm" style="'+(mode==='auto'?'border-color:var(--blue);color:#fff':'')+'" onclick="_dcfSetMode(\''+t+'\',\'auto\')">Auto</button><button class="btn btn-ghost btn-sm" style="'+(mode==='reported'?'border-color:var(--blue);color:#fff':'')+'" onclick="_dcfSetMode(\''+t+'\',\'reported\')">FCF reporté</button><button class="btn btn-ghost btn-sm" style="'+(mode==='normalized'?'border-color:var(--blue);color:#fff':'')+'" onclick="_dcfSetMode(\''+t+'\',\'normalized\')">FCF normalisé</button></div>'+caution+
-    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:8px;margin-bottom:12px">'+
-      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Base retenue/action</div><div class="mono" style="font-size:15px;font-weight:800">'+cSym+fN(base)+'</div><div style="font-size:8px;color:var(--muted2)">'+sourceDetail+'</div></div>'+ 
-      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">FCF reporté/action</div><div class="mono" style="font-size:15px;font-weight:800">'+(prof.reported?cSym+fN(prof.reported):'—')+'</div><div style="font-size:8px;color:var(--muted2)">cash après capex déclaré</div></div>'+ 
-      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">OCF/action</div><div class="mono" style="font-size:15px;font-weight:800">'+(prof.ocfTtm?cSym+fN(prof.ocfTtm):prof.ocfAnn?cSym+fN(prof.ocfAnn):'—')+'</div><div style="font-size:8px;color:var(--muted2)">avant capex</div></div>'+ 
-      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Croissance cash-flow 5 ans</div><div class="mono" style="font-size:15px;font-weight:800">'+g.toFixed(1)+'%</div><div style="font-size:8px;color:var(--muted2)">'+(g5!=null?'proxy consensus EPS 5 ans':hist!=null?'CAGR FCF historique':'proxy croissance')+'</div></div>'+ 
-      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Taux exigé</div><div class="mono" style="font-size:15px;font-weight:800">'+r.toFixed(1)+'%</div><div style="font-size:8px;color:var(--muted2)">'+(effectiveMode==='normalized'?'prime de prudence incluse':'actualisation des FCF')+'</div></div>'+ 
-      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Rendement implicite</div><div class="mono" style="font-size:15px;font-weight:800;color:'+(irr!=null&&irr>=15?'var(--green)':irr!=null&&irr>=10?'var(--yellow)':'var(--red)')+'">'+(irr==null?'—':irr.toFixed(1)+'%/an')+'</div><div style="font-size:8px;color:var(--muted2)">IRR qui ramène le DCF au cours</div></div>'+ 
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:12px">'+
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Cash-flow/action retenu</div><div class="mono" style="font-size:15px;font-weight:800">'+cSym+fN(base)+'</div><div style="font-size:8px;color:var(--muted2)">'+sourceDetail+'</div></div>'+ 
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Trajectoire croissance FCF</div><div class="mono" style="font-size:13px;font-weight:800">'+gTxt+'</div><div style="font-size:8px;color:var(--muted2)">consensus EPS puis fade</div></div>'+ 
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Taux d’actualisation</div><div class="mono" style="font-size:15px;font-weight:800">'+r.toFixed(1)+'%</div><div style="font-size:8px;color:var(--muted2)">proxy coût des fonds propres · pas ton objectif 15%</div></div>'+ 
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Prix max pour viser 15%/an</div><div class="mono" style="font-size:15px;font-weight:800;color:'+(targetUpside!=null?col(targetUpside):'var(--text)')+'">'+(targetVal?cSym+fN(targetVal.fair):'—')+'</div><div style="font-size:8px;color:var(--muted2)">mêmes cash-flows, actualisés à 15%</div></div>'+ 
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Rendement implicite</div><div class="mono" style="font-size:15px;font-weight:800;color:'+(irr!=null?(irr>=15?'var(--green)':irr>=10?'#f59e0b':'var(--red)'):'var(--muted)')+'">'+(irr!=null?irr.toFixed(1)+'%/an':'—')+'</div><div style="font-size:8px;color:var(--muted2)">IRR du DCF au cours actuel</div></div>'+ 
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">FCF reporté / normalisé</div><div class="mono" style="font-size:13px;font-weight:800">'+(prof.reported?cSym+fN(prof.reported):'—')+' / '+(prof.normalized?cSym+fN(prof.normalized):'—')+'</div><div style="font-size:8px;color:var(--muted2)">contrôle de qualité de la base</div></div>'+ 
     '</div>'+ 
-    '<div style="display:flex;gap:9px;align-items:end;flex-wrap:wrap;margin-bottom:12px;padding:10px;background:rgba(255,255,255,.025);border-radius:9px">'+
+    '<div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;padding:10px;background:rgba(255,255,255,.025);border-radius:9px;margin-bottom:10px">'+
       '<div><label style="font-size:8px;color:var(--muted)">CASH-FLOW/ACTION</label><br><input id="dcf-fcf" class="form-input mono" style="width:92px;padding:5px" value="'+base.toFixed(2)+'"></div>'+ 
-      '<div><label style="font-size:8px;color:var(--muted)">CROISS. 5A %</label><br><input id="dcf-g" class="form-input mono" style="width:82px;padding:5px" value="'+g.toFixed(1)+'"></div>'+ 
-      '<div><label style="font-size:8px;color:var(--muted)">TAUX EXIGÉ %</label><br><input id="dcf-r" class="form-input mono" style="width:82px;padding:5px" value="'+r.toFixed(1)+'"></div>'+ 
+      '<div><label style="font-size:8px;color:var(--muted)">CROISS. ANNÉE 1 %</label><br><input id="dcf-g" class="form-input mono" style="width:90px;padding:5px" value="'+growths[0].toFixed(1)+'"></div>'+ 
+      '<div><label style="font-size:8px;color:var(--muted)">TAUX ACTUAL. %</label><br><input id="dcf-r" class="form-input mono" style="width:88px;padding:5px" value="'+r.toFixed(1)+'"></div>'+ 
       '<div><label style="font-size:8px;color:var(--muted)">G TERMINAL %</label><br><input id="dcf-gt" class="form-input mono" style="width:82px;padding:5px" value="'+gt.toFixed(1)+'"></div>'+ 
       '<button class="btn btn-ghost btn-sm" onclick="_dcfApply(\''+t+'\')">Appliquer</button><button class="btn btn-ghost btn-sm" onclick="_dcfReset(\''+t+'\')">↺ Auto</button></div>'+ 
-    '<div style="display:grid;grid-template-columns:minmax(260px,.8fr) minmax(420px,1.2fr);gap:16px;align-items:start"><div><div style="font-size:10px;color:var(--muted);line-height:1.55"><b>Pourquoi le DCF peut différer de la matrice ?</b> EPS/P-E et cash-flow ne mesurent pas la même chose. Quand une société réinvestit massivement, le FCF reporté peut sous-estimer sa capacité économique à long terme ; le mode normalisé corrige partiellement ce biais sans assimiler l’OCF brut à du cash distribuable.<br><br>DCF = somme des cash-flows/action actualisés sur 5 ans + valeur terminale. Valeur terminale = CF₅ × (1+g∞)/(r−g∞). '+(warnTerminal?'<b style="color:var(--yellow)">⚠ '+terminalPct.toFixed(0)+'% de la valeur vient du terminal : hypothèse très sensible.</b>':'Part terminale : '+terminalPct.toFixed(0)+'%.')+(finWarn?'<br><b style="color:var(--yellow)">⚠ Pour banques/assureurs, privilégier multiples/ROE plutôt que ce DCF.</b>':'')+'</div></div><div><div style="font-size:10px;color:var(--muted);margin-bottom:5px">Sensibilité — valeur intrinsèque par taux exigé / croissance terminale</div>'+table+'</div></div></div>';
+    '<div style="font-size:10px;color:var(--muted);line-height:1.55;margin-bottom:10px"><b style="color:var(--text)">Pourquoi l’ancien DCF donnait des valeurs absurdes ?</b> Il utilisait ton objectif de 15–17% comme taux d’actualisation économique et une croissance FCF historique parfois quasi nulle, ce qui écrasait mécaniquement la valeur terminale. Ici, le taux d’actualisation sert à estimer la valeur intrinsèque ; le prix compatible avec <b>15%/an</b> est affiché séparément.</div>'+ 
+    '<div style="display:grid;grid-template-columns:minmax(260px,.9fr) minmax(360px,1.1fr);gap:14px;align-items:start"><div style="font-size:10px;color:var(--muted);line-height:1.55">DCF = somme des cash-flows actualisés sur 5 ans + valeur terminale Gordon. Part terminale : <b>'+(terminalPct!=null?terminalPct.toFixed(0)+'%':'—')+'</b>.<br>La normalisation du FCF ne remplace pas les capex : elle estime un niveau de conversion de cash plus représentatif quand un cycle d’investissement temporaire déforme le TTM.</div><div><div style="font-size:9px;color:var(--muted);margin-bottom:4px">Sensibilité — valeur intrinsèque par taux d’actualisation / croissance terminale</div>'+table+'</div></div>'+ 
+  '</div>';
 }
 window._dcfApply=function(ticker){function v(id){var x=parseFloat((document.getElementById(id)?.value||'').replace(',','.'));return isFinite(x)?x:null;}var st=_dcfState[ticker]||{},a=v('dcf-fcf'),g=v('dcf-g'),r=v('dcf-r'),gt=v('dcf-gt');if(a>0)st.fcfps=a;if(g!=null)st.g=Math.max(-30,Math.min(80,g));if(r!=null)st.r=Math.max(4,Math.min(50,r));if(gt!=null)st.gt=Math.max(0,Math.min(6,gt));if(st.r<=st.gt+.5)st.r=st.gt+.5;_dcfState[ticker]=st;_dcfRerender(ticker);};
 window._dcfSetMode=function(ticker,mode){var st=_dcfState[ticker]||{};st.mode=mode;delete st.fcfps;delete st.r;delete st.gt;delete st.g;_dcfState[ticker]=st;_dcfRerender(ticker);};
