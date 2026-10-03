@@ -94,8 +94,10 @@ nav{flex:1;padding:10px 8px;overflow-y:auto}
 .repartition-layout{display:grid;grid-template-columns:320px minmax(0,1fr);gap:18px;align-items:center;min-height:280px;margin-top:10px}
 .repartition-chart-wrap{position:relative;height:260px;min-height:260px;margin:0}
 .repartition-chart-wrap canvas{position:absolute;inset:0}
-.repartition-legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 12px;align-content:start;max-height:260px;overflow-y:auto;padding:4px 2px}
-.perf-side-box{border:1px solid rgba(99,75,228,.28);background:linear-gradient(180deg,rgba(99,75,228,.10),rgba(38,197,222,.05));border-radius:12px;padding:12px 14px;margin-bottom:10px;cursor:pointer;transition:all .16s ease}
+.repartition-legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 12px;align-content:start;max-height:none;overflow:visible;padding:4px 2px}
+.repartition-rich{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:18px;align-items:start}
+.repartition-pos-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px 12px;align-content:start}
+.perf-side-box{border:1px solid rgba(99,75,228,.28);background:linear-gradient(180deg,rgba(99,75,228,.10),rgba(38,197,222,.05));border-radius:12px;padding:12px 14px;margin-bottom:0;cursor:pointer;transition:all .16s ease}
 .perf-side-box:hover{transform:translateY(-1px);box-shadow:0 10px 26px rgba(99,75,228,.18);border-color:rgba(38,197,222,.32)}
 .perf-side-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
 .perf-side-title{font-size:12px;font-weight:700;color:#d9dbff}
@@ -228,6 +230,8 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
   .repartition-layout{grid-template-columns:1fr!important;min-height:0!important}
   .repartition-chart-wrap{height:260px!important;min-height:260px!important}
   .repartition-legend{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))!important;max-height:none!important}
+  .repartition-rich{grid-template-columns:1fr!important}
+  .repartition-pos-grid{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))!important}
 
   /* Tableaux : défilement horizontal de leur carte au lieu d'être coupés
      (on garde la structure <table> pour ne pas désaligner les colonnes) */
@@ -1848,7 +1852,7 @@ function renderLegend(){
     ].map(function(r){
       return `<div class="perf-side-line"><span class="lab">${r.lab}</span><span class="pct" style="color:${_pfPerfColor(r.pct)}">${_pfPerfFmt(r.pct)}</span><span class="eur" style="color:${_pfPerfColor(r.eur)}">${_pfPerfMoney(r.eur)}</span></div>`;
     }).join('');
-    el.innerHTML=`<div class="perf-side-box" onclick="showPerformanceDetail()"><div class="perf-side-head"><div><div class="perf-side-title">Résumé de performance</div><div class="perf-side-sub">Clique pour ouvrir le centre de performance</div></div><div style="font-size:18px;color:var(--cyan)">↗</div></div><div class="perf-side-grid">${rows}</div></div><div class="legend-divider"></div><div class="legend-chip-grid">${items}</div>`;
+    el.innerHTML=`<div class="repartition-rich"><div class="repartition-pos-grid">${items}</div><div class="perf-side-box" onclick="showPerformanceDetail()"><div class="perf-side-head"><div><div class="perf-side-title">Résumé de performance</div><div class="perf-side-sub">Clique pour ouvrir le centre de performance</div></div><div style="font-size:18px;color:var(--cyan)">↗</div></div><div class="perf-side-grid">${rows}</div></div></div>`;
     return;
   }
   el.innerHTML=`<div class="legend-chip-grid">${items}</div>`;
@@ -6017,13 +6021,13 @@ async function fetchPriceHistory(ticker, range){
 }
 var _histCurrency={};
 
-var BM_COLORS = ['#634BE4','#22c55e','#f59e0b','#ef4444','#a855f7','#06b6d4'];
+var BM_COLORS = ['#634BE4','#22c55e','#26C5DE','#10b981','#8b5cf6','#06b6d4'];
 // Couleurs fixes par ID → évite les doublons lors des désélections/sélections
 var BM_ITEM_COLORS = {
   '__me__': '#634BE4',   // bleu — mon portefeuille
-  'sp500':  '#f59e0b',   // ambre — S&P 500
-  'ndx':    '#f97316',   // orange — Nasdaq
-  'msci':   '#06b6d4',   // cyan — MSCI
+  'sp500':  '#22c55e',   // vert — S&P 500
+  'ndx':    '#26C5DE',   // bleu turquoise — Nasdaq
+  'msci':   '#8b5cf6',   // violet secondaire — MSCI
   'cac':    '#10b981',   // vert émeraude — CAC 40
 };
 // Couleurs réservées aux amis (différentes de tous les indices)
@@ -7638,13 +7642,36 @@ async function buildPortfolioLine(transactions, range, windowStartOverride){
 // ── Performance indice
 
 // ── Performance indice ────────────────────────────────────────────────────
-async function buildIndexLine(symbol, range){
+async function buildIndexLine(symbol, range, windowStartOverride){
   var pts=await fetchPriceHistory(symbol,range);
+  if(pts.length<2) return [];
+  if(windowStartOverride!=null&&isFinite(windowStartOverride)){
+    var cut=0;
+    for(var i=0;i<pts.length;i++){
+      if(pts[i].t>=windowStartOverride){ cut=Math.max(0,i-1); break; }
+      cut=i;
+    }
+    pts=pts.slice(cut);
+  }
   if(pts.length<2) return [];
   var startVal=pts[0].c; if(!startVal) return [];
   var step=Math.max(1,Math.floor(pts.length/60));
   return pts.filter(function(_,i){return i%step===0||i===pts.length-1;})
     .map(function(p){return {t:p.t,pct:(p.c/startVal-1)*100};});
+}
+
+var BM_PERIODS={
+  '1d': {label:'1J', range:'1mo', start:function(){ return Math.floor(Date.now()/1000)-86400; }},
+  '1w': {label:'1S', range:'1mo', start:function(){ return Math.floor(Date.now()/1000)-7*86400; }},
+  'mtd':{label:'MTD',range:'1mo', start:function(){ var d=new Date(); return Math.floor(new Date(d.getFullYear(),d.getMonth(),1).getTime()/1000); }},
+  'ytd':{label:'YTD',range:'1y',  start:function(){ var d=new Date(); return Math.floor(new Date(d.getFullYear(),0,1).getTime()/1000); }},
+  '1y': {label:'1A', range:'1y'},
+  '3y': {label:'3A', range:'3y'}
+};
+function _bmLabelFromTs(ts,key){
+  var d=new Date(ts*1000);
+  if(key==='1d'||key==='1w'||key==='mtd') return d.toLocaleDateString('fr-FR',{day:'2-digit',month:'short'});
+  return d.toLocaleDateString('fr-FR',{month:'short',year:'2-digit'});
 }
 
 // ── Page Benchmark ────────────────────────────────────────────────────────
@@ -7660,17 +7687,16 @@ async function renderBenchmark(){
   pg.innerHTML='<div style="margin-bottom:20px"><h2 style="font-size:18px;font-weight:700">Benchmark & Comparaison</h2>'+
     '<p style="color:var(--muted);font-size:13px;margin-top:3px">Compare ta performance avec tes amis et les grands indices</p></div>'+
     '<div id="bm-sel-container"><div class="spinner"></div></div>'+
-    '<div style="display:flex;gap:6px;margin:14px 0" id="bm-period-row">'+
-    ['1M','6M','1A','3A'].map(function(p,i){
-      var rng=['1mo','6mo','1y','3y'][i];
-      return '<button class="btn btn-ghost btn-sm bm-period-btn" data-range="'+rng+'" onclick="selectBmPeriod(this)">'+p+'</button>';
+    '<div style="display:flex;gap:6px;margin:14px 0;flex-wrap:wrap" id="bm-period-row">'+
+    Object.keys(BM_PERIODS).map(function(k){
+      return '<button class="btn btn-ghost btn-sm bm-period-btn" data-key="'+k+'" onclick="selectBmPeriod(this)">'+BM_PERIODS[k].label+'</button>';
     }).join('')+'</div>'+
     '<div class="card"><div id="bm-chart-wrap" style="position:relative;height:380px">'+
     '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted)">Sélectionne des éléments à comparer</div></div></div>';
 
-  // Default period = 1A (violet)
-  window._bmRange='1y'; window._bmItems=[];
-  var defBtn=document.querySelector('.bm-period-btn[data-range="1y"]');
+  // Default period = YTD
+  window._bmPeriodKey='ytd'; window._bmItems=[];
+  var defBtn=document.querySelector('.bm-period-btn[data-key="ytd"]');
   if(defBtn){defBtn.style.background='var(--blue)';defBtn.style.color='#fff';defBtn.style.borderColor='var(--blue)';defBtn.style.fontWeight='700';}
 
   // Build selector
@@ -7730,13 +7756,16 @@ function selectBmPeriod(btn){
     b.style.background=''; b.style.color=''; b.style.borderColor=''; b.style.fontWeight='';
   });
   btn.style.background='var(--blue)'; btn.style.color='#fff'; btn.style.borderColor='var(--blue)'; btn.style.fontWeight='700';
-  window._bmRange=btn.dataset.range;
+  window._bmPeriodKey=btn.dataset.key||'ytd';
   refreshBmChart();
 }
 
 async function refreshBmChart(){
   var items=window._bmItems||[];
-  var range=window._bmRange||'1y';
+  var periodKey=window._bmPeriodKey||'ytd';
+  var period=BM_PERIODS[periodKey]||BM_PERIODS['ytd'];
+  var range=period.range||'1y';
+  var startOverride=period.start?period.start():null;
   var wrap=document.getElementById('bm-chart-wrap'); if(!wrap) return;
   if(!items.length){
     wrap.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted)">Sélectionne au moins un élément</div>';
@@ -7744,13 +7773,13 @@ async function refreshBmChart(){
   }
   wrap.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%"><div class="spinner"></div></div>';
   var lines=await Promise.allSettled(items.map(async function(item){
-    if(item.type==='index') return await buildIndexLine(item.symbol,range);
+    if(item.type==='index') return await buildIndexLine(item.symbol,range,startOverride);
     if(item.type==='portfolio'){
-      return await buildPortfolioLine(S.transactions||[], range);
+      return await buildPortfolioLine(S.transactions||[], range, startOverride);
     }
     if(item.type==='friend'){
       var txns=await getFriendTransactions(item.id);
-      return await buildPortfolioLine(txns||[], range);
+      return await buildPortfolioLine(txns||[], range, startOverride);
     }
     return [];
   }));
@@ -7761,7 +7790,8 @@ async function refreshBmChart(){
     datasets.push({
       label:items[i].label,
       data:pts.map(function(p){return p.pct;}),
-      labels:pts.map(function(p){var d=new Date(p.t*1000);return d.toLocaleDateString('fr-FR',{month:'short',year:'2-digit'});}),
+      ts:pts.map(function(p){return p.t;}),
+      labels:pts.map(function(p){return _bmLabelFromTs(p.t,periodKey);}),
       borderColor:items[i].color,
       backgroundColor:'transparent',
       borderWidth:2.5,pointRadius:0,pointHoverRadius:5,tension:0.2,
