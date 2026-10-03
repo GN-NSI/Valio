@@ -480,23 +480,25 @@ html, body { max-width: 100%; overflow-x: hidden; }
     <aside id="sidebar">
       <div class="sidebar-logo"><div class="mark"><img src="/logo.png" alt="Valio"></div><span class="name">Valio</span></div><div class="sb-toggle" onclick="toggleSidebar()" id="sb-toggle">‹</div>
       <nav>
-        <div class="nav-item active" id="nav-portfolio" onclick="navigate('portfolio')"><span class="nav-icon">📊</span><span>Portefeuille</span></div>
+        <div class="nav-section">Structure</div>
         <div class="nav-item" id="nav-accounts" onclick="navigate('accounts')"><span class="nav-icon">💳</span><span>Comptes</span></div>
+
+        <div class="nav-section">Suivi</div>
+        <div class="nav-item active" id="nav-portfolio" onclick="navigate('portfolio')"><span class="nav-icon">📊</span><span>Portefeuille</span></div>
+        <div class="nav-item" id="nav-deposits" onclick="navigate('deposits')"><span class="nav-icon">💸</span><span>Dépôts & Solde</span></div>
+        <div class="nav-item" id="nav-risk" onclick="navigate('risk')"><span class="nav-icon">🛡️</span><span>Risque</span></div>
+        <div class="nav-item" id="nav-performance" onclick="navigate('performance')"><span class="nav-icon">⚡</span><span>Performance</span></div>
+
         <div class="nav-section">Analyse</div>
         <div class="nav-item" id="nav-ratios" onclick="navigate('ratios')"><span class="nav-icon">📈</span><span>Ratios</span></div>
-        <!-- Screener retiré: accès via clic sur entreprise dans Ratios -->
-        <div class="nav-item" id="nav-watchlist" onclick="navigate('watchlist')"><span class="nav-icon">🎯</span><span>Cibles d'achat</span></div>
+        <div class="nav-item" id="nav-watchlist" onclick="navigate('watchlist')"><span class="nav-icon">👁️</span><span>Watchlist</span></div>
         <div class="nav-item" id="nav-journal" onclick="navigate('journal')"><span class="nav-icon">📓</span><span>Journal</span></div>
-        <div class="nav-item" id="nav-performance" onclick="navigate('performance')"><span class="nav-icon">⚡</span><span>Performance</span></div>
-        <div class="nav-item" id="nav-compare" onclick="navigate('compare')"><span class="nav-icon">📊</span><span>Comparer</span></div>
-        <div class="nav-item" id="nav-risk" onclick="navigate('risk')"><span class="nav-icon">🛡️</span><span>Risque</span></div>
+        <div class="nav-item" id="nav-compare" onclick="navigate('compare')"><span class="nav-icon">⚖️</span><span>Comparatif</span></div>
+
         <div class="nav-section">Social</div>
         <div class="nav-item" id="nav-amis" onclick="navigate('amis')"><span class="nav-icon">👥</span><span>Amis</span></div>
         <div class="nav-item" id="nav-benchmark" onclick="navigate('benchmark')"><span class="nav-icon">📊</span><span>Benchmark</span></div>
         <div class="nav-item" id="nav-leaderboard" onclick="navigate('leaderboard')"><span class="nav-icon">🏆</span><span>Classement</span></div>
-      <div class="nav-section-label" style="font-size:10px;color:var(--muted);padding:12px 16px 4px;letter-spacing:.08em;font-weight:600">SUIVI</div>
-      <div class="nav-item" id="nav-deposits" onclick="navigate('deposits')"><span class="nav-icon">💸</span><span>Dépôts & Solde</span></div>
-      <div class="nav-item" id="nav-liquidity" onclick="navigate('liquidity')"><span class="nav-icon">💰</span><span>Liquidités</span></div>
       </nav>
       <div class="sidebar-footer" onclick="logout()">
         <div class="avatar" id="sidebar-avatar">?</div>
@@ -1331,7 +1333,7 @@ function navigate(page){
   S.page=page;
   document.querySelectorAll('.nav-item:not(.disabled)').forEach(e=>e.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes',ratios:'Screener',watchlist:'Cibles d\u0027achat',screener:'Screener',amis:'Amis',benchmark:'Benchmark',leaderboard:'Classement',journal:'Journal',performance:'Performance',compare:'Comparer',risk:'Risque X-Ray'}[page]||page;
+  document.getElementById('page-title').textContent={portfolio:'Portefeuille',accounts:'Comptes',ratios:'Screener',watchlist:'Watchlist',screener:'Screener',amis:'Amis',benchmark:'Benchmark',leaderboard:'Classement',journal:'Journal',performance:'Performance',compare:'Comparatif',risk:'Risque X-Ray',deposits:'Dépôts & Solde'}[page]||page;
   const pfDiv=document.getElementById('page-portfolio');
   const pgDiv=document.getElementById('page');
   if(page==='portfolio'){
@@ -1350,7 +1352,6 @@ function navigate(page){
     else if(page==='leaderboard')renderLeaderboard();
     else if(page==='journal')renderJournal();
     else if(page==='deposits')renderDeposits();
-    else if(page==='liquidity')renderLiquidity();
     else if(page==='performance')renderPerformancePage();
     else if(page==='compare')renderCompare();
     else if(page==='risk')renderRiskXray();
@@ -2464,197 +2465,80 @@ async function loadScreenerRatios(){
 var _prevPage = 'ratios';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ANALYSE MOAT & LEVIER IA (Modif 5) — saisie manuelle, stockée dans Supabase
+// MOAT 2030 — 5 barrières, IA intégrée dans l'analyse du moat
 // ═══════════════════════════════════════════════════════════════════════════
-var MOAT_CRIT=[
-  {k:'network',  label:'Effet de réseau',     w:5, hint:'La valeur croît avec chaque nouvel utilisateur'},
-  {k:'switching',label:'Coûts de transfert',  w:5, hint:'Changer de fournisseur est coûteux/douloureux'},
-  {k:'intangibles',label:'Actifs incorporels',w:4, hint:'Marque forte, brevets, licences réglementaires'},
-  {k:'cost',     label:'Avantage de coût',    w:4, hint:'Coûts structurellement plus bas que les rivaux'},
-  {k:'scale',    label:'Échelle efficiente',  w:3, hint:'Marché ne nourrissant que 1-2 acteurs rentables'},
-  {k:'process',  label:'Process power',       w:2, hint:'Savoir-faire opérationnel non copiable'},
-  {k:'pricing',  label:'Pricing power',       w:2, hint:'Augmente ses prix sans perdre de clients'},
-]; // somme des poids = 25 → ×4 = 100
-var AI_CRIT=[
-  {k:'data',   label:'Données propriétaires / rares',           w:5, hint:'Jeu de données unique exploitable par l\u0027IA'},
-  {k:'whopays',label:'« Qui paye ? » (pricing / coûts / captivité)',w:5, hint:'L\u0027IA fait payer plus, baisse les coûts ou rend captif — pas un coût défensif'},
-  {k:'process',label:'Process répétitifs, fréquents, mesurables',w:4, hint:'Complexes mais pas trop, automatisables'},
-  {k:'mgmt',   label:'Management repense le cœur de métier',     w:4, hint:'Réorganisation réelle des workflows, pas de la com\u0027'},
-  {k:'proof',  label:'Preuve chiffrée ET déployée',              w:4, hint:'Métriques concrètes en production (pas un pilote)'},
-  {k:'reach',  label:'Large base clients / déploiement échelle', w:3, hint:'Capacité à déployer vite et largement'},
-]; // somme = 25 → ×4 = 100
-var AI_FLAGS=[
-  {k:'hype',    label:'Beaucoup de blabla IA, zéro métrique mesurable'},
-  {k:'costonly',label:'IA surtout un coût, marges qui stagnent'},
-  {k:'pilots',  label:'Beaucoup de pilotes, peu de déploiement'},
-  {k:'baddata', label:'Données mauvaises / dispersées'},
-]; // chaque signal présent = -5, plancher 0
-var SCALE_LABELS=['Absent','Faible','Moyen','Fort','Très fort'];
-
-function _moatScore(m){ var s=0; MOAT_CRIT.forEach(function(c){s+=(+(m&&m[c.k])||0)*c.w;}); return s; }
-function _aiScore(a,flags){ var s=0; AI_CRIT.forEach(function(c){s+=(+(a&&a[c.k])||0)*c.w;}); var pen=0; if(flags)AI_FLAGS.forEach(function(f){if(flags[f.k])pen+=5;}); return Math.max(0,s-pen); }
-function _tier(s){ return s>=70?'Large':s>=40?'Étroit':'Faible'; }
-function _scoreColor(s){ return s>=70?'var(--green)':s>=40?'var(--yellow)':'var(--red)'; }
-function _trendArrow(t){ return t==='up'?'<span style="color:var(--green)" title="En expansion">↗</span>':t==='down'?'<span style="color:var(--red)" title="En érosion">↘</span>':'<span style="color:var(--muted)" title="Stable">→</span>'; }
+var MOAT2030_CRIT=[
+  {k:'hardBarriers',label:'Hard Barriers',hint:'Actifs physiques, fabs, logistique, licences, brevets défendables, ressources rares, capital/temps difficiles à reproduire.'},
+  {k:'dataNetwork',label:'Data & Network',hint:'Données propriétaires rares, feedback loops, effets de réseau utilisateurs/fournisseurs/développeurs, communauté difficile à recréer.'},
+  {k:'embeddednessStandards',label:'Embeddedness & Standards',hint:'Switching costs structurels, system of record, standard de marché, intégration profonde, étape critique de la chaîne de valeur.'},
+  {k:'brandTrustDesire',label:'Brand, Trust & Desire',hint:'Marque, confiance, prestige, désirabilité, patrimoine culturel et pricing power émotionnel.'},
+  {k:'scaleCostCapital',label:'Scale, Cost & Capital',hint:'Économies d’échelle, coûts, négociation, capex, FCF/cash et capacité à soutenir une guerre d’investissement.'}
+];
 function _esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function _scoreColor(s){ return s>=80?'var(--green)':s>=60?'var(--yellow)':s>=40?'#f59e0b':'var(--red)'; }
+function _moat2030Score(vals){
+  vals=vals||{};
+  var scores=MOAT2030_CRIT.map(function(c){return {k:c.k,label:c.label,v:Math.max(0,Math.min(100,Number(vals[c.k])||0))};})
+    .filter(function(x){return x.v>=40;}).sort(function(a,b){return b.v-a.v;}).slice(0,3);
+  var score=0;
+  if(scores.length===1) score=scores[0].v;
+  else if(scores.length===2) score=scores[0].v*.625+scores[1].v*.375;
+  else if(scores.length>=3) score=scores[0].v*.50+scores[1].v*.30+scores[2].v*.20;
+  return {score:Math.round(score),selected:scores};
+}
+function _moat2030Label(s){return s>=90?'Exceptionnel':s>=80?'Très fort':s>=70?'Fort':s>=60?'Correct':s>=50?'Faible à moyen':s>=40?'Barrière limitée':'Pas de moat durable';}
 
 async function loadAnalysis(ticker){
   var u=getUser(); if(!u) return null;
   try{ var rows=await dbGet('company_analysis','user_id=eq.'+u.id+'&ticker=eq.'+encodeURIComponent(ticker)); return (rows&&rows[0])||null; }
-  catch(e){ return null; } // table absente → null (pas de crash)
+  catch(e){ return null; }
 }
 async function saveAnalysisRow(ticker,data){
   var u=getUser(); if(!u) throw new Error('Non connecté');
   await rest('/rest/v1/company_analysis?on_conflict=user_id,ticker',{
-    method:'POST',
-    headers:{Prefer:'resolution=merge-duplicates,return=representation'},
+    method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=representation'},
     body:JSON.stringify({user_id:u.id,ticker:ticker,data:data,updated_at:new Date().toISOString()})
   });
 }
-
-function _critBars(crits,vals){
-  return crits.map(function(c){
-    var v=(vals&&vals[c.k])||0; var col=v>=3?'var(--green)':v>=2?'var(--yellow)':v>=1?'#f97316':'var(--muted2)';
-    return '<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px">'+
-      '<span style="flex:1;color:var(--muted)">'+c.label+'</span>'+
-      '<div style="width:60px;height:5px;border-radius:3px;background:var(--border2);overflow:hidden"><div style="height:100%;width:'+(v/4*100)+'%;background:'+col+'"></div></div>'+
-      '<span class="mono" style="width:14px;text-align:right;color:'+col+'">'+v+'</span></div>';
-  }).join('');
+function _moatBar(v,selected){
+  var col=_scoreColor(v),w=Math.max(0,Math.min(100,v));
+  return '<div style="height:6px;border-radius:999px;background:var(--border2);overflow:hidden"><div style="width:'+w+'%;height:100%;background:'+col+'"></div></div>'+
+    (selected?'<div style="font-size:8px;color:var(--cyan);margin-top:3px;font-weight:750">✓ retenue dans le score final</div>':'');
 }
-
 async function renderAnalysisCard(ticker,name){
   var el=document.getElementById('cd-analysis-section'); if(!el) return;
   window._cdAnaTicker=ticker; window._cdAnaName=name;
   el.innerHTML='<div class="card" style="padding:20px"><div class="spinner"></div></div>';
-  var row=await loadAnalysis(ticker);
-  var data=(row&&row.data)||null;
+  var row=await loadAnalysis(ticker),data=(row&&row.data)||null;
   window._cdAnaData=data;
-
-  if(!data){
+  if(!data||!data.moat2030){
+    var legacy=data&&(data.moat||data.ai);
     el.innerHTML='<div class="card" style="padding:20px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">'+
-      '<div><div style="font-size:15px;font-weight:700">🏰 Analyse — MOAT &amp; Levier IA</div>'+
-      '<div style="font-size:12px;color:var(--muted);margin-top:2px">Pas encore d\u0027analyse pour '+ticker+'. Note le business à la main.</div></div>'+
-      '<button class="btn btn-primary btn-sm" onclick="editAnalysis()">+ Analyser</button></div>';
+      '<div><div style="font-size:15px;font-weight:800">🏰 Moat 2030</div><div style="font-size:12px;color:var(--muted);margin-top:3px">'+(legacy?'Ancien modèle MOAT/IA détecté : il doit être re-noté avec le nouveau cadre 2030.':'Pas encore de notation Moat 2030 pour '+ticker+'.')+'</div></div>'+
+      '<button class="btn btn-primary btn-sm" onclick="editAnalysis()">+ Noter le moat</button></div>';
     return;
   }
-
-  var ms=_moatScore(data.moat), as=_aiScore(data.ai,data.ai_flags);
-  var activeFlags=AI_FLAGS.filter(function(f){return data.ai_flags&&data.ai_flags[f.k];});
-  var flagChips=activeFlags.length?('<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">'+activeFlags.map(function(f){
-    return '<span style="font-size:10px;background:rgba(239,68,68,.12);color:var(--red);border:1px solid rgba(239,68,68,.25);border-radius:5px;padding:2px 6px">−5 '+f.label+'</span>';}).join('')+'</div>'):'';
-  var rep=data.reports_url&&/^https?:\/\//.test(data.reports_url)
-    ? '<a href="'+_esc(data.reports_url)+'" target="_blank" rel="noopener" class="btn btn-ghost btn-sm" style="text-decoration:none">📄 Rapports</a>' : '';
-
-  el.innerHTML='<div class="card" style="padding:20px">'+
-    '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px">'+
-      '<div style="font-size:15px;font-weight:700">🏰 Analyse — MOAT &amp; Levier IA</div>'+
-      '<div style="display:flex;gap:8px">'+rep+'<button class="btn btn-ghost btn-sm" onclick="editAnalysis()">✏️ Éditer</button></div>'+
-    '</div>'+
-    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px">'+
-      '<div class="panel-card">'+
-        '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">MOAT économique</div>'+
-        '<div style="display:flex;align-items:baseline;gap:10px;margin:6px 0 12px">'+
-          '<span style="font-size:34px;font-weight:800;color:'+_scoreColor(ms)+'">'+ms+'</span>'+
-          '<span style="color:var(--muted)">/100</span> <span style="font-size:22px">'+_trendArrow(data.moat_trend)+'</span>'+
-          '<span style="font-size:12px;color:var(--muted)">'+_tier(ms)+'</span></div>'+
-        _critBars(MOAT_CRIT,data.moat)+
-        (data.moat_note?'<div style="font-size:12px;color:var(--muted);margin-top:10px;padding-top:8px;border-top:1px solid var(--border2);white-space:pre-wrap">'+_esc(data.moat_note)+'</div>':'')+
-      '</div>'+
-      '<div class="panel-card">'+
-        '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Levier de croissance IA</div>'+
-        '<div style="display:flex;align-items:baseline;gap:10px;margin:6px 0 12px">'+
-          '<span style="font-size:34px;font-weight:800;color:'+_scoreColor(as)+'">'+as+'</span>'+
-          '<span style="color:var(--muted)">/100</span> <span style="font-size:22px">'+_trendArrow(data.ai_trend)+'</span></div>'+
-        _critBars(AI_CRIT,data.ai)+
-        flagChips+
-        (data.ai_note?'<div style="font-size:12px;color:var(--muted);margin-top:10px;padding-top:8px;border-top:1px solid var(--border2);white-space:pre-wrap">'+_esc(data.ai_note)+'</div>':'')+
-      '</div>'+
-    '</div>'+
-    (row.updated_at?'<div style="font-size:10px;color:var(--muted2);margin-top:12px">Mis à jour le '+new Date(row.updated_at).toLocaleDateString('fr-FR')+'</div>':'')+
-  '</div>';
+  var calc=_moat2030Score(data.moat2030),selected={};calc.selected.forEach(function(x){selected[x.k]=true;});
+  var notes=data.moat2030_notes||{};
+  var rep=data.reports_url&&/^https?:\/\//.test(data.reports_url)?'<a href="'+_esc(data.reports_url)+'" target="_blank" rel="noopener" class="btn btn-ghost btn-sm" style="text-decoration:none">📄 Source / IR</a>':'';
+  var cards=MOAT2030_CRIT.map(function(c){var v=Number(data.moat2030[c.k])||0,note=notes[c.k]||'';return '<div class="panel-card" style="border-color:'+(selected[c.k]?'rgba(38,197,222,.34)':'var(--border)')+'"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px"><div style="font-size:12px;font-weight:750">'+c.label+'</div><div class="mono" style="font-size:16px;font-weight:850;color:'+_scoreColor(v)+'">'+v+'/100</div></div>'+_moatBar(v,selected[c.k])+(note?'<div style="font-size:10px;color:var(--muted);line-height:1.45;margin-top:8px">'+_esc(note)+'</div>':'')+'</div>';}).join('');
+  el.innerHTML='<div class="card" style="padding:20px"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px"><div><div style="font-size:15px;font-weight:800">🏰 Moat 2030</div><div style="font-size:11px;color:var(--muted);margin-top:3px">Résilience de l’avantage concurrentiel dans un monde où code, logiciels et agents IA deviennent plus abondants.</div></div><div style="display:flex;align-items:center;gap:8px">'+rep+'<button class="btn btn-ghost btn-sm" onclick="editAnalysis()">✏️ Éditer</button></div></div><div style="display:flex;align-items:baseline;gap:9px;margin-bottom:14px"><span style="font-size:36px;font-weight:900;color:'+_scoreColor(calc.score)+'">'+calc.score+'</span><span style="color:var(--muted)">/100</span><span style="font-size:12px;color:var(--muted)">'+_moat2030Label(calc.score)+'</span><span style="font-size:10px;color:var(--cyan);margin-left:6px">Top '+calc.selected.length+' barrière'+(calc.selected.length>1?'s':'')+' significative'+(calc.selected.length>1?'s':'')+'</span></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px">'+cards+'</div>'+(data.moat2030_note?'<div style="font-size:11px;color:var(--muted);margin-top:12px;padding-top:10px;border-top:1px solid var(--border2);white-space:pre-wrap">'+_esc(data.moat2030_note)+'</div>':'')+(row&&row.updated_at?'<div style="font-size:9px;color:var(--muted2);margin-top:10px">Mis à jour le '+new Date(row.updated_at).toLocaleDateString('fr-FR')+'</div>':'')+'</div>';
 }
-
-function _critSelect(prefix,c,val){
-  return '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border2)">'+
-    '<div style="flex:1"><div style="font-size:13px;font-weight:600">'+c.label+'</div>'+
-      (c.hint?'<div style="font-size:11px;color:var(--muted)">'+c.hint+'</div>':'')+'</div>'+
-    '<select id="'+prefix+'-'+c.k+'" onchange="_recalcAna()" class="form-input" style="width:120px;flex-shrink:0;padding:6px 8px">'+
-      [0,1,2,3,4].map(function(n){return '<option value="'+n+'"'+((+val===n)?' selected':'')+'>'+n+' · '+SCALE_LABELS[n]+'</option>';}).join('')+
-    '</select></div>';
+function _moat2030Input(c,v,note){
+  return '<div style="padding:10px 0;border-bottom:1px solid var(--border2)"><div style="display:grid;grid-template-columns:minmax(180px,1fr) 90px;gap:10px;align-items:start"><div><div style="font-size:13px;font-weight:700">'+c.label+'</div><div style="font-size:10px;color:var(--muted);line-height:1.4;margin-top:2px">'+c.hint+'</div></div><input id="moat2030-'+c.k+'" class="form-input mono" type="number" min="0" max="100" step="1" value="'+(v!=null?v:'')+'" placeholder="0–100" oninput="_recalcAna()" style="padding:6px 7px;text-align:right"></div><textarea id="moat2030-note-'+c.k+'" class="form-input" rows="2" placeholder="Justification / preuves / métriques (optionnel)" style="width:100%;resize:vertical;margin-top:7px;font-size:10px">'+_esc(note||'')+'</textarea></div>';
 }
-function _trendSelect(id,val){
-  var opts=[['up','↗ En expansion'],['flat','→ Stable'],['down','↘ En érosion']];
-  return '<select id="'+id+'" class="form-input" style="padding:6px 8px;width:160px">'+
-    opts.map(function(o){return '<option value="'+o[0]+'"'+((val||'flat')===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>';
-}
-
 window.editAnalysis=function(){
-  var ticker=window._cdAnaTicker, name=window._cdAnaName||ticker;
-  var d=window._cdAnaData||{};
-  var m=d.moat||{}, a=d.ai||{}, fl=d.ai_flags||{};
-  var h='<div class="modal-hd"><h2>Analyse — '+name+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div>'+
-    '<div style="font-size:12px;color:var(--muted);margin-bottom:14px">Note chaque critère de 0 (absent) à 4 (très fort). Les totaux se calculent automatiquement.</div>'+
-
-    // MOAT
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
-      '<div class="stats-section-title" style="margin:0;border:none">🏰 MOAT économique</div>'+
-      '<div style="font-weight:800;font-size:18px" id="moat-total">—</div></div>'+
-    MOAT_CRIT.map(function(c){return _critSelect('moat',c,m[c.k]);}).join('')+
-    '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0">'+
-      '<span style="font-size:12px;color:var(--muted)">Tendance du moat</span>'+_trendSelect('moat-trend',d.moat_trend)+'</div>'+
-    '<textarea id="moat-note" class="form-input" rows="2" placeholder="Justification / notes MOAT (optionnel)" style="width:100%;resize:vertical">'+_esc(d.moat_note||'')+'</textarea>'+
-
-    // IA
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin:22px 0 6px">'+
-      '<div class="stats-section-title" style="margin:0;border:none">🤖 Levier de croissance IA</div>'+
-      '<div style="font-weight:800;font-size:18px" id="ai-total">—</div></div>'+
-    AI_CRIT.map(function(c){return _critSelect('ai',c,a[c.k]);}).join('')+
-    '<div style="font-size:11px;color:var(--muted);margin:10px 0 4px">Signaux d\u0027alerte (chacun −5 pts) :</div>'+
-    AI_FLAGS.map(function(f){return '<label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;padding:3px 0;cursor:pointer"><input type="checkbox" id="aiflag-'+f.k+'" '+(fl[f.k]?'checked':'')+' onchange="_recalcAna()"> <span>'+f.label+'</span></label>';}).join('')+
-    '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0">'+
-      '<span style="font-size:12px;color:var(--muted)">Tendance du levier IA</span>'+_trendSelect('ai-trend',d.ai_trend)+'</div>'+
-    '<textarea id="ai-note" class="form-input" rows="2" placeholder="Justification / preuves chiffrées IA (optionnel)" style="width:100%;resize:vertical">'+_esc(d.ai_note||'')+'</textarea>'+
-
-    // Lien rapports
-    '<div class="form-group" style="margin:18px 0 8px"><label class="form-label">📄 Lien vers les rapports financiers (Investor Relations)</label>'+
-      '<input id="ana-reports" class="form-input" placeholder="https://..." value="'+_esc(d.reports_url||'')+'"></div>'+
-
-    '<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button>'+
-    '<button class="btn btn-primary" onclick="saveAnalysisForm()">Enregistrer</button></div>';
-  showModal(h);
-  _recalcAna();
+  var ticker=window._cdAnaTicker,name=window._cdAnaName||ticker,d=window._cdAnaData||{},m=d.moat2030||{},notes=d.moat2030_notes||{};
+  var h='<div class="modal-hd"><h2>Moat 2030 — '+name+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:12px">Note chaque source de 0 à 100. Seules les barrières ≥40 sont significatives ; le score final retient au maximum les 3 meilleures (50% / 30% / 20%, renormalisé s’il n’y en a que 1 ou 2). Le Levier IA n’existe plus comme score séparé.</div><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><div style="font-size:11px;font-weight:750;text-transform:uppercase;color:var(--muted)">Score final</div><div id="moat2030-total" class="mono" style="font-size:22px;font-weight:900">—</div></div>'+MOAT2030_CRIT.map(function(c){return _moat2030Input(c,m[c.k],notes[c.k]);}).join('')+'<textarea id="moat2030-overall-note" class="form-input" rows="2" placeholder="Synthèse globale (optionnel)" style="width:100%;resize:vertical;margin-top:12px">'+_esc(d.moat2030_note||'')+'</textarea><div class="form-group" style="margin:14px 0 8px"><label class="form-label">📄 Lien source / Investor Relations</label><input id="ana-reports" class="form-input" placeholder="https://..." value="'+_esc(d.reports_url||'')+'"></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveAnalysisForm()">Enregistrer</button></div>';
+  showModal(h);_recalcAna();
 };
-
-window._recalcAna=function(){
-  var m={},a={},fl={};
-  MOAT_CRIT.forEach(function(c){var e=document.getElementById('moat-'+c.k);m[c.k]=e?+e.value:0;});
-  AI_CRIT.forEach(function(c){var e=document.getElementById('ai-'+c.k);a[c.k]=e?+e.value:0;});
-  AI_FLAGS.forEach(function(f){var e=document.getElementById('aiflag-'+f.k);fl[f.k]=e?e.checked:false;});
-  var ms=_moatScore(m), as=_aiScore(a,fl);
-  var mt=document.getElementById('moat-total'); if(mt){mt.textContent=ms+' /100'; mt.style.color=_scoreColor(ms);}
-  var at=document.getElementById('ai-total'); if(at){at.textContent=as+' /100'; at.style.color=_scoreColor(as);}
-};
-
+window._recalcAna=function(){var m={};MOAT2030_CRIT.forEach(function(c){var e=document.getElementById('moat2030-'+c.k);m[c.k]=e?Math.max(0,Math.min(100,Number(e.value)||0)):0;});var r=_moat2030Score(m),el=document.getElementById('moat2030-total');if(el){el.textContent=r.score+' /100';el.style.color=_scoreColor(r.score);}};
 window.saveAnalysisForm=async function(){
-  var ticker=window._cdAnaTicker, name=window._cdAnaName||ticker;
-  var m={},a={},fl={};
-  MOAT_CRIT.forEach(function(c){m[c.k]=+document.getElementById('moat-'+c.k).value;});
-  AI_CRIT.forEach(function(c){a[c.k]=+document.getElementById('ai-'+c.k).value;});
-  AI_FLAGS.forEach(function(f){fl[f.k]=document.getElementById('aiflag-'+f.k).checked;});
-  var data={
-    moat:m, moat_trend:document.getElementById('moat-trend').value, moat_note:document.getElementById('moat-note').value.trim(),
-    ai:a, ai_flags:fl, ai_trend:document.getElementById('ai-trend').value, ai_note:document.getElementById('ai-note').value.trim(),
-    reports_url:document.getElementById('ana-reports').value.trim()
-  };
-  try{
-    await saveAnalysisRow(ticker,data);
-    closeModal(); showToast('✅ Analyse enregistrée');
-    renderAnalysisCard(ticker,name);
-  }catch(e){
-    var msg=(e&&e.message)||String(e);
-    if(/company_analysis|relation|does not exist|404|PGRST/i.test(msg)) msg='Table « company_analysis » introuvable — lance d\u0027abord le SQL fourni.';
-    showToast('❌ '+msg);
-  }
+  var ticker=window._cdAnaTicker,name=window._cdAnaName||ticker,d=window._cdAnaData||{},m={},notes={};
+  MOAT2030_CRIT.forEach(function(c){m[c.k]=Math.max(0,Math.min(100,Number(document.getElementById('moat2030-'+c.k).value)||0));notes[c.k]=(document.getElementById('moat2030-note-'+c.k).value||'').trim();});
+  var data=Object.assign({},d,{moat2030:m,moat2030_notes:notes,moat2030_note:(document.getElementById('moat2030-overall-note').value||'').trim(),reports_url:(document.getElementById('ana-reports').value||'').trim()});
+  // Nouveau modèle : l'ancien Levier IA n'est plus utilisé comme score séparé.
+  try{await saveAnalysisRow(ticker,data);window._cdAnaData=data;closeModal();showToast('✅ Moat 2030 enregistré');renderAnalysisCard(ticker,name);}catch(e){var msg=(e&&e.message)||String(e);if(/company_analysis|relation|does not exist|404|PGRST/i.test(msg))msg='Table « company_analysis » introuvable.';showToast('❌ '+msg);}
 };
 
 function openCompanyDetail(ticker, name) {
@@ -2707,7 +2591,7 @@ function _managementScore(m){
 
 // ══════════════════════════════════════════════════════════════════════════
 // QUALITY SCORE /100 — INDÉPENDANT DU COURS
-// Croissance 35 · MOAT 25 · Qualité économique 25 · IA 10 · Management 5
+// Croissance 35 · Moat 2030 35 · Qualité économique 25 · Management 5
 // ══════════════════════════════════════════════════════════════════════════
 function calcQualityScoreV2(opts){
   var f=(opts&&opts.fundamentals)||null;
@@ -2718,9 +2602,8 @@ function calcQualityScoreV2(opts){
   var details=[], rawPoints=0, availableWeight=0, applicableWeight=0;
   var blocks={
     growth:{label:'Croissance',max:35,points:0},
-    moat:{label:'MOAT',max:25,points:0},
+    moat:{label:'Moat 2030',max:35,points:0},
     economicQuality:{label:'Qualité économique',max:25,points:0},
-    ai:{label:'Levier IA',max:10,points:0},
     management:{label:'Management',max:5,points:0}
   };
 
@@ -2762,7 +2645,7 @@ function calcQualityScoreV2(opts){
   // Croissance FCF : CAGR sur la plus longue période disponible (2 à 4 ans)
   var fcfCagr=null;
   try{
-    var fcfArr=(fin&&fin.freeCashFlow)||null;
+    var fcfArr=(fin&&fin.freeCF)||null;
     if(fcfArr&&fcfArr.length>=3){
       var vals=fcfArr.filter(function(v){return v!=null;});
       if(vals.length>=3){
@@ -2775,19 +2658,15 @@ function calcQualityScoreV2(opts){
   add('growth','Croissance FCF (CAGR)', fcfCagr, pct,
       [[25,5],[15,4],[8,3],[3,1.5],[0,0.5],[-1e9,0]], 5, true);
 
-  // ═══ BLOC 2 — MOAT (25 pts) ═══ analyse manuelle
-  applicableWeight+=25;
-  if(an&&an.moat){
-    var ms=_moatScore(an.moat);
-    var moatPts=ms/100*25;
-    if(an.moat_trend==='up') moatPts+=2;
-    if(an.moat_trend==='down') moatPts-=2;
-    moatPts=_clamp(moatPts,0,25);
-    availableWeight+=25; rawPoints+=moatPts; blocks.moat.points=moatPts;
-    details.push({block:'moat',label:'MOAT'+(an.moat_trend==='up'?' \u2197':an.moat_trend==='down'?' \u2198':''),
-                  val:Math.round(ms)+'/100',pts:moatPts,max:25,state:'ok'});
+  // ═══ BLOC 2 — MOAT 2030 (35 pts) ═══ ancien MOAT 25 + ancien Levier IA 10 fusionnés
+  applicableWeight+=35;
+  if(an&&an.moat2030){
+    var ms2030=_moat2030Score(an.moat2030).score;
+    var moatPts=ms2030/100*35;
+    availableWeight+=35; rawPoints+=moatPts; blocks.moat.points=moatPts;
+    details.push({block:'moat',label:'Moat 2030',val:Math.round(ms2030)+'/100',pts:moatPts,max:35,state:'ok'});
   } else {
-    details.push({block:'moat',label:'MOAT',val:'non analysé',pts:null,max:25,state:'missing'});
+    details.push({block:'moat',label:'Moat 2030',val:'non analysé',pts:null,max:35,state:'missing'});
   }
 
   // ═══ BLOC 3 — QUALITÉ ÉCONOMIQUE (25 pts) ═══
@@ -2803,7 +2682,14 @@ function calcQualityScoreV2(opts){
     if(fin&&fin.revenue&&fin.revenue.length){
       for(var i=fin.revenue.length-1;i>=0;i--){ if(fin.revenue[i]>0){ revTTM=fin.revenue[i]; break; } }
     }
-    if(revTTM>0&&f.freeCashflow!=null) fcfMargin=f.freeCashflow/revTTM*100;
+    var fcfLast=null;
+    if(fin&&fin.freeCF&&fin.freeCF.length){for(var fi=fin.freeCF.length-1;fi>=0;fi--){if(fin.freeCF[fi]!=null){fcfLast=fin.freeCF[fi];break;}}}
+    if(revTTM>0&&fcfLast!=null) fcfMargin=fcfLast/revTTM*100;
+    else if(revTTM>0&&f.freeCashflow!=null){
+      // Les financials Valio sont en milliards, Yahoo fundamentals en unités brutes.
+      var fcfB=Math.abs(f.freeCashflow)>1e7?f.freeCashflow/1e9:f.freeCashflow;
+      fcfMargin=fcfB/revTTM*100;
+    }
   }catch(e){}
   add('economicQuality','FCF Margin', fcfMargin, pctAbs,
       [[30,5],[20,4],[12,3],[7,2],[2,1],[0,0.5],[-1e9,0]], 5, !isFinancial);
@@ -2816,25 +2702,7 @@ function calcQualityScoreV2(opts){
   add('economicQuality','ROE', f.returnOnEquity, pctAbs,
       [[30,3],[20,2.5],[12,2],[7,1],[0,0.25],[-1e9,0]], 3, true);
 
-  // ═══ BLOC 4 — LEVIER IA (10 pts) ═══ avec protection anti-hype
-  applicableWeight+=10;
-  if(an&&an.ai){
-    var as=_aiScore(an.ai,an.ai_flags);
-    var aiPts=as/100*10;
-    var proof=+(an.ai.proof||0), whoPays=+(an.ai.whopays||0);
-    if(proof<=1&&whoPays<=1) aiPts=Math.min(aiPts,4);
-    else if(proof<=1||whoPays<=1) aiPts=Math.min(aiPts,6);
-    if(an.ai_trend==='up') aiPts+=1;
-    if(an.ai_trend==='down') aiPts-=1;
-    aiPts=_clamp(aiPts,0,10);
-    availableWeight+=10; rawPoints+=aiPts; blocks.ai.points=aiPts;
-    details.push({block:'ai',label:'Levier IA'+(an.ai_trend==='up'?' \u2197':an.ai_trend==='down'?' \u2198':''),
-                  val:Math.round(as)+'/100',pts:aiPts,max:10,state:'ok'});
-  } else {
-    details.push({block:'ai',label:'Levier IA',val:'non analysé',pts:null,max:10,state:'missing'});
-  }
-
-  // ═══ BLOC 5 — MANAGEMENT (5 pts) ═══
+  // ═══ BLOC 4 — MANAGEMENT (5 pts) ═══
   applicableWeight+=5;
   if(an&&an.management){
     var gs=_managementScore(an.management);
@@ -2853,7 +2721,7 @@ function calcQualityScoreV2(opts){
   var score=availableWeight>0?Math.round(rawPoints/availableWeight*100):null;
   var reliability=coveragePct>=80?'ok':coveragePct>=65?'partial':'low';
 
-  return {score:score, version:'VALIO_QUALITY_V2', rawPoints:rawPoints,
+  return {score:score, version:'VALIO_QUALITY_V3', rawPoints:rawPoints,
           availableWeight:availableWeight, applicableWeight:applicableWeight,
           coveragePct:coveragePct, reliability:reliability, isFinancial:isFinancial,
           blocks:blocks, details:details};
@@ -2988,7 +2856,7 @@ function calcValioScoring(f,price,analysis,financials){
   var adj=valueScoreToAdjustment(v&&v.score);
   return {quality:q, value:v, valuationAdjustment:adj,
           valioScore:calcValioScore(q.score, v&&v.score),
-          versions:{quality:'VALIO_QUALITY_V2',value:'VALIO_VALUE_V2',scoring:'VALIO_SCORING_V2'}};
+          versions:{quality:'VALIO_QUALITY_V3',value:'VALIO_VALUE_V2',scoring:'VALIO_SCORING_V2'}};
 }
 
 // ── BADGE + MODALE ────────────────────────────────────────────────────────
@@ -3024,7 +2892,7 @@ window.showQualityDetail=function(k){
     return '<div style="flex:1;height:6px;background:var(--border2);border-radius:3px;overflow:hidden"><div style="width:'+pc+'%;height:100%;background:'+c+'"></div></div>';
   }
   // Synthèse des blocs Quality
-  var bk=['growth','moat','economicQuality','ai','management'].map(function(key){
+  var bk=['growth','moat','economicQuality','management'].map(function(key){
     var b=q.blocks[key];
     return '<tr style="border-bottom:1px solid var(--border2)"><td style="padding:7px 8px;font-size:12px;font-weight:600">'+b.label+'</td>'+
       '<td style="padding:7px 8px;width:130px"><div style="display:flex;align-items:center;gap:6px">'+bar(b.points,b.max)+
@@ -3095,7 +2963,7 @@ async function renderCompanyDetail(ticker, name) {
     '</div>' +
     // Barre de sous-onglets en HAUT (plus besoin de descendre la page)
     '<div id="cd-tabbar" style="display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:20px;overflow-x:auto">'+
-      ['ensemble|📊 Vue d\'ensemble','ratios|📈 Ratios & prix','fin|📋 Historique financier','mat|🎯 Matrice & DCF','moat|🏰 MOAT & IA','analysts|🎯 Analystes','sector|🏭 Secteur'].map(function(t){var p=t.split('|');
+      ['ensemble|📊 Vue d\'ensemble','ratios|📈 Ratios & prix','fin|📋 Historique financier','mat|🎯 Matrice & DCF','moat|🏰 Moat 2030','analysts|🎯 Analystes','sector|🏭 Secteur'].map(function(t){var p=t.split('|');
         return '<button id="cdtb-'+p[0]+'" onclick="showCdTab(\''+p[0]+'\')" style="padding:9px 16px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;white-space:nowrap;color:'+(p[0]==='ensemble'?'var(--text)':'var(--muted)')+';border-bottom:2px solid '+(p[0]==='ensemble'?'var(--blue)':'transparent')+';margin-bottom:-1px">'+p[1]+'</button>';
       }).join('')+'</div>' +
     '<div id="cd-content"><div style="text-align:center;padding:60px"><div class="spinner"></div> Chargement des données…</div></div>';
@@ -3250,7 +3118,7 @@ async function renderCompanyDetail(ticker, name) {
     '</div>' +
     '</div>'; // Fin grid 2 colonnes
 
-  // ── Analyse MOAT & Levier IA (Modif 5) ──
+  // ── Analyse Moat 2030 ──
   var anaEl=document.getElementById('cd-analysis-section');
   if(!anaEl){ anaEl=document.createElement('div'); anaEl.id='cd-analysis-section'; anaEl.style.marginTop='20px'; anaEl.style.display='none'; document.getElementById('page').appendChild(anaEl); }
   renderAnalysisCard(ticker, name);
@@ -3819,7 +3687,7 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
     '<div id="cdtab-moat" style="display:none"></div>' +
     '</div>';
 
-  // MOAT & IA : déplace la section existante dans son onglet
+  // Moat 2030 : déplace la section existante dans son onglet
   setTimeout(function(){
     var ana=document.getElementById('cd-analysis-section'), host=document.getElementById('cdtab-moat');
     if(ana&&host&&ana.parentElement!==host){ ana.style.display=''; host.appendChild(ana); }
@@ -4014,7 +3882,7 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
         // calculables : on recalcule le Valio Score avec une couverture complète.
         var _bEl=document.getElementById('valio-score-badge');
         if(_bEl) _bEl.innerHTML=renderQualityBadge(f, window._cdLastPrice, ticker, window._cdLastAnalysis);
-      }catch(e){ var ym=document.getElementById('cd-yield-matrix'); if(ym) ym.innerHTML='<div style="color:var(--muted);font-size:12px">Données insuffisantes (EPS manquant).</div>'; }
+      }catch(e){ console.error('Matrice & DCF:',e); var ym=document.getElementById('cd-yield-matrix'); if(ym) ym.innerHTML='<div style="color:var(--red);font-size:12px">Erreur de calcul Matrice & DCF : '+_esc((e&&e.message)||String(e))+'</div>'; }
       // Segments pie (données manuelles)
       // Breakdown card chart (segments ou géographie selon vue active)
       var _bkdRenderChart = function(view) {
@@ -6024,6 +5892,23 @@ function renderYieldMatrix(ticker, price, f, fin){
   var cSym=(S.prices[ticker]&&S.prices[ticker].currency==='EUR')?'\u20ac':'$';
   var tName=ticker.replace(/'/g,"\\'");
 
+  // Repères de valorisation — robustes même si certaines estimations manquent.
+  // BUG V15 corrigé : peRefs était référencé sans jamais être défini, ce qui faisait
+  // tomber tout l'onglet dans le catch « EPS manquant » alors que l'EPS était disponible.
+  var _ae=(f&&f.analystEstimates)||{};
+  var _fy0Obj=_ae.thisYear||_ae.currentYear||null;
+  var _fy1Obj=_ae.nextYear||null;
+  var _peTtm=(f&&f.trailingPE>0)?f.trailingPE:null;
+  var _peFy0=(_fy0Obj&&_fy0Obj.epsAvg>0&&price>0)?price/_fy0Obj.epsAvg:((f&&f.forwardPE>0)?f.forwardPE:null);
+  var _peFy1=(_fy1Obj&&_fy1Obj.epsAvg>0&&price>0)?price/_fy1Obj.epsAvg:null;
+  function _peMini(label,val,sub){return '<div style="padding:8px 10px;border:1px solid var(--border2);border-radius:8px;background:rgba(255,255,255,.018);min-width:120px"><div style="font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">'+label+'</div><div class="mono" style="font-size:14px;font-weight:800;margin-top:3px">'+(val!=null&&isFinite(val)?val.toFixed(1)+'x':'—')+'</div><div style="font-size:8px;color:var(--muted2);margin-top:2px">'+sub+'</div></div>';}
+  var peRefs='<div style="display:flex;gap:7px;flex-wrap:wrap;margin:0 0 12px">'+
+    _peMini('P/E TTM',_peTtm,'12 derniers mois')+
+    _peMini('P/E FY0',_peFy0,'exercice en cours')+
+    _peMini('P/E FY1',_peFy1,'exercice suivant')+
+    _peMini('Médiane P/E 5A',_medPE,'historique du titre')+
+    '</div>';
+
   function togBtn(label,nVal){
     var active=(N===nVal);
     return '<button onclick="window._ymSetN(\''+tName+'\','+nVal+')" style="padding:4px 12px;font-size:11px;font-weight:700;border-radius:6px;cursor:pointer;border:none;'+(active?'background:#634BE4;color:white;':'background:rgba(255,255,255,.08);color:var(--muted);')+'">'+label+'</button>';
@@ -6329,20 +6214,29 @@ function _depPill(label,active,onclick){return '<button onclick="'+onclick+'" st
 async function renderDeposits(){
   var pg=document.getElementById('page');
   pg.innerHTML='<div style="text-align:center;padding:60px"><div class="spinner"></div></div>';
-  // Filtre explicite sur les comptes du user (défense en profondeur, ne dépend pas que du RLS)
+  // Flux + liquidités sur la même page.
   var myAccIds=(S.accounts||[]).map(function(a){return a.id;});
-  var deposits=[];
+  var deposits=[],cashRows=[];
   if(myAccIds.length){
-    deposits=await dbGet('deposits','account_id=in.('+myAccIds.join(',')+')&order=deposit_date.asc&select=*,accounts(name)')||[];
+    var res=await Promise.allSettled([
+      dbGet('deposits','account_id=in.('+myAccIds.join(',')+')&order=deposit_date.asc&select=*,accounts(name)'),
+      dbGet('cash_balances','account_id=in.('+myAccIds.join(',')+')&select=*,accounts(name,type)')
+    ]);
+    deposits=(res[0].status==='fulfilled'&&res[0].value)||[];
+    cashRows=(res[1].status==='fulfilled'&&res[1].value)||[];
   }
-  _renderDepositsUI(deposits);
+  _renderDepositsUI(deposits,cashRows);
 }
 
-function _renderDepositsUI(deposits){
+function _renderDepositsUI(deposits,cashRows){
+  cashRows=cashRows||[];
   var pg=document.getElementById('page');
   var totalVal=S.enrichedPos.reduce(function(s,p){return s+(p.valueEur||0);},0);
   var totalCost=S.enrichedPos.reduce(function(s,p){return s+(p.totalCostEur||0);},0);
   var totalRealized=S.realizedPnl||0;
+  var totalCash=cashRows.reduce(function(s,r){return s+(Number(r.balance)||0);},0);
+  var totalAccountValue=totalVal+totalCash;
+  var cashPct=totalAccountValue>0?totalCash/totalAccountValue*100:0;
 
   // Comptes distincts pour le filtre
   var acctNames=[...new Set(deposits.map(function(d){return d.accounts&&d.accounts.name;}).filter(Boolean))];
@@ -6376,7 +6270,7 @@ function _renderDepositsUI(deposits){
 
   pg.innerHTML=
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">'+
-      '<h2 style="font-size:20px;font-weight:700">💸 Dépôts & Évolution du solde</h2>'+
+      '<h2 style="font-size:20px;font-weight:700">💸 Dépôts, Solde & Liquidités</h2>'+
       '<div style="display:flex;gap:8px">'+
         '<button class="btn btn-ghost btn-sm" onclick="openAddDeposit(\'retrait\')">− Retrait</button>'+
         '<button class="btn btn-primary btn-sm" onclick="openAddDeposit(\'depot\')">+ Ajouter un dépôt</button>'+
@@ -6396,21 +6290,27 @@ function _renderDepositsUI(deposits){
           '<div class="kpi-sub">Latentes + réalisées'+(pctVsDep!=null?' · '+(pctVsDep>=0?'+':'')+pctVsDep.toFixed(1)+'% des versements':'')+'</div></div>';
       })()+
     '</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:-6px 0 18px">'+
+      '<div class="kpi-card kpi-clickable" style="padding:14px 16px"><div class="kpi-label">Cash total</div><div class="kpi-value" style="font-size:22px">'+fE(totalCash)+'</div><div class="kpi-sub">Liquidités non investies</div></div>'+ 
+      '<div class="kpi-card" style="padding:14px 16px"><div class="kpi-label">Total comptes</div><div class="kpi-value" style="font-size:22px">'+fE(totalAccountValue)+'</div><div class="kpi-sub">Positions + cash</div></div>'+ 
+      '<div class="kpi-card" style="padding:14px 16px"><div class="kpi-label">Part en cash</div><div class="kpi-value" style="font-size:22px;color:'+(cashPct>15?'var(--yellow)':'var(--cyan)')+'">'+cashPct.toFixed(1)+'%</div><div class="kpi-sub">Du total suivi</div></div>'+ 
+    '</div>'+
+    '<div class="card" style="margin-bottom:18px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em">💰 Liquidités par compte</div><div style="font-size:10px;color:var(--muted2)">Clique sur ✏️ pour mettre à jour le solde</div></div>'+ 
+      (S.accounts||[]).map(function(a){var row=cashRows.find(function(r){return r.account_id===a.id;}),bal=row?(Number(row.balance)||0):0,pct=totalAccountValue>0?bal/totalAccountValue*100:0;return '<div style="display:grid;grid-template-columns:minmax(160px,1fr) 90px 110px 38px;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border2)"><div><div style="font-weight:650;font-size:12px">'+a.name+'</div><div style="font-size:9px;color:var(--muted)">'+a.type+'</div></div><div style="font-size:10px;color:var(--muted);text-align:right">'+pct.toFixed(1)+'%</div><div class="mono" style="font-size:13px;font-weight:750;text-align:right">'+fE(bal)+'</div><button class="btn btn-ghost btn-sm" onclick="editCashBalance(&quot;'+a.id+'&quot;,'+bal+',&quot;'+String(a.name).replace(/&/g,'&amp;').replace(/"/g,'&quot;')+'&quot;)">✏️</button></div>';}).join('')+
+    '</div>'+
     // ── Réconciliation : versements + gains réalisés doivent couvrir le coût des
     // positions. Un écart signale des dépôts manquants (ou des frais/dividendes non saisis).
     (function(){
-      var cashImplicite=totalDeposited+totalRealized-totalCost;
-      if(Math.abs(cashImplicite)<25) return ''; // écart négligeable → rien à signaler
-      var manque=cashImplicite<0;
-      var col=manque?'#f59e0b':'#26C5DE';
+      var cashTheorique=totalDeposited+totalRealized-totalCost;
+      var cashGap=cashTheorique-totalCash;
+      if(Math.abs(cashGap)<25) return ''; // cohérent à ~25 € près
+      var col='#f59e0b';
       return '<div style="margin-bottom:20px;padding:12px 16px;background:'+col+'14;border:1px solid '+col+'44;border-radius:10px">'+
-        '<div style="font-size:12px;font-weight:700;color:'+col+';margin-bottom:6px">'+(manque?'⚠️ Écart de cohérence détecté':'💵 Liquidités non investies')+'</div>'+
+        '<div style="font-size:12px;font-weight:700;color:'+col+';margin-bottom:6px">⚠️ Écart de rapprochement cash</div>'+ 
         '<div style="font-size:12px;color:var(--muted);line-height:1.5">'+
-          'Coût de tes positions : <b style="color:var(--text)">'+fE(totalCost)+'</b> · '+
-          'Versements + gains réalisés : <b style="color:var(--text)">'+fE(totalDeposited+totalRealized)+'</b><br>'+
-          (manque
-            ? 'Il manque <b style="color:'+col+'">'+fE(Math.abs(cashImplicite))+'</b> : tu as acheté pour plus que ce que tu as déposé. Il te manque probablement des dépôts non enregistrés (ou des dividendes reçus). Ajoute-les pour que la plus-value totale soit exacte.'
-            : 'Il te reste <b style="color:'+col+'">'+fE(cashImplicite)+'</b> de liquidités non investies (non comptées dans « Valeur actuelle » qui ne montre que les positions ouvertes).')+
+          'Cash théorique issu des flux : <b style="color:var(--text)">'+fE(cashTheorique)+'</b> · Cash saisi : <b style="color:var(--text)">'+fE(totalCash)+'</b> · Écart : <b style="color:'+col+'">'+fE(Math.abs(cashGap))+'</b>.<br>'+ 
+          'Cet écart peut venir de dépôts/retraits manquants, dividendes, frais, intérêts ou d’un solde cash non mis à jour.'+
         '</div></div>';
     })()+
     '<div class="card" style="margin-bottom:16px">'+
@@ -6650,46 +6550,7 @@ async function deleteDeposit(id){
 }
 
 // ═══ PAGE LIQUIDITÉS ═══════════════════════════════════════════════════════
-async function renderLiquidity(){
-  var pg=document.getElementById('page');
-  pg.innerHTML='<h2 style="font-size:20px;font-weight:700;margin-bottom:20px">💰 Liquidités par compte</h2>'+
-    '<div style="text-align:center;padding:40px"><div class="spinner"></div></div>';
-
-  var cashRows=await dbGet('cash_balances','select=*,accounts(name,type)')||[];
-  var invested=S.enrichedPos.reduce(function(s,p){return s+(p.valueEur||0);},0);
-  var totalCash=cashRows.reduce(function(s,r){return s+r.balance;},0);
-  var totalPortfolio=invested+totalCash;
-  var cashPct=totalPortfolio>0?(totalCash/totalPortfolio*100):0;
-
-  // Comptes sans ligne cash_balances → ajouter avec 0
-  var acctIds=cashRows.map(function(r){return r.account_id;});
-  var missingAccts=S.accounts.filter(function(a){return !acctIds.includes(a.id);});
-
-  pg.innerHTML=
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">'+
-      '<h2 style="font-size:20px;font-weight:700">💰 Liquidités par compte</h2>'+
-    '</div>'+
-    '<div class="kpi-grid" style="margin-bottom:22px">'+
-      '<div class="kpi-card"><div class="kpi-label">Cash total</div><div class="kpi-value">'+fE(totalCash)+'</div><div class="kpi-sub">Non investi</div></div>'+
-      '<div class="kpi-card"><div class="kpi-label">Investi</div><div class="kpi-value">'+fE(invested)+'</div><div class="kpi-sub">Positions ouvertes</div></div>'+
-      '<div class="kpi-card"><div class="kpi-label">Total compte</div><div class="kpi-value">'+fE(totalPortfolio)+'</div><div class="kpi-sub">Cash + positions</div></div>'+
-      '<div class="kpi-card"><div class="kpi-label">% en cash</div><div class="kpi-value"><span style="color:var(--yellow)">'+cashPct.toFixed(1)+'%</span></div><div class="kpi-sub">Du portefeuille total</div></div>'+
-    '</div>'+
-    '<div class="card">'+
-      '<div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-bottom:14px">Solde cash par compte</div>'+
-      S.accounts.map(function(a){
-        var row=cashRows.find(function(r){return r.account_id===a.id;});
-        var bal=row?row.balance:0;
-        var pct=totalPortfolio>0?(bal/totalPortfolio*100).toFixed(1):'0';
-        return '<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border2)">'+
-          '<div style="flex:1"><div style="font-weight:600;font-size:13px">'+a.name+'</div>'+
-          '<div style="font-size:11px;color:var(--muted)">'+pct+'% du portefeuille</div></div>'+
-          '<div class="mono" style="font-size:16px;font-weight:700">'+fE(bal)+'</div>'+
-          '<button class="btn btn-ghost btn-sm" onclick="editCashBalance(&quot;'+a.id+'&quot;,'+bal+',&quot;'+a.name+'&quot;)">✏️</button>'+
-          '</div>';
-      }).join('')+
-    '</div>';
-}
+async function renderLiquidity(){ return renderDeposits(); }
 
 async function editCashBalance(acctId, current, acctName){
   var val=prompt('Solde cash sur '+acctName+' (€) :', current.toFixed(2));
@@ -6699,7 +6560,7 @@ async function editCashBalance(acctId, current, acctName){
   try{
     await dbUpsert('cash_balances',{account_id:acctId,balance:amount,updated_at:new Date().toISOString()},'account_id');
     showToast('✅ Solde mis à jour');
-    renderLiquidity();
+    renderDeposits();
   }catch(e){showToast('❌ '+e.message);}
 }
 
@@ -9379,7 +9240,7 @@ function renderCompare() {
 
   pg.innerHTML=
     '<div style="width:100%;box-sizing:border-box">'+
-    '<h2 style="font-size:18px;font-weight:700;margin:0 0 14px">📊 Comparer des entreprises</h2>'+
+    '<h2 style="font-size:18px;font-weight:700;margin:0 0 14px">⚖️ Comparatif d\'entreprises</h2>'+
     '<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px;width:100%;box-sizing:border-box">'+
       '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:'+(pfChips?'10px':'12px')+'">'+
         chips+
