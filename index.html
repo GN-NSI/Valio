@@ -3095,14 +3095,14 @@ async function renderCompanyDetail(ticker, name) {
     '</div>' +
     // Barre de sous-onglets en HAUT (plus besoin de descendre la page)
     '<div id="cd-tabbar" style="display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:20px;overflow-x:auto">'+
-      ['ensemble|📊 Vue d\'ensemble','ratios|📈 Ratios & prix','fin|📋 Historique financier','mat|🎯 Matrice','moat|🏰 MOAT & IA','analysts|🎯 Analystes','sector|🏭 Secteur'].map(function(t){var p=t.split('|');
+      ['ensemble|📊 Vue d\'ensemble','ratios|📈 Ratios & prix','fin|📋 Historique financier','mat|🎯 Matrice & DCF','moat|🏰 MOAT & IA','analysts|🎯 Analystes','sector|🏭 Secteur'].map(function(t){var p=t.split('|');
         return '<button id="cdtb-'+p[0]+'" onclick="showCdTab(\''+p[0]+'\')" style="padding:9px 16px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;white-space:nowrap;color:'+(p[0]==='ensemble'?'var(--text)':'var(--muted)')+';border-bottom:2px solid '+(p[0]==='ensemble'?'var(--blue)':'transparent')+';margin-bottom:-1px">'+p[1]+'</button>';
       }).join('')+'</div>' +
     '<div id="cd-content"><div style="text-align:center;padding:60px"><div class="spinner"></div> Chargement des données…</div></div>';
 
   // Get fundamentals (use cache if available)
   var f = S.fundamentals[ticker];
-  if (!f || f._v == null || f._v < 9) {  // v9 gate : thisYear (0y) nécessaire pour la matrice
+  if (!f || f._v == null || f._v < 11) {  // v11 gate : FY0/FY1 + révisions analystes + PE explicites
     try {
       var r = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=fundamentals', {signal:AbortSignal.timeout(15000)});
       var d = await r.json();
@@ -3812,8 +3812,8 @@ async function loadCdFinancials(ticker, price, chartPts, f) {
     '</div>' +
     '</div>' +
     '<div id="cdtab-mat" style="display:none">' +
-    '<h3 style="font-size:15px;font-weight:700;margin:4px 0 4px" id="cd-matrix-title">🎯 Matrice de rendement — 5 ans</h3>' +
-    '<p style="font-size:11px;color:var(--muted);margin:0 0 12px">Rendement annualisé selon croissance de l\u0027EPS × multiple de sortie. Clique une cellule pour choisir ton scénario — les hypothèses sont éditables.</p>' +
+    '<h3 style="font-size:15px;font-weight:700;margin:4px 0 4px" id="cd-matrix-title">🎯 Matrice de rendement & DCF — 5 ans</h3>' +
+    '<p style="font-size:11px;color:var(--muted);margin:0 0 12px">Rendement annualisé selon croissance de l\u0027EPS × multiple de sortie, puis contrôle croisé par DCF FCF. Clique une cellule pour choisir ton scénario — les hypothèses sont éditables.</p>' +
     '<div class="card" id="cd-yield-matrix"><div style="color:var(--muted);font-size:12px;padding:10px">Calcul…</div></div>' +
     '</div>' +
     '<div id="cdtab-moat" style="display:none"></div>' +
@@ -4780,7 +4780,7 @@ window.loadCdAnalysts = async function(ticker, price, f, forceReload){
   el.dataset.loaded = ''; // reset pour forcer rechargement si nouvelles données
   el.innerHTML = '<div style="text-align:center;padding:40px"><div class="spinner"></div></div>';
 
-  if(!f || f._v == null || f._v < 9 || f.targetMeanPrice === undefined) {
+  if(!f || f._v == null || f._v < 11 || f.targetMeanPrice === undefined) {
     try {
       var r = await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=fundamentals', {signal:AbortSignal.timeout(15000)});
       var d = await r.json();
@@ -4899,6 +4899,27 @@ window.loadCdAnalysts = async function(ticker, price, f, forceReload){
     '</div>';
   }
 
+  // Qualité / dispersion du consensus — utile pour ne pas traiter une cible moyenne comme une certitude
+  var fy1Top = f && f.analystEstimates && f.analystEstimates.currentYear;
+  var targetDisp = (mn!=null&&mn>0&&lo!=null&&hi!=null) ? (hi-lo)/mn*100 : null;
+  var epsDisp = (fy1Top&&fy1Top.epsAvg>0&&fy1Top.epsLow!=null&&fy1Top.epsHigh!=null) ? (fy1Top.epsHigh-fy1Top.epsLow)/fy1Top.epsAvg*100 : null;
+  var freshTxt = (f&&f.timestamp) ? new Date(f.timestamp).toLocaleString('fr-FR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '—';
+  function aKpi(label,value,sub,color){return '<div style="padding:10px 12px;border:1px solid var(--border2);border-radius:9px;background:rgba(255,255,255,.02)"><div style="font-size:9px;text-transform:uppercase;color:var(--muted2);font-weight:700;letter-spacing:.04em">'+label+'</div><div style="font-size:16px;font-weight:800;margin-top:4px;color:'+(color||'var(--text)')+'">'+value+'</div><div style="font-size:9px;color:var(--muted);margin-top:3px">'+sub+'</div></div>';}
+  var analystAuditHtml='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px;margin-top:14px">'+
+    aKpi('Upside cible moyenne',upside==null?'—':(upside>=0?'+':'')+upside.toFixed(1)+'%','cours actuel → cible moyenne',upside==null?'var(--muted)':upside>=0?'var(--green)':'var(--red)')+
+    aKpi('Dispersion objectifs',targetDisp==null?'—':targetDisp.toFixed(1)+'%','(haut − bas) / moyenne · plus bas = consensus plus serré')+
+    aKpi('Dispersion EPS FY1',epsDisp==null?'—':epsDisp.toFixed(1)+'%','fourchette EPS analystes / moyenne FY1')+
+    aKpi('Analystes',f&&f.analystCount!=null?f.analystCount:'—','opinions Yahoo · maj '+freshTxt)+
+    '</div>';
+  var rb=f&&f.recommendationBreakdown, recDistHtml='';
+  if(rb){
+    var rtot=(rb.strongBuy||0)+(rb.buy||0)+(rb.hold||0)+(rb.sell||0)+(rb.strongSell||0);
+    if(rtot>0){
+      var rparts=[['Achat fort',rb.strongBuy||0,'#166534'],['Achat',rb.buy||0,'#22c55e'],['Neutre',rb.hold||0,'#f59e0b'],['Vente',rb.sell||0,'#f97316'],['Vente forte',rb.strongSell||0,'#991b1b']];
+      recDistHtml='<div style="margin-top:14px"><div style="font-size:10px;color:var(--muted);margin-bottom:6px">Répartition des recommandations ('+rtot+')</div><div style="display:flex;height:9px;border-radius:999px;overflow:hidden;background:var(--border2)">'+rparts.map(function(x){return x[1]?'<div title="'+x[0]+' : '+x[1]+'" style="width:'+(x[1]/rtot*100)+'%;background:'+x[2]+'"></div>':'';}).join('')+'</div><div style="display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:7px">'+rparts.map(function(x){return '<span style="font-size:9px;color:var(--muted)"><b style="color:'+x[2]+'">'+x[1]+'</b> '+x[0]+'</span>';}).join('')+'</div></div>';
+    }
+  }
+
   var consensusHtml = '<div class="card" style="margin-bottom:16px">' +
     '<div style="font-size:15px;font-weight:700;margin-bottom:16px">\ud83c\udfaf Consensus analystes' +
       (f&&f.analystCount ? ' <span style="font-size:12px;font-weight:400;color:var(--muted)">'+f.analystCount+' analystes</span>' : '') +
@@ -4914,7 +4935,7 @@ window.loadCdAnalysts = async function(ticker, price, f, forceReload){
         '</div>' +
       '</div>' +
       '<div>' + barHtml + '</div>' +
-    '</div>' +
+    '</div>' + analystAuditHtml + recDistHtml +
   '</div>';
 
   // ══ RÉSULTATS RÉELS (fiscal + glissant + dernier trim.) & ESTIMATIONS ══════
@@ -5116,7 +5137,23 @@ window.loadCdAnalysts = async function(ticker, price, f, forceReload){
     '<div style="font-size:10px;color:var(--muted);margin-top:12px">R\u00e9sultats r\u00e9els = Yahoo Finance GAAP. Estimations = consensus analystes non-GAAP. La croissance des estimations utilise la croissance Yahoo (non-GAAP vs non-GAAP) pour rester coh\u00e9rente \u2014 ne pas comparer au GAAP.</div>' +
   '</div>';
 
-  el.innerHTML = consensusHtml + epsHtml;
+  function revisionLine(label,e){
+    if(!e) return '';
+    var curE=e.epsTrendCurrent!=null?e.epsTrendCurrent:e.epsAvg;
+    var oldE=e.epsTrend30d;
+    var delta=(curE!=null&&oldE!=null&&oldE!==0)?(curE/oldE-1)*100:null;
+    var up=e.epsUp30d, down=e.epsDown30d;
+    if(delta==null&&up==null&&down==null) return '';
+    return '<div style="display:grid;grid-template-columns:minmax(130px,1fr) 110px 110px 130px;gap:10px;align-items:center;padding:9px 0;border-top:1px solid var(--border2)">'+
+      '<div><b>'+label+'</b><div style="font-size:9px;color:var(--muted)">révision EPS sur 30 jours</div></div>'+
+      '<div class="mono" style="text-align:right">'+(oldE!=null?cur+fN(oldE):'—')+' → '+(curE!=null?cur+fN(curE):'—')+'</div>'+
+      '<div class="mono" style="text-align:right;font-weight:800;color:'+(delta==null?'var(--muted)':delta>=0?'var(--green)':'var(--red)')+'">'+(delta==null?'—':(delta>=0?'+':'')+delta.toFixed(1)+'%')+'</div>'+
+      '<div style="text-align:right;font-size:10px"><span style="color:var(--green)">↑ '+(up==null?'—':up)+'</span> · <span style="color:var(--red)">↓ '+(down==null?'—':down)+'</span></div></div>';
+  }
+  var revRows=revisionLine('Exercice en cours',f&&f.analystEstimates&&f.analystEstimates.thisYear)+revisionLine('Exercice suivant',f&&f.analystEstimates&&f.analystEstimates.currentYear);
+  var revisionsHtml=revRows?'<div class="card" style="margin-top:16px"><div style="font-size:15px;font-weight:700">↗ Révisions du consensus</div><div style="font-size:10px;color:var(--muted);margin:4px 0 8px">Évolution de l\'EPS moyen attendu sur 30 jours. Les flèches indiquent le nombre de révisions à la hausse / à la baisse remontées par Yahoo.</div>'+revRows+'</div>':'';
+
+  el.innerHTML = consensusHtml + epsHtml + revisionsHtml;
   el.dataset.loaded = ticker;
 };
 
@@ -5457,6 +5494,22 @@ function _medianPE5y(fin, chartPts){
   return pers.length%2 ? pers[m] : (pers[m-1]+pers[m])/2;
 }
 
+function _valuationSectorKey(f){
+  var s=((f&&f.sector)||'').toLowerCase();
+  if(s.includes('technology')) return 'Technology';
+  if(s.includes('communication')) return 'Communication Services';
+  if(s.includes('consumer cyclical')||s.includes('consumer discretionary')) return 'Consumer Discretionary';
+  if(s.includes('consumer defensive')||s.includes('consumer staples')) return 'Consumer Staples';
+  if(s.includes('health')) return 'Healthcare';
+  if(s.includes('financial')) return 'Financials';
+  if(s.includes('industrial')) return 'Industrials';
+  if(s.includes('basic material')||s==='materials'||s.includes('material')) return 'Materials';
+  if(s.includes('energy')) return 'Energy';
+  if(s.includes('utilit')) return 'Utilities';
+  if(s.includes('real estate')) return 'Real Estate';
+  return (f&&f.sector)||'Other';
+}
+
 function estimateExitMultiple(f, gC, medianPE) {
   if(!f) return 22;
 
@@ -5474,7 +5527,7 @@ function estimateExitMultiple(f, gC, medianPE) {
     'Utilities':              14,
     'Real Estate':            17,
   };
-  var sector = f.sector || '';
+  var sector = _valuationSectorKey(f);
   var industry = (f.industry || '').toLowerCase();
   var base = sectorBases[sector] || 18;
 
@@ -5670,8 +5723,9 @@ function _safetyMarginHtml(ticker, price, eps0, f, fin, cSym, exitMult, medianPE
   if(!(price>0)) return '';
   var path=_epsPath3y(f, eps0);
   if(!path) return '';
-  var H=3, tx=(tauxExige!=null&&tauxExige>0)?tauxExige:15;
-  var prixFutur=path.eps3*exitMult;
+  var H=Math.max(1,(path.growths&&path.growths.length)||3), tx=(tauxExige!=null&&tauxExige>0)?tauxExige:15;
+  var verdictExitMult=estimateExitMultiple(f,path.growths&&path.growths.length?path.growths[0]:12,medianPE);
+  var prixFutur=path.eps3*verdictExitMult;
   var prixJuste=prixFutur/Math.pow(1+tx/100,H);
   var marge=(prixJuste-price)/prixJuste*100;
   // Rendement annualisé implicite AU COURS ACTUEL
@@ -5690,7 +5744,7 @@ function _safetyMarginHtml(ticker, price, eps0, f, fin, cSym, exitMult, medianPE
   if(medianPE!=null) anc.push({l:'Médiane 5 ans',v:medianPE});
   anc.push({l:'Modèle sectoriel',v:estimateExitMultiple(f,path.growths[0],null)});
   var ancHtml=anc.map(function(a){
-    var used=Math.abs(a.v-exitMult)<0.6;
+    var used=Math.abs(a.v-verdictExitMult)<0.6;
     return '<span style="font-size:10px;padding:2px 7px;border-radius:5px;'+
       (used?'background:'+col+'28;color:'+col+';font-weight:700':'background:var(--border2);color:var(--muted)')+'">'+
       a.l+' '+a.v.toFixed(1)+'x'+(used?' ✓':'')+'</span>';
@@ -5718,16 +5772,16 @@ function _safetyMarginHtml(ticker, price, eps0, f, fin, cSym, exitMult, medianPE
         '<div style="font-size:10px;color:var(--muted)">Cours actuel</div>'+
         '<div style="font-size:16px;font-weight:800" class="mono">'+cSym+fN(price)+'</div></div>'+
       '<div style="background:rgba(255,255,255,.04);border-radius:8px;padding:9px 11px">'+
-        '<div style="font-size:10px;color:var(--muted)">EPS base → 3 ans</div>'+
+        '<div style="font-size:10px;color:var(--muted)">EPS base → +'+H+' ans</div>'+
         '<div style="font-size:15px;font-weight:700" class="mono">'+cSym+fN(path.epsBase)+' → '+cSym+fN(path.eps3)+'</div></div>'+
       '<div style="background:rgba(255,255,255,.04);border-radius:8px;padding:9px 11px">'+
         '<div style="font-size:10px;color:var(--muted)">Multiple de sortie retenu</div>'+
-        '<div style="font-size:16px;font-weight:800" class="mono">'+exitMult.toFixed(1)+'x</div></div>'+
+        '<div style="font-size:16px;font-weight:800" class="mono">'+verdictExitMult.toFixed(1)+'x</div></div>'+
     '</div>'+
     '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Ancrages du multiple (le <b>plus bas</b> est retenu) : '+ancHtml+'</div>'+
     '<div style="font-size:10px;color:var(--muted2);line-height:1.5">'+
       (path.baseSrc==='manuel'?'<b style="color:#00E676">Base : tes résultats non-GAAP FY'+path.baseYear+'</b>':'Base : consensus FY'+path.baseYear)+' → FY'+path.targetYear+' · croissance '+path.g1src+' puis fade ×'+path.fade.toFixed(2)+' : '+gTxt+' · '+
-      'Prix juste = EPS 3 ans × multiple ÷ (1+'+tx+'%)³. Hors dividendes. '+
+      'Prix juste = EPS projeté × multiple ÷ (1+'+tx+'%)^'+H+'. Hors dividendes. '+
       'Une marge positive signifie que le cours actuel permet d\'atteindre '+tx+' %/an même avec ces hypothèses prudentes.'+
     '</div>'+
   '</div>';
@@ -5818,6 +5872,85 @@ function _perProjeteHtml(ticker, price, eps0, f, fin, cSym){
   '</div>';
 }
 
+var _dcfState={};
+function _dcfLastNN(arr){if(!arr)return null;for(var i=arr.length-1;i>=0;i--){if(arr[i]!=null&&isFinite(arr[i]))return arr[i];}return null;}
+function _dcfHistCagr(fin){
+  var a=(fin&&fin.freeCF)||[], vals=[];
+  a.forEach(function(v,i){if(v!=null&&v>0)vals.push({i:i,v:v});});
+  if(vals.length<2)return null;
+  var fst=vals[0],lst=vals[vals.length-1],n=Math.max(1,lst.i-fst.i);
+  var g=(Math.pow(lst.v/fst.v,1/n)-1)*100;
+  return isFinite(g)?g:null;
+}
+function _dcfValue(fcfps,g,r,gt,n){
+  n=n||5; g=g/100;r=r/100;gt=gt/100;
+  if(!(fcfps>0)||r<=gt) return null;
+  var pv=0,cf=fcfps;
+  for(var i=1;i<=n;i++){cf*=1+g;pv+=cf/Math.pow(1+r,i);}
+  var tv=cf*(1+gt)/(r-gt);
+  pv+=tv/Math.pow(1+r,n);
+  return {fair:pv,terminal:tv/Math.pow(1+r,n),fcf5:cf};
+}
+function _dcfImpliedReturn(price,fcfps,g,gt,n){
+  if(!(price>0&&fcfps>0))return null;
+  var lo=Math.max(gt/100+0.001,0.005),hi=1.5;
+  function pv(rate){var x=_dcfValue(fcfps,g,rate*100,gt,n);return x?x.fair:null;}
+  var vlo=pv(lo),vhi=pv(hi); if(vlo==null||vhi==null||price>vlo||price<vhi)return null;
+  for(var i=0;i<70;i++){var mid=(lo+hi)/2,vm=pv(mid);if(vm>price)lo=mid;else hi=mid;}
+  return (lo+hi)/2*100;
+}
+function _dcfHtml(ticker,price,f,fin,cSym){
+  if(!(price>0))return '';
+  var st=_dcfState[ticker]||{};
+  var shares=f&&f.sharesOutstanding;
+  var fcfRaw=f&&f.freeCashflow;
+  var fcfps=(fcfRaw>0&&shares>0)?fcfRaw/shares:null;
+  var fcfSrc='Yahoo FCF TTM';
+  if(!(fcfps>0)){
+    var ann=_dcfLastNN(fin&&fin.freeCF);
+    if(ann>0&&shares>0){fcfps=ann*1e9/shares;fcfSrc='dernier FCF annuel';}
+  }
+  if(!(fcfps>0))return '<div style="margin:16px 0;padding:14px 16px;border:1px solid var(--border);border-radius:10px;color:var(--muted)"><b style="color:var(--text)">💵 DCF FCF</b> — FCF/share indisponible ou négatif : le DCF simplifié n’est pas pertinent ici.</div>';
+  var hist=_dcfHistCagr(fin), g5=(f&&f.epsGrowthFwd5Y!=null&&f.epsGrowthFwd5Y>0)?f.epsGrowthFwd5Y:null;
+  var defG=g5!=null?Math.min(35,g5):(hist!=null?Math.max(0,Math.min(30,hist)):(f&&f.revenueGrowthFwd1Y!=null?Math.max(0,Math.min(25,f.revenueGrowthFwd1Y)):10));
+  var g=st.g!=null?st.g:Math.round(defG*10)/10;
+  var r=st.r!=null?st.r:15;
+  var gt=st.gt!=null?st.gt:3;
+  var base=st.fcfps!=null?st.fcfps:fcfps;
+  var val=_dcfValue(base,g,r,gt,5); if(!val)return '';
+  var upside=(val.fair/price-1)*100, irr=_dcfImpliedReturn(price,base,g,gt,5);
+  var terminalPct=val.fair>0?val.terminal/val.fair*100:null;
+  var warnTerminal=terminalPct!=null&&terminalPct>75;
+  var group=_valuationSectorKey(f), finWarn=group==='Financials';
+  function col(v){return v>=20?'#16a34a':v>=0?'#22c55e':v>=-20?'#f59e0b':'#ef4444';}
+  function sens(rate,tg){var x=_dcfValue(base,g,rate,tg,5);return x?x.fair:null;}
+  var rates=[Math.max(gt+1,r-4),Math.max(gt+1,r-2),r,r+2,r+4];
+  var tgs=[Math.max(0,gt-1),Math.max(0,gt-.5),gt,Math.min(5,gt+.5),Math.min(5,gt+1)];
+  var table='<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:10px" class="mono"><tr><th style="padding:5px 7px;color:var(--muted)">r \\ g∞</th>'+tgs.map(function(x){return '<th style="padding:5px 7px;color:var(--muted)">'+x.toFixed(1)+'%</th>';}).join('')+'</tr>'+rates.map(function(rr){return '<tr><td style="padding:5px 7px;color:var(--muted);font-weight:700">'+rr.toFixed(1)+'%</td>'+tgs.map(function(tg){var fv=sens(rr,tg),u=fv?(fv/price-1)*100:null;return '<td style="padding:5px 7px;text-align:right;color:'+(u==null?'var(--muted)':col(u))+';background:'+(Math.abs(rr-r)<.1&&Math.abs(tg-gt)<.1?'rgba(99,75,228,.12)':'transparent')+'">'+(fv?cSym+fN(fv):'—')+'</td>';}).join('')+'</tr>';}).join('')+'</table></div>';
+  var t=ticker.replace(/'/g,"\\'");
+  return '<div style="margin:18px 0;padding:16px 18px;border:1px solid rgba(38,197,222,.28);border-radius:12px;background:linear-gradient(135deg,rgba(38,197,222,.06),rgba(99,75,228,.05))">'+
+    '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px"><div><div style="font-size:14px;font-weight:800">💵 DCF simplifié — Free Cash Flow par action</div><div style="font-size:10px;color:var(--muted);margin-top:3px">5 ans de croissance explicite + valeur terminale Gordon. Un seul scénario éditable, séparé de la matrice P/E.</div></div><div style="text-align:right"><div style="font-size:9px;color:var(--muted)">Valeur intrinsèque</div><div style="font-size:22px;font-weight:900;color:'+col(upside)+'" class="mono">'+cSym+fN(val.fair)+'</div><div style="font-size:10px;color:'+col(upside)+'">'+(upside>=0?'+':'')+upside.toFixed(1)+'% vs cours</div></div></div>'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:8px;margin-bottom:12px">'+
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">FCF/action base</div><div class="mono" style="font-size:15px;font-weight:800">'+cSym+fN(base)+'</div><div style="font-size:8px;color:var(--muted2)">'+fcfSrc+'</div></div>'+
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Croissance FCF 5 ans</div><div class="mono" style="font-size:15px;font-weight:800">'+g.toFixed(1)+'%</div><div style="font-size:8px;color:var(--muted2)">'+(g5!=null?'proxy consensus EPS 5 ans':hist!=null?'CAGR FCF historique':'proxy croissance')+'</div></div>'+
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Taux exigé</div><div class="mono" style="font-size:15px;font-weight:800">'+r.toFixed(1)+'%</div><div style="font-size:8px;color:var(--muted2)">actualisation des FCF</div></div>'+
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Croissance terminale</div><div class="mono" style="font-size:15px;font-weight:800">'+gt.toFixed(1)+'%</div><div style="font-size:8px;color:var(--muted2)">Gordon à partir de l’an 6</div></div>'+
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Rendement implicite</div><div class="mono" style="font-size:15px;font-weight:800;color:'+(irr!=null&&irr>=15?'var(--green)':irr!=null&&irr>=10?'var(--yellow)':'var(--red)')+'">'+(irr==null?'—':irr.toFixed(1)+'%/an')+'</div><div style="font-size:8px;color:var(--muted2)">IRR qui ramène le DCF au cours</div></div>'+
+    '</div>'+
+    '<div style="display:flex;gap:9px;align-items:end;flex-wrap:wrap;margin-bottom:12px;padding:10px;background:rgba(255,255,255,.025);border-radius:9px">'+
+      '<div><label style="font-size:8px;color:var(--muted)">FCF/ACTION</label><br><input id="dcf-fcf" class="form-input mono" style="width:92px;padding:5px" value="'+base.toFixed(2)+'"></div>'+
+      '<div><label style="font-size:8px;color:var(--muted)">CROISS. 5A %</label><br><input id="dcf-g" class="form-input mono" style="width:82px;padding:5px" value="'+g.toFixed(1)+'"></div>'+
+      '<div><label style="font-size:8px;color:var(--muted)">TAUX EXIGÉ %</label><br><input id="dcf-r" class="form-input mono" style="width:82px;padding:5px" value="'+r.toFixed(1)+'"></div>'+
+      '<div><label style="font-size:8px;color:var(--muted)">G TERMINAL %</label><br><input id="dcf-gt" class="form-input mono" style="width:82px;padding:5px" value="'+gt.toFixed(1)+'"></div>'+
+      '<button class="btn btn-ghost btn-sm" onclick="_dcfApply(\''+t+'\')">Appliquer</button><button class="btn btn-ghost btn-sm" onclick="_dcfReset(\''+t+'\')">↺ Auto</button>'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:minmax(260px,.8fr) minmax(420px,1.2fr);gap:16px;align-items:start"><div><div style="font-size:10px;color:var(--muted);line-height:1.55">DCF = somme des FCF/action actualisés sur 5 ans + valeur terminale. Valeur terminale = FCF₅ × (1+g∞)/(r−g∞). '+(warnTerminal?'<b style="color:var(--yellow)">⚠ '+terminalPct.toFixed(0)+'% de la valeur vient du terminal : hypothèse très sensible.</b>':'Part terminale : '+terminalPct.toFixed(0)+'%.')+(finWarn?'<br><b style="color:var(--yellow)">⚠ Pour banques/assureurs, le FCF classique est peu pertinent : privilégier multiples/ROE.</b>':'')+'</div></div><div><div style="font-size:10px;color:var(--muted);margin-bottom:5px">Sensibilité — valeur intrinsèque par taux exigé / croissance terminale</div>'+table+'</div></div>'+
+    '</div>';
+}
+window._dcfApply=function(ticker){function v(id){var x=parseFloat((document.getElementById(id)?.value||'').replace(',','.'));return isFinite(x)?x:null;}var st=_dcfState[ticker]||{},a=v('dcf-fcf'),g=v('dcf-g'),r=v('dcf-r'),gt=v('dcf-gt');if(a>0)st.fcfps=a;if(g!=null)st.g=Math.max(-30,Math.min(80,g));if(r!=null)st.r=Math.max(4,Math.min(50,r));if(gt!=null)st.gt=Math.max(0,Math.min(6,gt));if(st.r<=st.gt+.5)st.r=st.gt+.5;_dcfState[ticker]=st;_dcfRerender(ticker);};
+window._dcfReset=function(ticker){delete _dcfState[ticker];_dcfRerender(ticker);};
+function _dcfRerender(ticker){var f=(S.fundamentals&&S.fundamentals[ticker])||null,price=window._cdLastNativePrice||(S.prices[ticker]&&S.prices[ticker].price);renderYieldMatrix(ticker,price,f,window._cdLastFin||{eps:[],freeCF:[]});}
+
 function renderYieldMatrix(ticker, price, f, fin){
   var el=document.getElementById('cd-yield-matrix'); if(!el) return;
   function lastNN(arr){ if(!arr)return null; for(var i=arr.length-1;i>=0;i--){ if(arr[i]!=null) return arr[i]; } return null; }
@@ -5884,7 +6017,7 @@ function renderYieldMatrix(ticker, price, f, fin){
   if(gRows.indexOf(sel.g)<0) sel.g=gC; if(mCols.indexOf(sel.m)<0) sel.m=mCur;
 
   function annRet(g,m){ return (Math.pow((eps0*Math.pow(1+g/100,N)*m)/price,1/N)-1)*100; }
-  function cellColor(r){ return r<8?'#ef4444':r<12?'#f59e0b':'#22c55e'; }
+  function cellColor(r){ return r<Math.max(0,rC-3)?'#ef4444':r<rC?'#f59e0b':'#22c55e'; }
   var selRet=annRet(sel.g,sel.m);
   var fair=eps0*Math.pow(1+sel.g/100,N)*sel.m/Math.pow(1+rC/100,N);
   var marge=(1-price/fair)*100;
@@ -5904,7 +6037,7 @@ function renderYieldMatrix(ticker, price, f, fin){
         '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Mon sc\u00e9nario \u2014 rendement '+N+' ans</div><div style="font-size:20px;font-weight:800;color:'+cellColor(selRet)+'" class="mono">'+selRet.toFixed(2)+' %/an</div></div>'+
         '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Mon sc\u00e9nario \u2014 marge</div><div style="font-size:20px;font-weight:800;color:'+(marge>=0?'#22c55e':'#f59e0b')+'" class="mono">'+(marge>=0?'+':'')+marge.toFixed(2)+' %</div></div>'+
       '</div>'+
-    '</div>'+
+    '</div>'+ peRefs +
     '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin-bottom:14px;padding:10px;background:var(--bg2,rgba(255,255,255,.02));border-radius:8px">'+
       '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">EPS de base ('+cSym+')</label><br><input id="ym-eps" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+eps0.toFixed(2)+'"></div>'+
       '<div><label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Croissance centrale %</label><br><input id="ym-g" class="form-input mono" style="width:90px;padding:5px 8px;font-size:12px" value="'+gC+'"></div>'+
@@ -5913,9 +6046,10 @@ function renderYieldMatrix(ticker, price, f, fin){
       '<button class="btn btn-ghost btn-sm" onclick="window._ymApply(\''+tName+'\')">Appliquer</button>'+
       '<button class="btn btn-ghost btn-sm" onclick="window._ymReset(\''+tName+'\')" title="Revenir au consensus analystes">\u21ba Consensus</button>'+
       '<button class="btn btn-ghost btn-sm" onclick="window._ymDetail(\''+tName+'\','+gC+')" title="Voir le détail du calcul du multiple">🔍 Calcul</button>'+
-      '<span style="font-size:10px;color:var(--muted2)">\u26a0\ufe0f Ces 4 champs = TON sc\u00e9nario \u00e9ditable. Le bloc VERDICT ci-dessous est ind\u00e9pendant : consensus analystes sur 3 ans, sans tes modifications \u2014 c\u2019est lui qui alimente le score /100.</span>'+
+      '<span style="font-size:10px;color:var(--muted2)">\u26a0\ufe0f Ces 4 champs = TON sc\u00e9nario \u00e9ditable. Le bloc VERDICT ci-dessous est ind\u00e9pendant : trajectoire consensus ≈3 ans, sans tes modifications \u2014 c\u2019est lui qui alimente le score /100.</span>'+
     '</div>'+
     _safetyMarginHtml(ticker, price, eps0, f, fin, cSym, mCur, _medPE, rC) +
+    _dcfHtml(ticker, price, f, fin, cSym) +
     _perProjeteHtml(ticker, price, eps0, f, fin, cSym) +
     '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:11px;white-space:nowrap" class="mono">'+
     '<tr><th style="padding:5px 8px;color:var(--muted);font-size:9px;text-align:left">CROISS. \\ MULT.</th>'+
@@ -5927,7 +6061,7 @@ function renderYieldMatrix(ticker, price, f, fin){
           return '<td onclick="window._ymPick(\''+tName+'\','+g+','+m+')" style="padding:5px 8px;text-align:right;cursor:pointer;color:'+cellColor(r)+';'+(isSel?'outline:1.5px solid #634BE4;border-radius:4px;font-weight:800;':'')+(m===mCur?'background:rgba(99,75,228,.07);':'')+'">'+r.toFixed(2)+'%</td>';
         }).join('')+'</tr>';
     }).join('')+'</table></div>'+
-    '<div style="font-size:10px;color:var(--muted2);margin-top:10px">Sc\u00e9nario\u00a0: EPS +'+sel.g+' %/an \u00d7 multiple '+sel.m+'x \u00b7 EPS base '+eps0.toFixed(2)+' '+cSym+' \u00b7 horizon '+N+' ans. EPS projet\u00e9 '+N+' ans, valoaris\u00e9 au multiple de sortie, hors dividendes/rachats. Vert \u2265 12\u00a0%/an \u00b7 Orange 8\u201312\u00a0% \u00b7 Rouge < 8\u00a0%.'+(N===10?' \u26a0\ufe0f Pour 10 ans\u00a0: ajuster la croissance vers un rythme soutenable (\u00bd du consensus court terme est souvent plus r\u00e9aliste).':'')+'</div>';
+    '<div style="font-size:10px;color:var(--muted2);margin-top:10px">Sc\u00e9nario\u00a0: EPS +'+sel.g+' %/an \u00d7 multiple '+sel.m+'x \u00b7 EPS base '+eps0.toFixed(2)+' '+cSym+' \u00b7 horizon '+N+' ans. EPS projet\u00e9 '+N+' ans, valoris\u00e9 au multiple de sortie, hors dividendes/rachats. Vert \u2265 cible '+rC+'%/an \u00b7 Orange dans les 3 points sous la cible \u00b7 Rouge au-del\u00e0.'+(N===10?' \u26a0\ufe0f Pour 10 ans\u00a0: ajuster la croissance vers un rythme soutenable (\u00bd du consensus court terme est souvent plus r\u00e9aliste).':'')+'</div>';
   el.innerHTML=html;
 }
 window._ymSetN=function(ticker,n){ var st=_ymSel[ticker]||{}; st.n=n; _ymSel[ticker]=st; window._ymRerender(ticker); };
@@ -5939,7 +6073,7 @@ window._ymApply=function(ticker){
   if(g!=null) st.gC=Math.round(Math.min(60,Math.max(2,g)));
   if(m!=null){ st.mC=Math.round(Math.min(120,Math.max(5,m))); st.mManual=true; }
   if(r!=null) st.r=Math.min(50,Math.max(1,r));
-  st.g=st.gC; st.m=st.mC||st.g; _ymSel[ticker]=st;
+  st.g=st.gC; if(st.mC!=null) st.m=st.mC; _ymSel[ticker]=st;
   window._ymRerender(ticker);
 };
 window._ymReset=function(ticker){ delete _ymSel[ticker]; window._ymRerender(ticker); };
@@ -5956,7 +6090,7 @@ window._ymPick=function(ticker,g,m){ var st=_ymSel[ticker]||{}; st.g=g; st.m=m; 
 window._ymDetail=function(ticker, gC){
   var f=(S.fundamentals&&S.fundamentals[ticker])||null;
   if(!f){showToast('Données insuffisantes');return;}
-  var sector=f.sector||'—';
+  var sector=_valuationSectorKey(f);
   var sectorBases={'Technology':27,'Communication Services':22,'Consumer Discretionary':20,'Consumer Staples':18,'Healthcare':21,'Financials':14,'Industrials':18,'Materials':14,'Energy':11,'Utilities':14,'Real Estate':17};
   var sectorBase=sectorBases[sector]||18;
   var industry=(f.industry||'').toLowerCase();
@@ -5999,7 +6133,7 @@ window._ymDetail=function(ticker, gC){
       '<td style="padding:10px 8px;font-size:11px;color:var(--muted)">avant ancrage P/E actuel</td>'+
     '</tr>'+
     '<tr style="border-bottom:1px solid var(--border2)">'+
-      '<td style="padding:8px">P/E actuel fwd ('+( f.forwardPE?'calculé':'trailing')+')</td>'+
+      '<td style="padding:8px">P/E FY1 / forward ('+( f.forwardPE?'consensus':'trailing')+')</td>'+
       '<td style="padding:8px;text-align:right;font-weight:700">'+curPE.toFixed(1)+'x</td>'+
       '<td style="padding:8px;font-size:11px;color:var(--muted)">'+blendNote+'</td>'+
     '</tr>'+
