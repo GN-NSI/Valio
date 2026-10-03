@@ -95,6 +95,18 @@ nav{flex:1;padding:10px 8px;overflow-y:auto}
 .repartition-chart-wrap{position:relative;height:260px;min-height:260px;margin:0}
 .repartition-chart-wrap canvas{position:absolute;inset:0}
 .repartition-legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 12px;align-content:start;max-height:260px;overflow-y:auto;padding:4px 2px}
+.perf-side-box{border:1px solid rgba(99,75,228,.28);background:linear-gradient(180deg,rgba(99,75,228,.10),rgba(38,197,222,.05));border-radius:12px;padding:12px 14px;margin-bottom:10px;cursor:pointer;transition:all .16s ease}
+.perf-side-box:hover{transform:translateY(-1px);box-shadow:0 10px 26px rgba(99,75,228,.18);border-color:rgba(38,197,222,.32)}
+.perf-side-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.perf-side-title{font-size:12px;font-weight:700;color:#d9dbff}
+.perf-side-sub{font-size:10px;color:var(--muted)}
+.perf-side-grid{display:grid;grid-template-columns:1fr;gap:8px}
+.perf-side-line{display:grid;grid-template-columns:68px 1fr auto;gap:8px;align-items:center;font-size:12px}
+.perf-side-line .lab{color:var(--muted)}
+.perf-side-line .pct{font-weight:700}
+.perf-side-line .eur{font-weight:700;text-align:right}
+.legend-divider{height:1px;background:rgba(255,255,255,.06);margin:8px 0 10px}
+.legend-chip-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(138px,1fr));gap:8px 12px}
 .breadcrumb{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;flex-wrap:wrap;min-height:18px;margin-top:6px}
 .bc-link{cursor:pointer;color:var(--blue);text-decoration:underline}.bc-sep{color:var(--muted2)}
 .right-panel{display:flex;flex-direction:column;gap:12px}
@@ -427,9 +439,12 @@ const BRAND={
   AAPL:'#6b7280',       // Apple gris
   'BESI.AS':'#d97706',BESI:'#d97706', // BESI ambre
   'SMSN.L':'#1428a0',SMSN:'#1428a0', // Samsung bleu marine profond
-  ATEYY:'#e11d48',      // Advantest rose-rouge (distinct du rouge TSMC)
+  ATEYY:'#e11d48',ADVANTEST:'#e11d48',      // Advantest rose-rouge (distinct du rouge TSMC)
   NVTS:'#06b6d4',       // Navitas cyan
   VRT:'#16a34a',        // Vertiv vert sombre (distinct du vert NVDA)
+  SKHYNIX:'#0ea5a8','000660.KS':'#0ea5a8',SMNG:'#14b8a6',PENG:'#14b8a6', // mémoire / Penguin : teal
+  LYFT:'#2563eb',ORCL:'#ec4899',APP:'#64748b',FICO:'#22c55e',NBIS:'#f472b6',ADYEN:'#f59e0b',
+  HESAF:'#f97316',HESAY:'#f97316','RMS.PA':'#f97316',AXT:'#fb7185',
   V:'#1e3a8a',          // Visa bleu très sombre
   MA:'#dc2626',         // Mastercard rouge
   JPM:'#1d4ed8',        // JP Morgan bleu classique
@@ -442,6 +457,32 @@ const BRAND={
 };
 const PALETTE=['#634BE4','#8b5cf6','#22c55e','#f59e0b','#ef4444','#06b6d4','#ec4899','#f97316','#10b981','#a78bfa','#64748b','#34d399','#f472b6','#60a5fa','#fbbf24'];
 function tickerColor(t,i){return BRAND[t]||PALETTE[i%PALETTE.length];}
+function _hexRgb(hex){
+  var h=(hex||'').replace('#',''); if(h.length===3) h=h.split('').map(function(c){return c+c;}).join('');
+  var n=parseInt(h,16); if(!isFinite(n)) return {r:0,g:0,b:0};
+  return {r:(n>>16)&255,g:(n>>8)&255,b:n&255};
+}
+function _colorDistance(a,b){
+  var x=_hexRgb(a), y=_hexRgb(b);
+  return Math.sqrt(Math.pow(x.r-y.r,2)+Math.pow(x.g-y.g,2)+Math.pow(x.b-y.b,2));
+}
+function _spreadAdjacentColors(labels, colors){
+  var pool=[].concat(colors||[], PALETTE, ['#00b4d8','#1d4ed8','#14b8a6','#f43f5e','#84cc16','#fb7185','#38bdf8']);
+  var used=[];
+  return (colors||[]).map(function(c,i){
+    var cand=c||PALETTE[i%PALETTE.length];
+    var prev=used[i-1]||null;
+    var ok=(!prev || _colorDistance(cand,prev)>=85) && used.indexOf(cand)===-1;
+    if(ok){ used.push(cand); return cand; }
+    for(var k=0;k<pool.length;k++){
+      var p=pool[(i+k)%pool.length];
+      if(used.indexOf(p)!==-1) continue;
+      if(prev && _colorDistance(p,prev)<85) continue;
+      cand=p; break;
+    }
+    used.push(cand); return cand;
+  });
+}
 
 // ═══ OVERRIDES MANUELS (pays/secteur pour tickers exotiques) ═══
 // FMP peut retourner le pays de la cotation (ex: SMSN.L → GB) au lieu du pays de l'entreprise (KR)
@@ -1476,7 +1517,7 @@ function updateKPIs(pos){
 
   const el=document.getElementById('kpi-grid');if(!el)return;
   el.innerHTML=[
-    {l:'Valeur totale',v:fE(tv),s:`sur ${fE(tcTotal)} investis`},
+    {l:'Valeur totale',id:'kpi-total-card',v:fE(tv),s:`sur ${fE(tcTotal)} investis <span style="color:var(--cyan);font-size:11px">· dépôts & solde →</span>`,onclick:`navigate('deposits')`},
     {l:'PV latentes',v:`<span class="${pnlLatent>=0?'c-green':'c-red'}">${sg(pnlLatent)}${fE(pnlLatent)}</span>`,
      s:`<span class="badge ${pnlLatent>=0?'badge-green':'badge-red'}">${sg(pct)}${pct.toFixed(2)}%</span>`},
     {l:'PV réalisées',v:`<span class="${pnlRealized>=0?'c-green':'c-red'}">${sg(pnlRealized)}${fE(Math.abs(pnlRealized))}</span>`,
@@ -1771,9 +1812,10 @@ function renderDonut(){
   const cv=document.getElementById('donut-chart');if(!cv)return;
   const {labels,values,colors,clickable}=buildChartData();
   const total=values.reduce((s,v)=>s+v,0);if(!total)return;
+  const adjustedColors=_spreadAdjacentColors(labels,colors);
   if(S.chart){S.chart.destroy();S.chart=null;}
   S.chart=new Chart(cv,{type:'doughnut',
-    data:{labels,datasets:[{data:values,backgroundColor:colors,borderColor:'rgba(0,0,0,.12)',borderWidth:1,hoverOffset:8}]},
+    data:{labels,datasets:[{data:values,backgroundColor:adjustedColors,borderColor:'rgba(0,0,0,.12)',borderWidth:1,hoverOffset:8}]},
     options:{cutout:'68%',onClick:(_,els)=>{if(els.length)handleDrill(labels[els[0].index]);},
       plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const pct=((ctx.raw/total)*100).toFixed(1);return ctx.label+': '+fN(ctx.raw)+'\u00a0€ ('+pct+'%)';},title:ctx=>ctx[0]?.label||''}}},
     }});
@@ -1786,16 +1828,30 @@ function renderLegend(){
   const el=document.getElementById('chart-legend');if(!el)return;
   const {labels,values,colors,clickable}=buildChartData();
   const total=values.reduce((s,v)=>s+v,0);if(!total){el.innerHTML='';return;}
-  el.innerHTML=labels.map((l,i)=>{
+  const adjustedColors=_spreadAdjacentColors(labels,colors);
+  const items=labels.map((l,i)=>{
     const pct=((values[i]/total)*100).toFixed(1);
     const cls=clickable?'legend-clickable':'';
-    const click=clickable?`onclick="handleDrill('${l.replace(/'/g,"\\'")}')"` :'';
-    return`<div class="${cls}" ${click} style="display:flex;align-items:center;gap:6px;padding:2px 4px">
-      <div style="width:9px;height:9px;border-radius:50%;background:${colors[i]};flex-shrink:0"></div>
-      <span style="font-size:12px;white-space:normal;overflow-wrap:anywhere;line-height:1.25">${l}</span>
-      <span style="font-size:11px;color:var(--muted)">${pct}%</span>
+    const click=clickable?`onclick="handleDrill('${l.replace(/'/g,"\'")}')"` :'';
+    return`<div class="${cls}" ${click} style="display:flex;align-items:flex-start;gap:8px;padding:2px 4px">
+      <div style="width:9px;height:9px;border-radius:50%;background:${adjustedColors[i]};flex-shrink:0;margin-top:4px"></div>
+      <div style="min-width:0"><div style="font-size:12px;white-space:normal;overflow-wrap:anywhere;line-height:1.25">${l}</div><div style="font-size:11px;color:var(--muted)">${pct}%</div></div>
     </div>`;
   }).join('');
+
+  var showPerfAside=(chartMode==='positions'&&chartDrill.length===0);
+  if(showPerfAside){
+    var rows=[
+      {lab:'Jour',pct:_pfPerfState.metrics['1d'],eur:_pfPerfState.eurMetrics['1d']},
+      {lab:'Semaine',pct:_pfPerfState.metrics['1w'],eur:_pfPerfState.eurMetrics['1w']},
+      {lab:'Mois',pct:_pfPerfState.metrics['1m'],eur:_pfPerfState.eurMetrics['1m']}
+    ].map(function(r){
+      return `<div class="perf-side-line"><span class="lab">${r.lab}</span><span class="pct" style="color:${_pfPerfColor(r.pct)}">${_pfPerfFmt(r.pct)}</span><span class="eur" style="color:${_pfPerfColor(r.eur)}">${_pfPerfMoney(r.eur)}</span></div>`;
+    }).join('');
+    el.innerHTML=`<div class="perf-side-box" onclick="showPerformanceDetail()"><div class="perf-side-head"><div><div class="perf-side-title">Résumé de performance</div><div class="perf-side-sub">Clique pour ouvrir le centre de performance</div></div><div style="font-size:18px;color:var(--cyan)">↗</div></div><div class="perf-side-grid">${rows}</div></div><div class="legend-divider"></div><div class="legend-chip-grid">${items}</div>`;
+    return;
+  }
+  el.innerHTML=`<div class="legend-chip-grid">${items}</div>`;
 }
 
 function renderBreadcrumb(){
@@ -7185,6 +7241,7 @@ function _pfUpdatePerfTiles(){
   var load=document.getElementById('pf-detail-loading');
   if(load) load.style.display=_pfPerfState.loading?'inline-flex':'none';
   _pfUpdateMainPerformanceKpi();
+  if(document.getElementById('chart-legend')){ try{ renderLegend(); }catch(e){} }
 }
 
 function selectPortfolioPerfPeriod(period){
@@ -7414,9 +7471,11 @@ async function buildPortfolioLine(transactions, range, windowStartOverride){
   // Pour la vue « depuis l'origine », éviter un point de départ trop ancien,
   // mal pricé ou correspondant à une micro-position qui gonfle artificiellement le TWR.
   if(windowStartOverride!=null&&isFinite(windowStartOverride)){
-    for(var _guard=0; _guard<120 && windowStart<now-86400; _guard++){
+    var _currentValForTwr=portfolioValueAt(now).val||0;
+    var _meaningfulStart=Math.max(1000, Math.min(5000, _currentValForTwr*0.08));
+    for(var _guard=0; _guard<220 && windowStart<now-86400; _guard++){
       var _startCheck=portfolioValueAt(windowStart+3600);
-      if(_startCheck.hasPrice && _startCheck.val>=100) break;
+      if(_startCheck.hasPrice && _startCheck.val>=_meaningfulStart) break;
       windowStart+=86400;
     }
   }
