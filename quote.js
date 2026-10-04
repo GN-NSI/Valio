@@ -101,7 +101,7 @@ module.exports = async (req, res) => {
   if (type === 'fundamentals') {
     try {
       // Cache Supabase → réponse instantanée si données < 24h
-      const CACHE_V = 11; // v11 = analyst revisions + recommendation breakdown + PE FY0/FY1 explicites
+      const CACHE_V = 12; // v11 = analyst revisions + recommendation breakdown + PE FY0/FY1 explicites
       const cached = await getCache(symbol);
       const cacheValid = cached
         && cached._v === CACHE_V
@@ -136,6 +136,8 @@ module.exports = async (req, res) => {
       const totalDebt = raw(fd.totalDebt);
       const totalCash = raw(fd.totalCash);
       const ebitda    = raw(ks.ebitda);
+      const netIncomeToCommon = raw(ks.netIncomeToCommon);
+      const financialCurrency = fd.financialCurrency || null;
 
       const pfcf = (mktCap && fcf && fcf > 0) ? mktCap / fcf : null;
       const pocf = (mktCap && ocf && ocf > 0) ? mktCap / ocf : null;
@@ -294,7 +296,7 @@ module.exports = async (req, res) => {
         revenueGrowthFY1: trend1y?.revenueEstimate?.growth?.raw != null ? trend1y.revenueEstimate.growth.raw*100 : null,
         epsGrowthFwd5Y,
         revenueGrowthFwd1Y,
-        freeCashflow: fcf, operatingCashFlow: ocf,
+        freeCashflow: fcf, operatingCashFlow: ocf, netIncomeToCommon, financialCurrency,
         mktCap, sharesOutstanding, fcfGrowth: null, roic: null,
         nextEarningsTs,
         // Nouvelles données analystes
