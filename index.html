@@ -2163,27 +2163,44 @@ function _computeCentralValuationSignal(ticker,price,f,fin){
   if(!(price>0)||!f||!fin)return null;
   var epsFallback=(f.trailingPE>0)?price/f.trailingPE:null,proj=_valuationProjection(ticker,f,fin,epsFallback);if(!proj)return null;
   var g5=_projectionGrowths(proj,5,100);if(!g5.length)return null;
-  var mult=estimateExitMultiple(f,g5[g5.length-1],null),epsN=_projectEps(proj.epsBase,g5);
+  var analysis=_analysisDataFor(ticker),mult=estimateExitMultiple(f,g5[g5.length-1],null,analysis),epsN=_projectEps(proj.epsBase,g5);
   var matrix=(epsN>0&&mult>0)?(Math.pow((epsN*mult)/price,1/5)-1)*100:null;
-  var model=_dcfIsReinvestmentCandidate(ticker,f)?'reinvestment':'standard',r=_dcfSectorRate(f,g5[0]),gt=4.5,dcf=null,qualityAlert=false;
-  if(model==='reinvestment'){
-    var rp=_dcfReinvestmentProfile(ticker,price,f,fin,proj,100,.50),v=rp?_dcfValueSeries(rp.cfs,r,gt):null;if(v)dcf=_dcfImpliedReturnFromVal(price,v);
-  }else{
-    var prof=_dcfCashProfile(ticker,price,f,fin,proj);qualityAlert=!!(prof&&prof.dataAlert);if(prof&&((prof.reported>0)||(prof.normalized>0))){var eff=prof.autoMode||'reported',base=eff==='normalized'?prof.normalized:prof.reported;if(!(base>0))base=prof.normalized||prof.reported;var v2=_dcfValuePath(base,g5,r,gt);if(v2)dcf=_dcfImpliedReturnFromVal(price,v2);}
+  var wantsReinv=_dcfIsReinvestmentCandidate(ticker,f),r=_dcfSectorRate(f,g5[0]),gt=4.5,dcf=null,qualityAlert=false,usedModel=wantsReinv?'reinvestment':'standard';
+  if(wantsReinv){
+    var rp=_dcfReinvestmentProfile(ticker,price,f,fin,proj,100,.50),v=(rp&&rp.cfs&&rp.cfs[rp.cfs.length-1]>0)?_dcfValueSeries(rp.cfs,r,gt):null;
+    if(v) dcf=_dcfImpliedReturnFromVal(price,v);
+    else usedModel='standard'; // fallback automatique : un modèle réinvestissement incomplet ne supprime plus la valorisation
   }
-  var avg=(matrix!=null&&isFinite(matrix)&&dcf!=null&&isFinite(dcf))?(matrix+dcf)/2:null,gap=(matrix!=null&&dcf!=null)?Math.abs(matrix-dcf):null,target=15,decisionMismatch=(matrix!=null&&dcf!=null)?((matrix>=target)!==(dcf>=target)):false,warn=qualityAlert||decisionMismatch||(gap!=null&&gap>25);
-  return {matrix:matrix,dcf:dcf,avg:avg,gap:gap,warn:warn,decisionMismatch:decisionMismatch,qualityAlert:qualityAlert};
+  if(usedModel==='standard'){
+    var prof=_dcfCashProfile(ticker,price,f,fin,proj);qualityAlert=!!(prof&&prof.dataAlert);
+    if(prof&&((prof.reported>0)||(prof.normalized>0))){
+      var eff=prof.autoMode||'reported',base=eff==='normalized'?prof.normalized:prof.reported;if(!(base>0))base=prof.normalized||prof.reported;
+      var v2=_dcfValuePath(base,g5,r,gt);if(v2)dcf=_dcfImpliedReturnFromVal(price,v2);
+    }
+  }
+  var hasM=matrix!=null&&isFinite(matrix),hasD=dcf!=null&&isFinite(dcf),count=(hasM?1:0)+(hasD?1:0);
+  var avg=count===2?(matrix+dcf)/2:(hasM?matrix:(hasD?dcf:null));
+  var gap=hasM&&hasD?Math.abs(matrix-dcf):null,target=15,decisionMismatch=hasM&&hasD?((matrix>=target)!==(dcf>=target)):false;
+  var projectionWarn=proj.projectionQuality==='extrapolated',warn=qualityAlert||projectionWarn||decisionMismatch||(gap!=null&&gap>25)||count<2;
+  return {matrix:matrix,dcf:dcf,avg:avg,gap:gap,warn:warn,decisionMismatch:decisionMismatch,qualityAlert:qualityAlert,projectionWarn:projectionWarn,modelsCount:count,projectionLabel:proj.projectionLabel,mult:mult,moat:_moatPEBonusPct(analysis)};
 }
 async function _ensureValuationSignal(ticker){
   if(_valuationSignals[ticker])return _valuationSignals[ticker];
   var f=S.fundamentals[ticker];if(!f)return null;
   var p=S.prices[ticker];if(!p||!(p.price>0))return null;
+  if(!Object.prototype.hasOwnProperty.call(_analysisCache,ticker)){try{await loadAnalysis(ticker);}catch(_a){}}
   var fin=_valuationFinCache[ticker];
   if(!fin){try{var r=await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=financials',{signal:AbortSignal.timeout(12000)});var d=await r.json();if(d&&!d.error){fin=d;_valuationFinCache[ticker]=d;}}catch(e){}}
   if(!fin)return null;
   var s=_computeCentralValuationSignal(ticker,p.price,f,fin);if(s)_valuationSignals[ticker]=s;return s;
 }
-function _valuationCellHtml(ticker){var s=_valuationSignals[ticker];if(!s||s.avg==null)return '<span style="color:var(--muted)">—</span>';var warn=s.warn?' ⚠':'';var why=s.qualityAlert?'qualité cash-flow à contrôler':s.decisionMismatch?'désaccord autour du seuil 15%':(s.gap>25?'écart de modèles élevé':'modèles exploitables');return '<div class="mono" style="font-weight:800;color:'+_valuationSignalColor(s.avg)+'" title="Matrice '+s.matrix.toFixed(1)+'% · DCF '+s.dcf.toFixed(1)+'% · écart '+s.gap.toFixed(1)+' pts · '+why+'">'+s.avg.toFixed(1)+'%'+warn+'</div><div style="font-size:8px;color:var(--muted2)">M '+s.matrix.toFixed(1)+' · D '+s.dcf.toFixed(1)+'</div>';}
+function _valuationCellHtml(ticker){
+  var s=_valuationSignals[ticker];if(!s||s.avg==null)return '<span style="color:var(--muted)">—</span>';
+  var warn=s.warn?' ⚠':'',mTxt=s.matrix!=null&&isFinite(s.matrix)?s.matrix.toFixed(1):'—',dTxt=s.dcf!=null&&isFinite(s.dcf)?s.dcf.toFixed(1):'—';
+  var why=s.qualityAlert?'qualité cash-flow à contrôler':s.projectionWarn?'consensus 5 ans absent : extrapolation FY1':s.decisionMismatch?'désaccord autour du seuil 15%':(s.gap!=null&&s.gap>25?'écart de modèles élevé':(s.modelsCount<2?'1 seul modèle exploitable':'modèles exploitables'));
+  var gapTxt=s.gap!=null?s.gap.toFixed(1)+' pts':'n/a';
+  return '<div class="mono" style="font-weight:800;color:'+_valuationSignalColor(s.avg)+'" title="Matrice '+mTxt+'% · DCF '+dTxt+'% · écart '+gapTxt+' · '+why+'">'+s.avg.toFixed(1)+'%'+warn+'</div><div style="font-size:8px;color:var(--muted2)">M '+mTxt+' · D '+dTxt+(s.modelsCount<2?' · '+s.modelsCount+'/2':'')+'</div>';
+}
 function getSortVal(ticker, col){
   if(col==='poids'){var ep=S.enrichedPos.find(function(x){return x.ticker===ticker;});return ep?(ep.valueEur||0):0;}
   if(col==='price') return (S.prices[ticker]&&S.prices[ticker].price)||0;
@@ -2588,10 +2605,14 @@ function _moat2030Score(vals){
 }
 function _moat2030Label(s){return s>=95?'Exceptionnel / quasi parfait':s>=90?'Élite / très rare':s>=80?'Très fort':s>=70?'Fort':s>=60?'Correct':s>=50?'Faible à moyen':s>=40?'Barrière limitée':'Pas de moat durable';}
 
+var _analysisCache={};
 async function loadAnalysis(ticker){
   var u=getUser(); if(!u) return null;
-  try{ var rows=await dbGet('company_analysis','user_id=eq.'+u.id+'&ticker=eq.'+encodeURIComponent(ticker)); return (rows&&rows[0])||null; }
-  catch(e){ return null; }
+  if(Object.prototype.hasOwnProperty.call(_analysisCache,ticker)) return _analysisCache[ticker];
+  try{
+    var rows=await dbGet('company_analysis','user_id=eq.'+u.id+'&ticker=eq.'+encodeURIComponent(ticker));
+    var row=(rows&&rows[0])||null; _analysisCache[ticker]=row; return row;
+  } catch(e){ _analysisCache[ticker]=null; return null; }
 }
 async function saveAnalysisRow(ticker,data){
   var u=getUser(); if(!u) throw new Error('Non connecté');
@@ -2599,6 +2620,22 @@ async function saveAnalysisRow(ticker,data){
     method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=representation'},
     body:JSON.stringify({user_id:u.id,ticker:ticker,data:data,updated_at:new Date().toISOString()})
   });
+  _analysisCache[ticker]={ticker:ticker,data:data,updated_at:new Date().toISOString()};
+}
+function _analysisDataFor(ticker){
+  var r=_analysisCache[ticker];
+  if(r&&r.data)return r.data;
+  if(window._cdAnaTicker===ticker&&window._cdAnaData)return window._cdAnaData;
+  if(window._cdLastAnalysis&&window._cdAnaTicker===ticker)return window._cdLastAnalysis;
+  return null;
+}
+function _moatPEBonusPct(analysis){
+  if(!analysis||!analysis.moat2030)return {score:null,bonus:0};
+  var s=_moat2030Score(analysis.moat2030).score;
+  // Bonus volontairement plafonné à +30% : le moat majore le multiple issu de la croissance,
+  // sans pouvoir à lui seul justifier un multiple extrême.
+  var b=s<=50?0:Math.min(30,(s-50)*(30/45));
+  return {score:s,bonus:Math.round(b*10)/10};
 }
 function _moatBar(v,selected){
   var col=_scoreColor(v),w=Math.max(0,Math.min(100,v));
@@ -2622,23 +2659,26 @@ async function renderAnalysisCard(ticker,name){
   var notes=data.moat2030_notes||{};
   var rep=data.reports_url&&/^https?:\/\//.test(data.reports_url)?'<a href="'+_esc(data.reports_url)+'" target="_blank" rel="noopener" class="btn btn-ghost btn-sm" style="text-decoration:none">📄 Source / IR</a>':'';
   var cards=MOAT2030_CRIT.map(function(c){var v=Number(data.moat2030[c.k])||0,note=notes[c.k]||'';return '<div class="panel-card" style="border-color:'+(selected[c.k]?'rgba(38,197,222,.34)':'var(--border)')+'"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px"><div style="font-size:12px;font-weight:750">'+c.label+'</div><div class="mono" style="font-size:16px;font-weight:850;color:'+_scoreColor(v)+'">'+v+'/100</div></div>'+_moatBar(v,selected[c.k])+(note?'<div style="font-size:10px;color:var(--muted);line-height:1.45;margin-top:8px">'+_esc(note)+'</div>':'')+'</div>';}).join('');
-  el.innerHTML='<div class="card" style="padding:20px"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px"><div><div style="font-size:15px;font-weight:800">🏰 Moat 2030</div><div style="font-size:11px;color:var(--muted);margin-top:3px">Résilience de l’avantage concurrentiel dans un monde où code, logiciels et agents IA deviennent plus abondants.</div></div><div style="display:flex;align-items:center;gap:8px">'+rep+'<button class="btn btn-ghost btn-sm" onclick="editAnalysis()">✏️ Éditer</button></div></div><div style="display:flex;align-items:baseline;gap:9px;margin-bottom:14px"><span style="font-size:36px;font-weight:900;color:'+_scoreColor(calc.score)+'">'+calc.score+'</span><span style="color:var(--muted)">/100</span><span style="font-size:12px;color:var(--muted)">'+_moat2030Label(calc.score)+'</span><span style="font-size:10px;color:var(--cyan);margin-left:6px">Top '+calc.selected.length+' barrière'+(calc.selected.length>1?'s':'')+' significative'+(calc.selected.length>1?'s':'')+'</span><span style="font-size:9px;color:var(--muted2);margin-left:6px">brut '+calc.rawScore+' → échelle stricte '+calc.score+'</span></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px">'+cards+'</div>'+(data.moat2030_note?'<div style="font-size:11px;color:var(--muted);margin-top:12px;padding-top:10px;border-top:1px solid var(--border2);white-space:pre-wrap">'+_esc(data.moat2030_note)+'</div>':'')+(row&&row.updated_at?'<div style="font-size:9px;color:var(--muted2);margin-top:10px">Mis à jour le '+new Date(row.updated_at).toLocaleDateString('fr-FR')+'</div>':'')+'</div>';
+  el.innerHTML='<div class="card" style="padding:20px"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px"><div><div style="font-size:15px;font-weight:800">🏰 Moat 2030</div><div style="font-size:11px;color:var(--muted);margin-top:3px">Résilience de l’avantage concurrentiel dans un monde où code, logiciels et agents IA deviennent plus abondants.</div></div><div style="display:flex;align-items:center;gap:8px">'+rep+'<button class="btn btn-ghost btn-sm" onclick="editAnalysis()">✏️ Éditer</button></div></div><div style="display:flex;align-items:baseline;gap:9px;margin-bottom:14px"><span style="font-size:36px;font-weight:900;color:'+_scoreColor(calc.score)+'">'+calc.score+'</span><span style="color:var(--muted)">/100</span><span style="font-size:12px;color:var(--muted)">'+_moat2030Label(calc.score)+'</span><span style="font-size:10px;color:var(--cyan);margin-left:6px">Top '+calc.selected.length+' barrière'+(calc.selected.length>1?'s':'')+' significative'+(calc.selected.length>1?'s':'')+'</span><span style="font-size:9px;color:var(--muted2);margin-left:6px">brut '+calc.rawScore+' → échelle stricte '+calc.score+'</span><span style="font-size:10px;color:var(--cyan);margin-left:6px">Bonus P/E terminal +'+_moatPEBonusPct(data).bonus.toFixed(1)+'%</span></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px">'+cards+'</div>'+(data.moat2030_note?'<div style="font-size:11px;color:var(--muted);margin-top:12px;padding-top:10px;border-top:1px solid var(--border2);white-space:pre-wrap">'+_esc(data.moat2030_note)+'</div>':'')+(row&&row.updated_at?'<div style="font-size:9px;color:var(--muted2);margin-top:10px">Mis à jour le '+new Date(row.updated_at).toLocaleDateString('fr-FR')+'</div>':'')+'</div>';
 }
 function _moat2030Input(c,v,note){
   return '<div style="padding:10px 0;border-bottom:1px solid var(--border2)"><div style="display:grid;grid-template-columns:minmax(180px,1fr) 90px;gap:10px;align-items:start"><div><div style="font-size:13px;font-weight:700">'+c.label+'</div><div style="font-size:10px;color:var(--muted);line-height:1.4;margin-top:2px">'+c.hint+'</div></div><input id="moat2030-'+c.k+'" class="form-input mono" type="number" min="0" max="100" step="1" value="'+(v!=null?v:'')+'" placeholder="0–100" oninput="_recalcAna()" style="padding:6px 7px;text-align:right"></div><textarea id="moat2030-note-'+c.k+'" class="form-input" rows="2" placeholder="Justification / preuves / métriques (optionnel)" style="width:100%;resize:vertical;margin-top:7px;font-size:10px">'+_esc(note||'')+'</textarea></div>';
 }
 window.editAnalysis=function(){
   var ticker=window._cdAnaTicker,name=window._cdAnaName||ticker,d=window._cdAnaData||{},m=d.moat2030||{},notes=d.moat2030_notes||{};
-  var h='<div class="modal-hd"><h2>Moat 2030 — '+name+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:12px">Note chaque source de 0 à 100. Seules les barrières ≥40 sont significatives ; le score final retient au maximum les 3 meilleures (50% / 30% / 20%, renormalisé s’il n’y en a que 1 ou 2). Le Levier IA n’existe plus comme score séparé.<br><b style="color:var(--text)">Échelle stricte :</b> 95–100 = quasi perfection / extrêmement rare · 90–94 = élite · 80–89 = très fort. Le score final est légèrement comprimé au-dessus de 80 pour éviter les notes trop faciles.</div><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><div style="font-size:11px;font-weight:750;text-transform:uppercase;color:var(--muted)">Score final</div><div id="moat2030-total" class="mono" style="font-size:22px;font-weight:900">—</div></div>'+MOAT2030_CRIT.map(function(c){return _moat2030Input(c,m[c.k],notes[c.k]);}).join('')+'<textarea id="moat2030-overall-note" class="form-input" rows="2" placeholder="Synthèse globale (optionnel)" style="width:100%;resize:vertical;margin-top:12px">'+_esc(d.moat2030_note||'')+'</textarea><div class="form-group" style="margin:14px 0 8px"><label class="form-label">📄 Lien source / Investor Relations</label><input id="ana-reports" class="form-input" placeholder="https://..." value="'+_esc(d.reports_url||'')+'"></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveAnalysisForm()">Enregistrer</button></div>';
+  var h='<div class="modal-hd"><h2>Moat 2030 — '+name+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:12px">Note chaque source de 0 à 100. Seules les barrières ≥40 sont significatives ; le score final retient au maximum les 3 meilleures (50% / 30% / 20%, renormalisé s’il n’y en a que 1 ou 2). Le Levier IA n’existe plus comme score séparé.<br><b style="color:var(--text)">Échelle stricte :</b> 95–100 = quasi perfection / extrêmement rare · 90–94 = élite · 80–89 = très fort. Le score final est légèrement comprimé au-dessus de 80 pour éviter les notes trop faciles.<br><b style="color:var(--text)">Impact valorisation :</b> aucun bonus sous 50/100, puis bonus progressif sur le P/E terminal jusqu’à <b>+30% max</b> vers 95/100 et au-delà.</div><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><div style="font-size:11px;font-weight:750;text-transform:uppercase;color:var(--muted)">Score final</div><div style="display:flex;align-items:baseline;gap:10px"><div id="moat2030-total" class="mono" style="font-size:22px;font-weight:900">—</div><div id="moat2030-bonus" class="mono" style="font-size:12px;color:var(--cyan)">Bonus P/E —</div></div></div>'+MOAT2030_CRIT.map(function(c){return _moat2030Input(c,m[c.k],notes[c.k]);}).join('')+'<textarea id="moat2030-overall-note" class="form-input" rows="2" placeholder="Synthèse globale (optionnel)" style="width:100%;resize:vertical;margin-top:12px">'+_esc(d.moat2030_note||'')+'</textarea><div class="form-group" style="margin:14px 0 8px"><label class="form-label">📄 Lien source / Investor Relations</label><input id="ana-reports" class="form-input" placeholder="https://..." value="'+_esc(d.reports_url||'')+'"></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveAnalysisForm()">Enregistrer</button></div>';
   showModal(h);_recalcAna();
 };
-window._recalcAna=function(){var m={};MOAT2030_CRIT.forEach(function(c){var e=document.getElementById('moat2030-'+c.k);m[c.k]=e?Math.max(0,Math.min(100,Number(e.value)||0)):0;});var r=_moat2030Score(m),el=document.getElementById('moat2030-total');if(el){el.textContent=r.score+' /100';el.style.color=_scoreColor(r.score);}};
+window._recalcAna=function(){var m={};MOAT2030_CRIT.forEach(function(c){var e=document.getElementById('moat2030-'+c.k);m[c.k]=e?Math.max(0,Math.min(100,Number(e.value)||0)):0;});var r=_moat2030Score(m),el=document.getElementById('moat2030-total'),be=document.getElementById('moat2030-bonus');if(el){el.textContent=r.score+' /100';el.style.color=_scoreColor(r.score);}if(be){be.textContent='Bonus P/E +'+_moatPEBonusPct({moat2030:m}).bonus.toFixed(1)+'%';}};
 window.saveAnalysisForm=async function(){
   var ticker=window._cdAnaTicker,name=window._cdAnaName||ticker,d=window._cdAnaData||{},m={},notes={};
   MOAT2030_CRIT.forEach(function(c){m[c.k]=Math.max(0,Math.min(100,Number(document.getElementById('moat2030-'+c.k).value)||0));notes[c.k]=(document.getElementById('moat2030-note-'+c.k).value||'').trim();});
   var data=Object.assign({},d,{moat2030:m,moat2030_notes:notes,moat2030_note:(document.getElementById('moat2030-overall-note').value||'').trim(),reports_url:(document.getElementById('ana-reports').value||'').trim()});
-  // Nouveau modèle : l'ancien Levier IA n'est plus utilisé comme score séparé.
-  try{await saveAnalysisRow(ticker,data);window._cdAnaData=data;closeModal();showToast('✅ Moat 2030 enregistré');renderAnalysisCard(ticker,name);}catch(e){var msg=(e&&e.message)||String(e);if(/company_analysis|relation|does not exist|404|PGRST/i.test(msg))msg='Table « company_analysis » introuvable.';showToast('❌ '+msg);}
+  try{
+    await saveAnalysisRow(ticker,data);window._cdAnaData=data;window._cdLastAnalysis=data;delete _valuationSignals[ticker];
+    closeModal();showToast('✅ Moat 2030 enregistré · bonus de multiple mis à jour');renderAnalysisCard(ticker,name);
+    if(window._cdLastNativePrice) try{renderYieldMatrix(ticker,window._cdLastNativePrice,(S.fundamentals&&S.fundamentals[ticker])||null,window._cdLastFin||{});}catch(_r){}
+  }catch(e){var msg=(e&&e.message)||String(e);if(/company_analysis|relation|does not exist|404|PGRST/i.test(msg))msg='Table « company_analysis » introuvable.';showToast('❌ '+msg);}
 };
 
 function openCompanyDetail(ticker, name) {
@@ -5478,19 +5518,21 @@ function _valuationSectorKey(f){
   return (f&&f.sector)||'Other';
 }
 
-function estimateExitMultiple(f, gTerminal, medianPE) {
-  // V23 — Multiple terminal principalement piloté par la croissance EPS en A5.
-  // 20% de croissance => ~25x ; plancher 12x ; plafond 40x.
+function estimateExitMultiple(f, gTerminal, medianPE, analysis) {
+  // V24 — moteur principal = croissance EPS A5 ; le Moat applique ensuite un bonus en %.
+  // Base : 9 + 0,80 × croissance A5. Ex. 20% => 25x avant moat.
   var g=isFinite(gTerminal)?gTerminal:8;
-  var m=10 + .75*g;
-  return Math.max(12,Math.min(40,Math.round(m*2)/2));
+  var base=Math.max(12,Math.min(40,9+.80*g));
+  var mb=_moatPEBonusPct(analysis||null),m=base*(1+mb.bonus/100);
+  // Cap final volontairement plus haut que le cap "croissance seule", mais reste borné.
+  return Math.max(12,Math.min(45,Math.round(m*2)/2));
 }
 
 function _valuationProjection(ticker,f,fin,epsFallback){
-  var ae=(f&&f.analystEstimates)||{}, yNow=new Date().getFullYear();
+  var ae=(f&&f.analystEstimates)||{}, yNow=new Date().getFullYear(),analysis=_analysisDataFor(ticker)||{},ov=analysis.valuation_override||{};
   function ok(v){return v!=null&&isFinite(v)&&v>0;}
   function med(a){var x=(a||[]).filter(ok).slice().sort(function(a,b){return a-b;});if(!x.length)return null;var m=Math.floor(x.length/2);return x.length%2?x[m]:(x[m-1]+x[m])/2;}
-  var fy0=(ae.thisYear&&ok(ae.thisYear.epsAvg))?ae.thisYear.epsAvg:(ok(f&&f.epsFY0)?f.epsFY0:null);
+  var fy0Yahoo=(ae.thisYear&&ok(ae.thisYear.epsAvg))?ae.thisYear.epsAvg:(ok(f&&f.epsFY0)?f.epsFY0:null);
   var fy1=(ae.currentYear&&ok(ae.currentYear.epsAvg))?ae.currentYear.epsAvg:(ok(f&&f.epsFY1)?f.epsFY1:null);
   var n0=(ae.thisYear&&ae.thisYear.epsCount)||null,n1=(ae.currentYear&&(ae.currentYear.epsCount||ae.currentYear.count))||null;
   var manualTtm=null,manualKind=null;
@@ -5499,51 +5541,60 @@ function _valuationProjection(ticker,f,fin,epsFallback){
     if(qs.length>=4){var l=qs.slice(-4),now=new Date(),curIdx=now.getFullYear()*4+(Math.floor(now.getMonth()/3)+1);if(l[3].idx-l[0].idx===3&&l[3].idx>=curIdx-5){manualTtm=l.reduce(function(t,x){return t+x.v;},0);manualKind='TTM manuel récent';}}
   }catch(e){}
 
-  // Fallback ADR / couverture analystes incomplète : EPS TTM via prix/PER puis EPS forward via PER forward.
+  // Yahoo reste TOUJOURS la base par défaut. L'override manuel ne s'active que si l'utilisateur le choisit explicitement.
+  var fy0=fy0Yahoo;
   if(!(fy0>0)&&epsFallback>0)fy0=epsFallback;
   if(!(fy1>0)&&epsFallback>0&&f&&f.trailingPE>0&&f.forwardPE>0){fy1=epsFallback*(f.trailingPE/f.forwardPE);}
 
-  var symbol=(ticker||f&&f.symbol||'').toUpperCase(),sub=(TICKER_SUBSECTOR[symbol]||'').toLowerCase(),industry=((f&&f.industry)||'').toLowerCase();
-  // Penguin n'est pas traité comme un fabricant de mémoire cyclique : son modèle est AI infrastructure / solutions.
+  var symbol=(ticker||f&&f.symbol||'').toUpperCase(),industry=((f&&f.industry)||'').toLowerCase();
   var cyclicalMemory=(symbol==='000660.KS'||symbol==='SKHYNIX'||industry.includes('memory'))&&symbol!=='PENG';
-  var base=fy0,baseSrc='consensus FY0',baseYear=yNow;
-  if(!(base>0)&&manualTtm>0){base=manualTtm;baseSrc=manualKind;baseYear=yNow;}
+  var base=fy0,baseSrc=(fy0Yahoo>0?'Yahoo consensus FY0':'EPS TTM / fallback'),baseYear=yNow,manualActive=false;
+  if(ov.epsMode==='manual'&&ok(+ov.epsNormalized)){
+    base=+ov.epsNormalized;baseSrc='EPS normalisé manuel';manualActive=true;
+  }else if(!(base>0)&&manualTtm>0){
+    base=manualTtm;baseSrc=manualKind;baseYear=yNow;
+  }
   if(!(base>0)&&epsFallback>0){base=epsFallback;baseSrc='EPS TTM';baseYear=yNow;}
   if(!(base>0))return null;
 
   if(cyclicalMemory){
     var hist=((fin&&fin.eps)||[]).filter(function(v){return v>0;}).slice(-3),norm=med(hist.concat([fy0,fy1]));
-    if(norm>0){base=norm;baseSrc='EPS normalisé mi-cycle';}
-    return {epsBase:base,epsNext:fy1,baseYear:yNow,baseSrc:baseSrc,nBase:n0,nNext:n1,growths:[15,12,9,7,6],sustainable:null,cyclical:true,g5:null,normalizedExceptional:false};
+    if(norm>0&&ov.epsMode!=='manual'){base=norm;baseSrc='EPS normalisé mi-cycle';}
+    return {epsBase:base,epsNext:fy1,baseYear:yNow,baseSrc:baseSrc,nBase:n0,nNext:n1,growths:[15,12,9,7,6],sustainable:null,cyclical:true,g5:null,manualActive:manualActive,projectionQuality:'model',projectionLabel:'Modèle cyclique mi-cycle'};
   }
 
   var quotedG=(f&&isFinite(f.epsGrowthFwd1Y))?f.epsGrowthFwd1Y:((ae.currentYear&&isFinite(ae.currentYear.epsGrowth))?ae.currentYear.epsGrowth:null);
-  var g1=(fy1>0&&base>0)?(fy1/base-1)*100:null;
-  var normalizedExceptional=false;
-  // Cas Alphabet-like : FY0 GAAP exceptionnel mais croissance forward normalisée positive.
-  // Si les deux signaux se contredisent fortement, on reconstruit FY0 avec le taux forward explicite.
-  if(isFinite(g1)&&g1<-15&&isFinite(quotedG)&&quotedG>5&&fy1>0){
-    var recon=fy1/(1+quotedG/100);
-    if(recon>0&&recon<fy1*1.5){base=recon;baseSrc='EPS FY0 normalisé reconstruit';g1=quotedG;normalizedExceptional=true;}
-  }
+  var explicitFY1=(fy1>0&&base>0);
+  var g1=explicitFY1?(fy1/base-1)*100:null;
   if(!(isFinite(g1)&&g1>-60&&g1<180))g1=quotedG;
-  if(!(isFinite(g1)&&g1>-60&&g1<180))g1=10;
-  g1=Math.max(-35,Math.min(100,g1));
+  if(isFinite(g1))g1=Math.max(-60,Math.min(120,g1));
 
-  var g5=(f&&isFinite(f.epsGrowthFwd5Y)&&f.epsGrowthFwd5Y>-10&&f.epsGrowthFwd5Y<90)?f.epsGrowthFwd5Y:null;
-  var gs=[g1];
+  var g5=(f&&isFinite(f.epsGrowthFwd5Y)&&f.epsGrowthFwd5Y>-20&&f.epsGrowthFwd5Y<100)?f.epsGrowthFwd5Y:null;
+  var gs=[],projectionQuality='',projectionLabel='';
   if(g5!=null){
-    // Le 5y analyste sert d'ancre long terme ; interpolation douce jusqu'à A5.
-    for(var i=1;i<5;i++)gs.push(g1+(g5-g1)*(i/4));
-  }else if(g1>=0){
-    // Sans ancre 5y, fade transparent sans plancher arbitraire lié à la taille de l'entreprise.
-    gs=[g1,g1*.85,g1*.72,g1*.62,g1*.55];
+    // Yahoo 5Y est un CAGR annuel sur cinq ans, PAS la croissance de l'année 5.
+    // On respecte exactement ce CAGR. Si FY1 est connu, A2-A5 prennent un taux constant
+    // calculé pour que la croissance cumulée sur 5 ans égale le CAGR Yahoo.
+    if(explicitFY1&&isFinite(g1)&&g1>-95){
+      var total=Math.pow(1+g5/100,5),first=Math.max(.05,1+g1/100),rest=Math.pow(total/first,1/4)-1;
+      rest=Math.max(-.60,Math.min(1.20,rest));
+      gs=[g1,rest*100,rest*100,rest*100,rest*100];
+    }else{
+      gs=[g5,g5,g5,g5,g5];
+    }
+    projectionQuality='consensus5y';
+    projectionLabel='Yahoo : consensus CAGR EPS 5 ans';
+  }else if(isFinite(g1)){
+    // Pas de CAGR 5 ans : aucun fade arbitraire caché. On maintient le seul consensus explicite disponible
+    // et on signale clairement que A2-A5 sont une extrapolation Valio.
+    gs=[g1,g1,g1,g1,g1];
+    projectionQuality='extrapolated';
+    projectionLabel='Yahoo FY1 uniquement · extrapolation constante A2-A5';
   }else{
-    // Une baisse exceptionnelle converge progressivement vers 0 plutôt que vers un plancher positif forcé.
-    gs=[g1,g1*.65,g1*.40,g1*.20,0];
+    return null;
   }
-  gs=gs.map(function(g){return Math.max(-40,Math.min(100,g));});
-  return {epsBase:base,epsNext:fy1,baseYear:baseYear,baseSrc:baseSrc,nBase:n0,nNext:n1,growths:gs,sustainable:null,cyclical:false,g5:g5,normalizedExceptional:normalizedExceptional};
+  gs=gs.map(function(g){return Math.max(-60,Math.min(120,g));});
+  return {epsBase:base,epsNext:fy1,baseYear:baseYear,baseSrc:baseSrc,nBase:n0,nNext:n1,growths:gs,sustainable:null,cyclical:false,g5:g5,manualActive:manualActive,projectionQuality:projectionQuality,projectionLabel:projectionLabel};
 }
 function _scaleProjectionGrowth(g,scale){
   scale=(scale==null?100:scale);var k=scale/100;
@@ -5698,15 +5749,26 @@ function _dcfCompute(ticker,price,f,fin){
   var fallback=(f&&f.trailingPE>0&&price>0)?price/f.trailingPE:null,proj=_valuationProjection(ticker,f,fin,fallback),st=_dcfState[ticker]||{};if(!proj)return null;
   var ym=_ymSel[ticker]||{},scale=ym.scale!=null?ym.scale:100,modelMode=st.model||'auto',reinvestCandidate=_dcfIsReinvestmentCandidate(ticker,f),model=modelMode==='auto'?(reinvestCandidate?'reinvestment':'standard'):modelMode;
   var growths=_projectionGrowths(proj,5,scale),r=st.r!=null?st.r:_dcfSectorRate(f,growths[0]),gt=st.gt!=null?st.gt:_dcfTerminalGrowthDefault(f),target=ym.r!=null&&ym.r>0?ym.r:15;if(r<=gt+.5)r=gt+.5;
-  var val=null,targetVal=null,irr=null,prof=null,base=null,effective=null,reinv=null,mode=st.mode||'auto';
+  var val=null,targetVal=null,irr=null,prof=null,base=null,effective=null,reinv=null,mode=st.mode||'auto',autoFallback=false;
+
   if(model==='reinvestment'){
-    reinv=_dcfReinvestmentProfile(ticker,price,f,fin,proj,scale,st.structuralShare);if(!reinv||!reinv.cfs||reinv.cfs[reinv.cfs.length-1]<=0)return null;
-    val=_dcfValueSeries(reinv.cfs,r,gt);if(!val)return null;targetVal=_dcfTargetPriceFromVal(val,target);irr=_dcfImpliedReturnFromVal(price,val);base=reinv.cfs[0];effective='reinvestment';
-  }else{
-    prof=_dcfCashProfile(ticker,price,f,fin,proj);if(!prof||(!(prof.reported>0)&&!(prof.normalized>0)))return null;effective=mode==='auto'?prof.autoMode:mode;base=st.fcfps!=null?st.fcfps:(effective==='normalized'?prof.normalized:prof.reported);if(!(base>0))base=prof.normalized||prof.reported;
+    reinv=_dcfReinvestmentProfile(ticker,price,f,fin,proj,scale,st.structuralShare);
+    if(reinv&&reinv.cfs&&reinv.cfs.length&&reinv.cfs[reinv.cfs.length-1]>0){
+      val=_dcfValueSeries(reinv.cfs,r,gt);
+      if(val){targetVal=_dcfTargetPriceFromVal(val,target);irr=_dcfImpliedReturnFromVal(price,val);base=reinv.cfs[0];effective='reinvestment';}
+    }
+    // En Auto, un manque de données réinvestissement ne doit jamais supprimer le DCF :
+    // on repasse proprement en Standard FCF. Si l'utilisateur force Réinvestissement, on garde N/A.
+    if(!val&&modelMode==='auto'){model='standard';autoFallback=true;reinv=null;}
+    else if(!val)return null;
+  }
+
+  if(model==='standard'){
+    prof=_dcfCashProfile(ticker,price,f,fin,proj);if(!prof||(!(prof.reported>0)&&!(prof.normalized>0)))return null;
+    effective=mode==='auto'?prof.autoMode:mode;base=st.fcfps!=null?st.fcfps:(effective==='normalized'?prof.normalized:prof.reported);if(!(base>0))base=prof.normalized||prof.reported;
     val=_dcfValuePath(base,growths,r,gt);if(!val)return null;targetVal=_dcfTargetPriceFromVal(val,target);irr=_dcfImpliedReturnFromVal(price,val);
   }
-  return {proj:proj,prof:prof,reinv:reinv,st:st,ym:ym,scale:scale,modelMode:modelMode,model:model,reinvestCandidate:reinvestCandidate,mode:mode,effective:effective,base:base,growths:growths,r:r,gt:gt,target:target,val:val,targetVal:targetVal,irr:irr};
+  return {proj:proj,prof:prof,reinv:reinv,st:st,ym:ym,scale:scale,modelMode:modelMode,model:model,reinvestCandidate:reinvestCandidate,autoFallback:autoFallback,mode:mode,effective:effective,base:base,growths:growths,r:r,gt:gt,target:target,val:val,targetVal:targetVal,irr:irr};
 }
 function _dcfHtml(ticker,price,f,fin,cSym){
   if(!(price>0))return '';var d=_dcfCompute(ticker,price,f,fin);if(!d)return '<div style="margin:16px 0;padding:14px 16px;border:1px solid var(--border);border-radius:10px;color:var(--muted)"><b style="color:var(--text)">💵 DCF cash-flow 5 ans</b> — base cash-flow/action ou données de réinvestissement insuffisantes.</div>';
@@ -5719,6 +5781,7 @@ function _dcfHtml(ticker,price,f,fin,cSym){
   var modelLabel=model==='reinvestment'?'Réinvestissement':'Standard FCF',modeLabel=model==='reinvestment'?'croissance → capital requis':(d.effective==='normalized'?'FCF normalisé':'FCF reporté');
   var caution='';
   if(model==='standard'&&prof&&prof.reasons.length)caution='<div style="margin:0 0 12px;padding:10px 12px;border:1px solid rgba(245,158,11,.30);background:rgba(245,158,11,.08);border-radius:9px;font-size:10px;color:var(--muted);line-height:1.55"><b style="color:#f59e0b">⚠ Contrôle cash-flow.</b> '+prof.reasons.join(' · ')+'.</div>';
+  if(d.autoFallback)caution+='<div style="margin:0 0 12px;padding:9px 11px;border:1px solid rgba(38,197,222,.25);background:rgba(38,197,222,.06);border-radius:8px;font-size:10px;color:var(--muted)"><b style="color:var(--cyan)">↪ Fallback automatique.</b> Données insuffisantes pour le modèle Réinvestissement : Valio utilise le Standard FCF au lieu de supprimer la valorisation.</div>';
   if(model==='reinvestment')caution='<div style="margin:0 0 12px;padding:10px 12px;border:1px solid rgba(38,197,222,.28);background:rgba(38,197,222,.07);border-radius:9px;font-size:10px;color:var(--muted);line-height:1.55"><b style="color:var(--cyan)">🏗️ Mode réinvestissement.</b> Le FCF n’est pas extrapolé depuis son niveau actuel : Valio projette le CA, estime l’OCF puis soustrait un capex lié à la croissance + un plancher structurel de renouvellement.</div>';
   if(term>85)caution+='<div style="margin:0 0 12px;padding:8px 11px;border:1px solid rgba(245,158,11,.28);background:rgba(245,158,11,.06);border-radius:8px;font-size:10px;color:#f59e0b">⚠ La valeur terminale représente '+term.toFixed(0)+'% de la valeur : le DCF est très sensible au taux terminal et au coût du capital.</div>';
   var modelBtns='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"><span style="font-size:9px;color:var(--muted);align-self:center;margin-right:3px">MODÈLE</span><button class="btn btn-ghost btn-sm" style="'+(d.modelMode==='auto'?'border-color:var(--blue);color:#fff':'')+'" onclick="_dcfSetModel(&quot;'+t+'&quot;,&quot;auto&quot;)">Auto</button><button class="btn btn-ghost btn-sm" style="'+(d.modelMode==='standard'?'border-color:var(--blue);color:#fff':'')+'" onclick="_dcfSetModel(&quot;'+t+'&quot;,&quot;standard&quot;)">Standard FCF</button><button class="btn btn-ghost btn-sm" style="'+(d.modelMode==='reinvestment'?'border-color:var(--blue);color:#fff':'')+'" onclick="_dcfSetModel(&quot;'+t+'&quot;,&quot;reinvestment&quot;)">Réinvestissement</button></div>';
@@ -5746,11 +5809,11 @@ function _dcfRerender(ticker){var f=(S.fundamentals&&S.fundamentals[ticker])||nu
 function renderYieldMatrix(ticker, price, f, fin){
   var el=document.getElementById('cd-yield-matrix');if(!el)return;
   var st=_ymSel[ticker]||{},N=5,rC=(st.r!=null&&st.r>0)?st.r:15;
-  var quoteCur=(S.prices[ticker]&&S.prices[ticker].currency)||_currencyFromSuffix(ticker)||'USD',cSym=currSymbol(quoteCur),epsFallback=(f&&f.trailingPE>0&&price>0)?price/f.trailingPE:null,proj=_valuationProjection(ticker,f,fin,epsFallback);
-  if(!proj||!(price>0)){el.innerHTML='<div style="color:var(--muted);font-size:12px">Projection centrale indisponible — vérifie les estimations analystes ou saisis des résultats récents.</div>';return;}
+  var quoteCur=(S.prices[ticker]&&S.prices[ticker].currency)||_currencyFromSuffix(ticker)||'USD',cSym=currSymbol(quoteCur),epsFallback=(f&&f.trailingPE>0&&price>0)?price/f.trailingPE:null,analysis=_analysisDataFor(ticker),proj=_valuationProjection(ticker,f,fin,epsFallback);
+  if(!proj||!(price>0)){el.innerHTML='<div style="color:var(--muted);font-size:12px">Projection centrale indisponible — Yahoo ne fournit pas assez de données exploitables. Tu peux saisir une base EPS normalisée manuelle pour les cas exceptionnels.</div>';return;}
   var titleEl=document.getElementById('cd-matrix-title');if(titleEl)titleEl.textContent='🎯 Matrice de rendement & DCF — 5 ans';
-  var eps0=(st.eps>0)?st.eps:proj.epsBase,centralGrowths=_projectionGrowths(proj,N,100),terminalG=centralGrowths[centralGrowths.length-1];
-  var medPE=_medianPE5y(fin,window._cdChartPts||[]),autoMult=estimateExitMultiple(f,terminalG,medPE),mCur=(st.mManual&&st.mC!=null)?st.mC:autoMult;
+  var eps0=(st.eps>0)?st.eps:proj.epsBase,centralGrowths=_projectionGrowths(proj,N,100),terminalG=centralGrowths[centralGrowths.length-1],moatInfo=_moatPEBonusPct(analysis);
+  var medPE=_medianPE5y(fin,window._cdChartPts||[]),autoMult=estimateExitMultiple(f,terminalG,medPE,analysis),mCur=(st.mManual&&st.mC!=null)?st.mC:autoMult;
   var scale=(st.scale!=null)?st.scale:100,selM=(st.m!=null)?st.m:mCur;if(!(scale>=40&&scale<=180))scale=100;
   var scaleRows=[];for(var sc=70;sc<=130;sc+=5)scaleRows.push(sc);var mCols=[];for(var mm=Math.max(5,mCur-6);mm<=mCur+6;mm++)mCols.push(mm);if(mCols.indexOf(selM)<0)selM=mCur;
   st.eps=eps0;st.scale=scale;st.m=selM;st.n=N;_ymSel[ticker]=st;
@@ -5761,15 +5824,37 @@ function renderYieldMatrix(ticker, price, f, fin){
   var peRefs='<div style="display:flex;gap:7px;flex-wrap:wrap;margin:0 0 12px">'+peMini('P/E TTM',peTtm,'12 derniers mois')+peMini('P/E FY0',peFy0,'exercice en cours')+peMini('P/E FY1',peFy1,'exercice suivant')+peMini('Médiane P/E 5A',medPE,'historique du titre')+'</div>',tName=ticker.replace(/'/g,"\\'");
   function tog(label,n){return '<button onclick="window._ymSetN(\''+tName+'\','+n+')" style="padding:4px 12px;font-size:11px;font-weight:700;border-radius:6px;cursor:pointer;border:none;'+(N===n?'background:#634BE4;color:white;':'background:rgba(255,255,255,.08);color:var(--muted);')+'">'+label+'</button>';}
   function scenarioBtn(label,sc){var active=Math.round(scale)===sc;return '<button onclick="window._ymScenario(\''+tName+'\','+sc+')" class="btn btn-ghost btn-sm" style="'+(active?'border-color:var(--blue);background:rgba(99,75,228,.15);color:#fff':'')+'">'+label+'</button>';}
+  var ov=(analysis&&analysis.valuation_override)||{},epsMode=ov.epsMode==='manual'?'manual':'yahoo',manualEps=(ov.epsNormalized!=null&&isFinite(+ov.epsNormalized))?+ov.epsNormalized:'';
+  var qCol=proj.projectionQuality==='consensus5y'?'#22c55e':proj.projectionQuality==='extrapolated'?'#f59e0b':'#26C5DE';
+  var sourceBadge='<span style="display:inline-block;margin-left:8px;padding:2px 7px;border-radius:999px;border:1px solid '+qCol+'55;background:'+qCol+'12;color:'+qCol+';font-size:9px;font-weight:750">'+(proj.projectionQuality==='consensus5y'?'● Consensus Yahoo 5 ans':proj.projectionQuality==='extrapolated'?'⚠ Yahoo FY1 · A2-A5 extrapolées':'● '+proj.projectionLabel)+'</span>';
+  var manualBadge=proj.manualActive?'<span style="display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;border:1px solid rgba(99,75,228,.45);background:rgba(99,75,228,.12);color:#a78bfa;font-size:9px;font-weight:750">EPS normalisé manuel</span>':'';
+  var moatBadge=moatInfo.score!=null?'<span style="display:inline-block;margin-left:6px;color:var(--cyan);font-size:9px;font-weight:750">Moat '+moatInfo.score+'/100 → +'+moatInfo.bonus.toFixed(1)+'% sur le P/E</span>':'<span style="display:inline-block;margin-left:6px;color:var(--muted2);font-size:9px">Moat non renseigné → bonus 0%</span>';
+  var baseControls='<div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin:-2px 0 12px;padding:9px 11px;border:1px solid var(--border2);border-radius:8px;background:rgba(255,255,255,.018)"><div><label style="font-size:8px;color:var(--muted);text-transform:uppercase">Base EPS persistante</label><br><select id="ym-base-source" class="form-input" style="min-width:170px;padding:5px"><option value="yahoo"'+(epsMode==='yahoo'?' selected':'')+'>Yahoo (défaut)</option><option value="manual"'+(epsMode==='manual'?' selected':'')+'>Normalisé manuel</option></select></div><div><label style="font-size:8px;color:var(--muted);text-transform:uppercase">EPS normalisé manuel ('+cSym+')</label><br><input id="ym-eps-normalized" class="form-input mono" style="width:125px;padding:5px" value="'+manualEps+'" placeholder="ex : 12.50"></div><button class="btn btn-ghost btn-sm" onclick="window._saveValuationBase(\''+tName+'\')">💾 Enregistrer la base</button><div style="font-size:9px;color:var(--muted);max-width:420px;line-height:1.4">Yahoo reste la source par défaut. Le mode manuel sert uniquement aux résultats réellement exceptionnels/retraités.</div></div>';
   var dcfPreview=_dcfCompute(ticker,price,f,fin),cohHtml='';if(dcfPreview&&dcfPreview.irr!=null){var diff=Math.abs(selRet-dcfPreview.irr),target=15,decisionMismatch=(selRet>=target)!==(dcfPreview.irr>=target),qualityAlert=!!(dcfPreview.prof&&dcfPreview.prof.dataAlert),cc,cl;if(qualityAlert){cc='#ef4444';cl='Qualité cash-flow à contrôler';}else if(decisionMismatch){cc='#ef4444';cl='Désaccord de verdict autour du seuil '+target+'%';}else if(diff<=8){cc='#22c55e';cl='Écart faible — modèles cohérents';}else if(diff<=25){cc='#26C5DE';cl='Même verdict — écart de magnitude';}else{cc='#f59e0b';cl='Même verdict mais écart élevé';}cohHtml='<div style="margin:0 0 14px;padding:10px 12px;border:1px solid '+cc+'44;background:'+cc+'0d;border-radius:9px;display:flex;gap:20px;align-items:center;flex-wrap:wrap;font-size:10px"><b style="color:'+cc+'">Cohérence des modèles</b><span>Matrice '+N+'A : <b style="color:var(--text)">'+selRet.toFixed(1)+'%/an</b></span><span>DCF 5A + terminal : <b style="color:var(--text)">'+dcfPreview.irr.toFixed(1)+'%/an</b></span><span style="color:'+cc+'">'+cl+' ('+diff.toFixed(1)+' pts)</span></div>';}
   var scenarioName=scale===75?'Bear':scale===125?'Bull':scale===100?'Base':'Personnalisé '+scale+'%';
   var html='<div style="display:flex;align-items:center;gap:6px;margin-bottom:14px">'+tog('5 ans',5)+'<div style="margin-left:16px;display:flex;gap:26px;flex-wrap:wrap"><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Mon scénario — prix max ('+rC+'%/an)</div><div style="font-size:20px;font-weight:800;color:#634BE4" class="mono">'+cSym+fN(fair)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Mon scénario — rendement '+N+' ans</div><div style="font-size:20px;font-weight:800;color:'+cellColor(selRet)+'" class="mono">'+selRet.toFixed(2)+' %/an</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Écart au prix max</div><div style="font-size:20px;font-weight:800;color:'+(gap>=0?'#22c55e':'#f59e0b')+'" class="mono">'+(gap>=0?'+':'')+gap.toFixed(2)+' %</div></div></div></div>'+peRefs+
-    '<div style="padding:9px 12px;margin-bottom:12px;border:1px solid rgba(38,197,222,.18);background:rgba(38,197,222,.045);border-radius:8px;font-size:10px;color:var(--muted);line-height:1.55"><b style="color:var(--text)">Projection commune ('+scenarioName+') :</b> '+proj.baseSrc+' · EPS '+cSym+fN(eps0)+' · '+centralPathTxt+' · multiple auto '+mCur.toFixed(1)+'x.'+(proj.cyclical?' <span style="color:#f59e0b">Titre cyclique : EPS normalisé mi-cycle.</span>':'')+'</div>'+
-    '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin-bottom:10px;padding:10px;background:var(--bg2,rgba(255,255,255,.02));border-radius:8px"><div><label style="font-size:9px;color:var(--muted);text-transform:uppercase">EPS de base ('+cSym+')</label><br><input id="ym-eps" class="form-input mono" style="width:90px;padding:5px" value="'+eps0.toFixed(2)+'"></div><div><label style="font-size:9px;color:var(--muted);text-transform:uppercase">Scénario vs central</label><div style="display:flex;gap:5px;margin-top:4px">'+scenarioBtn('Bear 75%',75)+scenarioBtn('Base 100%',100)+scenarioBtn('Bull 125%',125)+'</div></div><div><label style="font-size:9px;color:var(--muted);text-transform:uppercase">Personnalisé %</label><br><input id="ym-scale" class="form-input mono" style="width:90px;padding:5px" value="'+scale+'"></div><div><label style="font-size:9px;color:var(--muted);text-transform:uppercase">Multiple de sortie</label><br><input id="ym-m" class="form-input mono" style="width:90px;padding:5px" value="'+mCur+'"></div><div><label style="font-size:9px;color:var(--muted);text-transform:uppercase">Rendement cible %/an</label><br><input id="ym-r" class="form-input mono" style="width:90px;padding:5px" value="'+rC+'"></div><button class="btn btn-ghost btn-sm" onclick="window._ymApply(\''+tName+'\')">Appliquer</button><button class="btn btn-ghost btn-sm" onclick="window._ymReset(\''+tName+'\')">↺ Base</button><button class="btn btn-ghost btn-sm" onclick="window._ymDetail(\''+tName+'\','+terminalG.toFixed(2)+')">🔍 Multiple</button></div>'+cohHtml+
+    '<div style="padding:9px 12px;margin-bottom:12px;border:1px solid rgba(38,197,222,.18);background:rgba(38,197,222,.045);border-radius:8px;font-size:10px;color:var(--muted);line-height:1.55"><b style="color:var(--text)">Projection commune ('+scenarioName+') :</b> '+proj.baseSrc+' · EPS '+cSym+fN(eps0)+' · '+centralPathTxt+' · multiple auto '+mCur.toFixed(1)+'x.'+sourceBadge+manualBadge+moatBadge+(proj.g5!=null?' <span style="color:var(--muted2)">CAGR Yahoo 5 ans : '+proj.g5.toFixed(1)+'%</span>':'')+(proj.cyclical?' <span style="color:#f59e0b">Titre cyclique : EPS normalisé mi-cycle.</span>':'')+'</div>'+baseControls+
+    '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin-bottom:10px;padding:10px;background:var(--bg2,rgba(255,255,255,.02));border-radius:8px"><div><label style="font-size:9px;color:var(--muted);text-transform:uppercase">EPS de scénario ('+cSym+')</label><br><input id="ym-eps" class="form-input mono" style="width:90px;padding:5px" value="'+eps0.toFixed(2)+'"></div><div><label style="font-size:9px;color:var(--muted);text-transform:uppercase">Scénario vs central</label><div style="display:flex;gap:5px;margin-top:4px">'+scenarioBtn('Bear 75%',75)+scenarioBtn('Base 100%',100)+scenarioBtn('Bull 125%',125)+'</div></div><div><label style="font-size:9px;color:var(--muted);text-transform:uppercase">Personnalisé %</label><br><input id="ym-scale" class="form-input mono" style="width:90px;padding:5px" value="'+scale+'"></div><div><label style="font-size:9px;color:var(--muted);text-transform:uppercase">Multiple de sortie</label><br><input id="ym-m" class="form-input mono" style="width:90px;padding:5px" value="'+mCur+'"></div><div><label style="font-size:9px;color:var(--muted);text-transform:uppercase">Rendement cible %/an</label><br><input id="ym-r" class="form-input mono" style="width:90px;padding:5px" value="'+rC+'"></div><button class="btn btn-ghost btn-sm" onclick="window._ymApply(\''+tName+'\')">Appliquer</button><button class="btn btn-ghost btn-sm" onclick="window._ymReset(\''+tName+'\')">↺ Base</button><button class="btn btn-ghost btn-sm" onclick="window._ymDetail(\''+tName+'\','+terminalG.toFixed(2)+')">🔍 Multiple</button></div>'+cohHtml+
     _safetyMarginHtml(ticker,price,eps0,f,fin,cSym,mCur,medPE,rC,scale)+_dcfHtml(ticker,price,f,fin,cSym)+_perProjeteHtml(ticker,price,eps0,f,fin,cSym)+
     '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:11px;white-space:nowrap;width:100%" class="mono"><tr><th style="padding:5px 8px;color:var(--muted);font-size:9px;text-align:left">TRAJECTOIRE × CENTRAL</th>'+mCols.map(function(m){return '<th style="padding:5px 8px;color:'+(m===mCur?'#634BE4':'var(--muted)')+'">'+m+'x</th>';}).join('')+'</tr>'+scaleRows.map(function(sc){return '<tr'+(sc===scale?' style="background:rgba(99,75,228,.10)"':'')+'><td style="padding:5px 8px;color:'+(sc===100?'#26C5DE':sc===scale?'#634BE4':'var(--muted)')+';font-weight:700">'+sc+'%'+(sc===100?' · Base':'')+'</td>'+mCols.map(function(m){var rr=annRet(sc,m),isSel=sc===scale&&m===selM;return '<td onclick="window._ymPick(\''+tName+'\','+sc+','+m+')" style="padding:5px 8px;text-align:right;cursor:pointer;color:'+cellColor(rr)+';'+(isSel?'outline:1.5px solid #634BE4;border-radius:4px;font-weight:800;':'')+(m===mCur?'background:rgba(99,75,228,.07);':'')+'">'+rr.toFixed(2)+'%</td>';}).join('')+'</tr>';}).join('')+'</table></div><div style="font-size:10px;color:var(--muted2);margin-top:10px">Bear = 75% · Base = 100% · Bull = 125% de la trajectoire centrale. Pour une croissance négative, Bear rend la baisse plus forte et Bull la réduit. Vert ≥ '+rC+'%/an · orange à moins de 3 points · rouge au-delà.</div>';
   el.innerHTML=html;
 }
+window._saveValuationBase=async function(ticker){
+  var mode=((document.getElementById('ym-base-source')||{}).value)||'yahoo';
+  var raw=((document.getElementById('ym-eps-normalized')||{}).value||'').replace(',','.').trim(),v=raw===''?null:parseFloat(raw);
+  if(mode==='manual'&&!(v>0)){showToast('❌ Renseigne un EPS normalisé manuel positif.');return;}
+  try{
+    var row=await loadAnalysis(ticker),data=(row&&row.data)?Object.assign({},row.data):{};
+    var old=data.valuation_override||{};
+    data.valuation_override=Object.assign({},old,{epsMode:mode,epsNormalized:(v>0?v:(old.epsNormalized||null))});
+    await saveAnalysisRow(ticker,data);
+    if(window._cdAnaTicker===ticker){window._cdAnaData=data;window._cdLastAnalysis=data;}
+    delete _valuationSignals[ticker];
+    if(_ymSel[ticker]){delete _ymSel[ticker].eps;delete _ymSel[ticker].m;delete _ymSel[ticker].mC;delete _ymSel[ticker].mManual;}
+    showToast(mode==='manual'?'✅ EPS normalisé manuel activé':'✅ Base Yahoo réactivée');
+    window._ymRerender(ticker);
+  }catch(e){showToast('❌ '+((e&&e.message)||e));}
+};
 window._ymSetN=function(ticker,n){var st=_ymSel[ticker]||{};st.n=n;_ymSel[ticker]=st;window._ymRerender(ticker);};
 window._ymScenario=function(ticker,scale){var st=_ymSel[ticker]||{};st.scale=scale;_ymSel[ticker]=st;window._ymRerender(ticker);};
 window._ymApply=function(ticker){function v(id){var e=document.getElementById(id),x=parseFloat((e&&e.value||'').replace(',','.'));return isFinite(x)?x:null;}var st=_ymSel[ticker]||{},eps=v('ym-eps'),sc=v('ym-scale'),m=v('ym-m'),r=v('ym-r');if(eps>0)st.eps=eps;if(sc!=null)st.scale=Math.max(40,Math.min(180,Math.round(sc)));if(m!=null){st.mC=Math.max(5,Math.min(100,Math.round(m)));st.mManual=true;st.m=st.mC;}if(r!=null)st.r=Math.max(1,Math.min(50,r));_ymSel[ticker]=st;window._ymRerender(ticker);};
@@ -5780,8 +5865,9 @@ window._ymPick=function(ticker,sc,m){var st=_ymSel[ticker]||{};st.scale=sc;st.m=
 // Transparence du calcul du multiple de sortie
 window._ymDetail=function(ticker, gTerminal){
   var f=(S.fundamentals&&S.fundamentals[ticker])||null;if(!f){showToast('Données insuffisantes');return;}
-  var result=estimateExitMultiple(f,gTerminal,null);
-  showModal('<div class="modal-hd"><h2>🔍 Multiple de sortie central</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px"><div class="card"><div style="font-size:10px;color:var(--muted)">Croissance EPS année 5</div><div style="font-size:18px;font-weight:800">'+(+gTerminal).toFixed(1)+'%</div></div><div class="card"><div style="font-size:10px;color:var(--muted)">Multiple retenu</div><div style="font-size:18px;font-weight:800;color:var(--cyan)">'+result.toFixed(1)+'x</div></div></div><div style="font-size:12px;color:var(--muted);line-height:1.7">Règle V23 : <b style="color:var(--text)">P/E terminal = 10 + 0,75 × croissance EPS A5</b>, avec un plancher de 12x et un plafond de 40x. Le secteur et la médiane historique ne déterminent plus automatiquement le multiple ; la croissance terminale est le moteur principal. Le multiple reste modifiable manuellement.</div>');
+  var analysis=_analysisDataFor(ticker),mb=_moatPEBonusPct(analysis),g=+gTerminal,base=Math.max(12,Math.min(40,9+.80*g)),result=estimateExitMultiple(f,g,null,analysis);
+  var moatTxt=mb.score==null?'Moat non renseigné : bonus 0%.':'Moat '+mb.score+'/100 : bonus +'+mb.bonus.toFixed(1)+'%.';
+  showModal('<div class="modal-hd"><h2>🔍 Multiple de sortie central</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px"><div class="card"><div style="font-size:10px;color:var(--muted)">Croissance EPS année 5</div><div style="font-size:18px;font-weight:800">'+g.toFixed(1)+'%</div></div><div class="card"><div style="font-size:10px;color:var(--muted)">P/E croissance seul</div><div style="font-size:18px;font-weight:800">'+base.toFixed(1)+'x</div></div><div class="card"><div style="font-size:10px;color:var(--muted)">P/E final avec Moat</div><div style="font-size:18px;font-weight:800;color:var(--cyan)">'+result.toFixed(1)+'x</div></div></div><div style="font-size:12px;color:var(--muted);line-height:1.7">Règle V24 : <b style="color:var(--text)">P/E croissance = 9 + 0,80 × croissance EPS A5</b> (plancher 12x, plafond 40x), puis <b style="color:var(--text)">P/E final = P/E croissance × (1 + bonus Moat)</b>. '+moatTxt+' Le bonus Moat est progressif et plafonné à +30%, puis le P/E final est plafonné à 45x. Le multiple reste modifiable manuellement.</div>');
 };
 
 function cdValChart(id, years, vals, currentRatio, label) {
