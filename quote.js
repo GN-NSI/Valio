@@ -598,3 +598,4 @@ Rules:
     return res.json({ symbol, price, prevClose: prev, changeAbs, changePct, change1M, changeYTD, change1Y, currency: meta.currency||'USD', exchange: meta.exchangeName, chartData: chartPts, timestamp: Date.now() });
   } catch (e) { return res.status(500).json({ error: e.message }); }
 };
+
