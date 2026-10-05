@@ -2173,7 +2173,11 @@ function _computeCentralValuationSignal(ticker,price,f,fin){
     dcf=_dcfImpliedReturnFixedTerminal(price,base,g10,r,gt);
   }
   var avg=(matrix!=null&&isFinite(matrix)&&dcf!=null&&isFinite(dcf))?(matrix+dcf)/2:null;
-  return {matrix:matrix,dcf:dcf,avg:avg,gap:(matrix!=null&&dcf!=null)?Math.abs(matrix-dcf):null};
+  var gap=(matrix!=null&&dcf!=null)?Math.abs(matrix-dcf):null,target=15;
+  var decisionMismatch=(matrix!=null&&dcf!=null)?((matrix>=target)!==(dcf>=target)):false;
+  var qualityAlert=!!(prof&&prof.dataAlert);
+  var warn=qualityAlert||decisionMismatch||(gap!=null&&gap>25);
+  return {matrix:matrix,dcf:dcf,avg:avg,gap:gap,warn:warn,decisionMismatch:decisionMismatch,qualityAlert:qualityAlert};
 }
 async function _ensureValuationSignal(ticker){
   if(_valuationSignals[ticker])return _valuationSignals[ticker];
@@ -2184,7 +2188,7 @@ async function _ensureValuationSignal(ticker){
   if(!fin)return null;
   var s=_computeCentralValuationSignal(ticker,p.price,f,fin);if(s)_valuationSignals[ticker]=s;return s;
 }
-function _valuationCellHtml(ticker){var s=_valuationSignals[ticker];if(!s||s.avg==null)return '<span style="color:var(--muted)">—</span>';var warn=s.gap!=null&&s.gap>10?' ⚠':'';return '<div class="mono" style="font-weight:800;color:'+_valuationSignalColor(s.avg)+'" title="Matrice '+s.matrix.toFixed(1)+'% · DCF '+s.dcf.toFixed(1)+'% · écart '+s.gap.toFixed(1)+' pts">'+s.avg.toFixed(1)+'%'+warn+'</div><div style="font-size:8px;color:var(--muted2)">M '+s.matrix.toFixed(1)+' · D '+s.dcf.toFixed(1)+'</div>';}
+function _valuationCellHtml(ticker){var s=_valuationSignals[ticker];if(!s||s.avg==null)return '<span style="color:var(--muted)">—</span>';var warn=s.warn?' ⚠':'';var why=s.qualityAlert?'qualité cash-flow à contrôler':s.decisionMismatch?'désaccord autour du seuil 15%':(s.gap>25?'écart de modèles élevé':'modèles exploitables');return '<div class="mono" style="font-weight:800;color:'+_valuationSignalColor(s.avg)+'" title="Matrice '+s.matrix.toFixed(1)+'% · DCF '+s.dcf.toFixed(1)+'% · écart '+s.gap.toFixed(1)+' pts · '+why+'">'+s.avg.toFixed(1)+'%'+warn+'</div><div style="font-size:8px;color:var(--muted2)">M '+s.matrix.toFixed(1)+' · D '+s.dcf.toFixed(1)+'</div>';}
 function getSortVal(ticker, col){
   if(col==='poids'){var ep=S.enrichedPos.find(function(x){return x.ticker===ticker;});return ep?(ep.valueEur||0):0;}
   if(col==='price') return (S.prices[ticker]&&S.prices[ticker].price)||0;
@@ -2211,16 +2215,28 @@ function thSort(label,col,sortState,fn){
 // ═══ WATCHLIST ═══
 var watchlistItems = [];
 var wlCategoryFilter='all';
-var WL_DEFAULT_CATEGORIES=['Core portefeuille','Candidats renforcement','Paris / Bets','Autres'];
+var WL_DEFAULT_CATEGORIES=['Core','Cœur tactique','Satellite','Autres'];
 function _wlCatStorageKey(){var u=getUser();return 'valio_watch_categories_'+(u&&u.id?u.id:'local');}
 function _wlCatMap(){try{return JSON.parse(localStorage.getItem(_wlCatStorageKey())||'{}')||{};}catch(e){return {};}}
 function _wlSaveLocalCategory(ticker,cat){try{var m=_wlCatMap();m[ticker]=cat||'Autres';localStorage.setItem(_wlCatStorageKey(),JSON.stringify(m));}catch(e){}}
-function _wlCategory(w){return (w&&w.category)||_wlCatMap()[w&&w.ticker]||'Autres';}
-function _wlCatColor(cat){var c=(cat||'').toLowerCase();if(c.indexOf('core')>=0)return '#8b5cf6';if(c.indexOf('renfor')>=0)return '#22c55e';if(c.indexOf('bet')>=0||c.indexOf('pari')>=0)return '#26C5DE';return '#94a3b8';}
+function _wlNormalizeCategory(cat,ticker){
+  var c=(cat||'').trim(),lc=c.toLowerCase();
+  if(lc==='core'||lc==='core portefeuille')return 'Core';
+  if(lc==='cœur tactique'||lc==='coeur tactique'||lc==='tactique')return 'Cœur tactique';
+  if(lc==='satellite'||lc.indexOf('pari')>=0||lc.indexOf('bet')>=0)return 'Satellite';
+  if(lc.indexOf('renfor')>=0){
+    if(ticker&&Object.prototype.hasOwnProperty.call(CORE_SAT,ticker))return CORESAT_LABELS[getCoreSat(ticker)]||'Autres';
+    return 'Autres';
+  }
+  return WL_DEFAULT_CATEGORIES.indexOf(c)>=0?c:'Autres';
+}
+function _wlCategory(w){var t=w&&w.ticker,raw=(w&&w.category)||_wlCatMap()[t]||null;return _wlNormalizeCategory(raw,t);}
+function _wlCatColor(cat){cat=_wlNormalizeCategory(cat);if(cat==='Core')return CORESAT_COLORS.core;if(cat==='Cœur tactique')return CORESAT_COLORS.tactique;if(cat==='Satellite')return CORESAT_COLORS.satellite;return '#94a3b8';}
+function _wlCategorySelect(id,current){current=_wlNormalizeCategory(current);return '<select class="form-input" id="'+id+'">'+WL_DEFAULT_CATEGORIES.map(function(c){return '<option value="'+_esc(c)+'"'+(c===current?' selected':'')+'>'+_esc(c)+'</option>';}).join('')+'</select>';}
 function _wlCatBadge(w){var cat=_wlCategory(w),col=_wlCatColor(cat);return '<button onclick="event.stopPropagation();editWatchCategory(\''+w.id+'\')" title="Changer de catégorie" style="border:1px solid '+col+'55;background:'+col+'16;color:'+col+';border-radius:999px;padding:3px 8px;font-size:9px;font-weight:750;cursor:pointer;white-space:nowrap">'+_esc(cat)+'</button>';}
 window.setWatchCategoryFilter=function(cat){wlCategoryFilter=cat||'all';renderWatchlistTable();};
-window.editWatchCategory=function(wid){var w=watchlistItems.find(function(x){return String(x.id)===String(wid);});if(!w)return;var cur=_wlCategory(w);showModal('<div class="modal-hd"><h2>Catégorie — '+_esc(w.ticker)+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div><label class="form-label">Catégorie</label><input class="form-input" id="wl-cat-edit" list="wl-cat-options" value="'+_esc(cur)+'" placeholder="Ex : Core portefeuille"><datalist id="wl-cat-options">'+WL_DEFAULT_CATEGORIES.map(function(c){return '<option value="'+_esc(c)+'">';}).join('')+'</datalist><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveWatchCategory(\''+wid+'\')">Enregistrer</button></div>');};
-window.saveWatchCategory=async function(wid){var w=watchlistItems.find(function(x){return String(x.id)===String(wid);});if(!w)return;var el=document.getElementById('wl-cat-edit'),cat=(el&&el.value||'Autres').trim()||'Autres';w.category=cat;_wlSaveLocalCategory(w.ticker,cat);try{await dbPatch('watchlist','id=eq.'+wid,{category:cat});}catch(e){/* Compatibilité anciennes tables : fallback localStorage */}closeModal();renderWatchlistTable();showToast('✅ Catégorie mise à jour');};
+window.editWatchCategory=function(wid){var w=watchlistItems.find(function(x){return String(x.id)===String(wid);});if(!w)return;var cur=_wlCategory(w);showModal('<div class="modal-hd"><h2>Catégorie — '+_esc(w.ticker)+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div><label class="form-label">Catégorie</label>'+_wlCategorySelect('wl-cat-edit',cur)+'<div style="font-size:10px;color:var(--muted);margin-top:7px">Même classification que le portefeuille : Core · Cœur tactique · Satellite.</div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveWatchCategory(\''+wid+'\')">Enregistrer</button></div>');};
+window.saveWatchCategory=async function(wid){var w=watchlistItems.find(function(x){return String(x.id)===String(wid);});if(!w)return;var el=document.getElementById('wl-cat-edit'),cat=_wlNormalizeCategory((el&&el.value)||'Autres',w.ticker);w.category=cat;_wlSaveLocalCategory(w.ticker,cat);try{await dbPatch('watchlist','id=eq.'+wid,{category:cat});}catch(e){/* Compatibilité anciennes tables : fallback localStorage */}closeModal();renderWatchlistTable();showToast('✅ Catégorie mise à jour');};
 
 function mkLogoCell(ticker) {
   var t = ticker.replace(/[^A-Z0-9]/gi,'').slice(0,3).toUpperCase();
@@ -2231,7 +2247,7 @@ async function renderWatchlist(){
   var pg=document.getElementById('page');
   var u=getUser(); if(!u) return;
   pg.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;flex-wrap:wrap;gap:10px">'+
-    '<div><h2 style="font-size:18px;font-weight:700">👁️ Watchlist</h2><p style="color:var(--muted);font-size:13px;margin-top:3px">Classe tes idées par rôle : core, candidats au renforcement, paris/bets ou catégories personnalisées.</p></div>'+
+    '<div><h2 style="font-size:18px;font-weight:700">👁️ Watchlist</h2><p style="color:var(--muted);font-size:13px;margin-top:3px">Classe tes idées avec la même logique que le portefeuille : Core, Cœur tactique ou Satellite, puis compare leur rendement potentiel.</p></div>'+
     '<button class="btn btn-primary" onclick="openAddWatch()">+ Ajouter un titre</button>'+
     '</div><div id="wl-content"><div style="text-align:center;padding:40px"><div class="spinner"></div></div></div>';
   await loadWatchlist();
@@ -2284,6 +2300,7 @@ function renderWatchlistTable(){
       '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+w.ticker+'">'+w.name+'</div><div class="ticker-sym">'+w.ticker+'</div></div></div></td>'+
       '<td>'+_wlCatBadge(w)+'</td>'+
       '<td>'+priceStr+'</td>'+
+      '<td id="wr-'+tid+'-valiorend">'+_valuationCellHtml(w.ticker)+'</td>'+
       '<td style="text-align:left">'+tgtCell+'</td>'+
       ['per','fwdpe','peg','pocf','marge','ca1a','cafwd','eps1a','epsfwd','debt'].map(function(k){return '<td id="wr-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '<td style="white-space:nowrap;position:sticky;right:0;background:var(--card);box-shadow:-6px 0 12px -4px rgba(0,0,0,.5);z-index:2"><button class="btn btn-ghost btn-sm" onclick="editTargets(\''+w.id+'\')" title="Définir les cibles">🎯</button>'+
@@ -2297,6 +2314,7 @@ function renderWatchlistTable(){
     '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+ 
     '<th style="text-align:left;min-width:150px">Catégorie</th>'+ 
     thSort('Cours','price',wlSort,'sortWL')+
+    thSort('Rend. Valio','valiorend',wlSort,'sortWL')+
     '<th style="text-align:left">🎯 Cible</th>'+
     thSort('PER','per',wlSort,'sortWL')+
     thSort('Fwd PER','fwdpe',wlSort,'sortWL')+
@@ -2309,7 +2327,7 @@ function renderWatchlistTable(){
     '<th style="position:sticky;right:0;background:var(--card);box-shadow:-6px 0 12px -4px rgba(0,0,0,.5);z-index:3;min-width:90px">Actions</th>'+
     '</tr></thead><tbody>'+rows+'</tbody></table></div></div>'+
     '<div style="margin-top:12px;display:flex;justify-content:flex-end">'+
-    '<button class="btn btn-primary" onclick="loadWatchRatios()">⟳ Charger les ratios</button></div>';
+    '<button class="btn btn-primary" onclick="loadWatchRatios()">⟳ Charger ratios & valorisation</button></div>';
   // Restaurer les ratios depuis le cache (S.fundamentals)
   sorted.forEach(function(w){ if(S.fundamentals[w.ticker]) updateRatioRowById('wr',w.ticker); });
 }
@@ -2318,7 +2336,7 @@ window.editTargets=function(wid){
   var w=watchlistItems.find(function(x){return String(x.id)===String(wid);}); if(!w) return;
   showModal('<div class="modal-hd"><h2>🎯 Cibles — '+w.ticker+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div>'+
     '<p style="font-size:12px;color:var(--muted);margin-bottom:12px">Le badge ATTEINT s\u0027affiche dès qu\u0027UN des niveaux touche (laisser vide = pas de cible). Les P/E se vérifient après « Charger les ratios ».</p>'+
-    '<label class="form-label">Catégorie</label><input class="form-input" id="tg-cat" list="tg-cat-options" value="'+_esc(_wlCategory(w))+'"><datalist id="tg-cat-options">'+WL_DEFAULT_CATEGORIES.map(function(c){return '<option value="'+_esc(c)+'">';}).join('')+'</datalist>'+
+    '<label class="form-label">Catégorie</label>'+_wlCategorySelect('tg-cat',_wlCategory(w))+
     '<label class="form-label" style="margin-top:8px">Prix cible (devise du titre)</label><input class="form-input" id="tg-price" value="'+(w.target_price!=null?w.target_price:'')+'" placeholder="ex : 550">'+
     '<label class="form-label" style="margin-top:8px">P/E cible</label><input class="form-input" id="tg-pe" value="'+(w.target_pe!=null?w.target_pe:'')+'" placeholder="ex : 20">'+
     '<label class="form-label" style="margin-top:8px">Fwd P/E cible</label><input class="form-input" id="tg-fwdpe" value="'+(w.target_fwdpe!=null?w.target_fwdpe:'')+'" placeholder="ex : 16">'+
@@ -2327,7 +2345,7 @@ window.editTargets=function(wid){
 window.saveTargets=async function(wid){
   function fv(id){ var v=document.getElementById(id).value.replace(',','.').trim(); return v===''?null:parseFloat(v); }
   try{
-    var w=watchlistItems.find(function(x){return String(x.id)===String(wid);}),cat=((document.getElementById('tg-cat')||{}).value||'Autres').trim()||'Autres';
+    var w=watchlistItems.find(function(x){return String(x.id)===String(wid);}),cat=_wlNormalizeCategory(((document.getElementById('tg-cat')||{}).value||'Autres'),w&&w.ticker);
     if(w){w.category=cat;_wlSaveLocalCategory(w.ticker,cat);}
     try{await dbPatch('watchlist','id=eq.'+wid,{target_price:fv('tg-price'),target_pe:fv('tg-pe'),target_fwdpe:fv('tg-fwdpe'),category:cat});}
     catch(_catErr){await dbPatch('watchlist','id=eq.'+wid,{target_price:fv('tg-price'),target_pe:fv('tg-pe'),target_fwdpe:fv('tg-fwdpe')});}
@@ -2348,6 +2366,8 @@ async function loadWatchRatios(){
         try{var r=await fetch(API+'?symbol='+encodeURIComponent(w.ticker)+'&type=fundamentals',{signal:AbortSignal.timeout(10000)});var d=await r.json();if(d&&!d.error)S.fundamentals[w.ticker]=d;}catch(e){}
       }
       updateRatioRowById('wr',w.ticker);
+      try{await _ensureValuationSignal(w.ticker);}catch(_ve){}
+      var ve=document.getElementById('wr-'+w.ticker.replace(/[^a-zA-Z0-9]/g,'_')+'-valiorend');if(ve)ve.innerHTML=_valuationCellHtml(w.ticker);
     }));
     if(i+BATCH<watchlistItems.length) await new Promise(function(r){setTimeout(r,DELAY);});
   }
@@ -2383,14 +2403,14 @@ function openAddWatch(){
     '<div class="form-group"><label class="form-label">Ticker *</label><input type="text" id="w-ticker" class="form-input" placeholder="ex: AAPL" oninput="this.value=this.value.toUpperCase()"></div>'+
     '<div class="form-group"><label class="form-label">Nom *</label><input type="text" id="w-name" class="form-input" placeholder="ex: Apple"></div>'+
     '</div>'+
-    '<div class="form-group"><label class="form-label">Catégorie</label><input id="w-category" class="form-input" list="w-cat-options" value="Core portefeuille" placeholder="Ex : Core portefeuille"><datalist id="w-cat-options">'+WL_DEFAULT_CATEGORIES.map(function(c){return '<option value="'+_esc(c)+'">';}).join('')+'</datalist></div>'+
+    '<div class="form-group"><label class="form-label">Catégorie</label>'+_wlCategorySelect('w-category','Core')+'</div>'+
     '<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveWatch()">Ajouter</button></div>');
 }
 
 async function saveWatch(){
   var ticker=document.getElementById('w-ticker').value.trim().toUpperCase();
   var name=document.getElementById('w-name').value.trim();
-  var category=((document.getElementById('w-category')||{}).value||'Autres').trim()||'Autres';
+  var category=_wlNormalizeCategory(((document.getElementById('w-category')||{}).value||'Core'),ticker);
   if(!ticker||!name){showToast('Remplis les deux champs');return;}
   var u=getUser(); if(!u) return;
   try{
@@ -5630,13 +5650,17 @@ function _dcfCashProfile(ticker,price,f,fin,proj){
   if(fin&&fin.operatingCF&&fin.netIncome){for(var j=0;j<Math.min(fin.operatingCF.length,fin.netIncome.length);j++){var oo=fin.operatingCF[j],ni2=fin.netIncome[j];if(oo>0&&ni2>0&&oo/ni2>.1&&oo/ni2<3)histON.push(oo/ni2);}}
   var histFNMed=_dcfMedian(histFN),histONMed=_dcfMedian(histON),niTtm=(f&&f.netIncomeToCommon>0)?f.netIncomeToCommon:null,fcf=f&&f.freeCashflow>0?f.freeCashflow:null,ocf=f&&f.operatingCashFlow>0?f.operatingCashFlow:null;
   var curFN=(fcf&&niTtm)?fcf/niTtm:null,curON=(ocf&&niTtm)?ocf/niTtm:null,reported=null,reportedSource='';
+  var annFN=(annF>0&&annNI>0)?annF/annNI:null,rawDataIssue=false;
   if(epsQuote>0&&curFN>0&&curFN<2){reported=epsQuote*curFN;reportedSource='FCF TTM / bénéfice TTM × EPS coté';}
-  else if(epsQuote>0&&annF>0&&annNI>0){reported=epsQuote*(annF/annNI);reportedSource='conversion FCF/bénéfice annuelle';}
+  else if(epsQuote>0&&annFN>0.08&&annFN<1.8){reported=epsQuote*annFN;reportedSource='conversion FCF/bénéfice annuelle';}
   else if(quoteCur===finCur&&f&&f.sharesOutstanding>0&&fcf>0){reported=fcf/f.sharesOutstanding;reportedSource='FCF / actions';}
-  var targetFN=Math.max(.35,Math.min(1.25,histFNMed!=null?histFNMed:(curFN!=null?curFN:.8))),normalized=epsQuote>0?epsQuote*targetFN:reported;if(!(normalized>0))normalized=reported;
-  var reasons=[];if(reported>0&&normalized>0&&reported<normalized*.70)reasons.push('conversion FCF/bénéfice courante sous sa norme historique');if(curON!=null&&curFN!=null&&curON>0&&curFN/curON<.45)reasons.push('FCF faible relativement à l’OCF');if(quoteCur!==finCur)reasons.push('instrument coté en '+quoteCur+' alors que les comptes sont en '+finCur+' : conversion par ratios par action');
-  var ratio=reported>0&&normalized>0?normalized/reported:null,dataAlert=ratio!=null&&ratio>2.5;if(dataAlert)reasons.push('écart reporté/normalisé supérieur à 2,5× : contrôle de données recommandé');
-  var distorted=reasons.length>0&&reported>0&&normalized>reported*1.12,autoMode=distorted?'normalized':'reported';
+  else if(annFN!=null&&(annFN<=.08||annFN>=1.8)){rawDataIssue=true;}
+  var targetFN=Math.max(.35,Math.min(1.25,histFNMed!=null?histFNMed:(curFN!=null&&curFN>0&&curFN<2?curFN:.8))),normalized=epsQuote>0?epsQuote*targetFN:reported;if(!(normalized>0))normalized=reported;
+  // Sanity check : un FCF/action > 2x l'EPS coté est presque toujours une erreur de devise/ADR/période.
+  if(reported>0&&epsQuote>0&&reported/epsQuote>2){rawDataIssue=true;reported=null;reportedSource='';}
+  var reasons=[];if(rawDataIssue)reasons.push('conversion FCF/bénéfice brute incohérente : base normalisée utilisée');if(reported>0&&normalized>0&&reported<normalized*.70)reasons.push('conversion FCF/bénéfice courante sous sa norme historique');if(curON!=null&&curFN!=null&&curON>0&&curFN/curON<.45)reasons.push('FCF faible relativement à l’OCF');if(quoteCur!==finCur)reasons.push('instrument coté en '+quoteCur+' alors que les comptes sont en '+finCur+' : conversion par ratios par action');
+  var ratio=reported>0&&normalized>0?normalized/reported:null,dataAlert=rawDataIssue||(ratio!=null&&(ratio>2.5||ratio<.25));if(dataAlert&&ratio!=null&&ratio>2.5)reasons.push('écart reporté/normalisé supérieur à 2,5× : contrôle de données recommandé');
+  var distorted=reasons.length>0&&reported>0&&normalized>reported*1.12,autoMode=(!reported||dataAlert||distorted)?'normalized':'reported';
   return {reported:reported,normalized:normalized,autoMode:autoMode,epsQuote:epsQuote,histFN:histFNMed,histON:histONMed,curFN:curFN,curON:curON,reasons:reasons,dataAlert:dataAlert,quoteCurrency:quoteCur,financialCurrency:finCur,reportedSource:reportedSource};
 }
 function _dcfCompute(ticker,price,f,fin){
@@ -5684,7 +5708,7 @@ function renderYieldMatrix(ticker, price, f, fin){
   var peRefs='<div style="display:flex;gap:7px;flex-wrap:wrap;margin:0 0 12px">'+peMini('P/E TTM',peTtm,'12 derniers mois')+peMini('P/E FY0',peFy0,'exercice en cours')+peMini('P/E FY1',peFy1,'exercice suivant')+peMini('Médiane P/E 5A',medPE,'historique du titre')+'</div>',tName=ticker.replace(/'/g,"\\'");
   function tog(label,n){return '<button onclick="window._ymSetN(\''+tName+'\','+n+')" style="padding:4px 12px;font-size:11px;font-weight:700;border-radius:6px;cursor:pointer;border:none;'+(N===n?'background:#634BE4;color:white;':'background:rgba(255,255,255,.08);color:var(--muted);')+'">'+label+'</button>';}
   function scenarioBtn(label,sc){var active=Math.round(scale)===sc;return '<button onclick="window._ymScenario(\''+tName+'\','+sc+')" class="btn btn-ghost btn-sm" style="'+(active?'border-color:var(--blue);background:rgba(99,75,228,.15);color:#fff':'')+'">'+label+'</button>';}
-  var dcfPreview=_dcfCompute(ticker,price,f,fin),cohHtml='';if(dcfPreview&&dcfPreview.irr!=null){var diff=Math.abs(selRet-dcfPreview.irr),cc=diff<=3?'#22c55e':diff<=8?'#f59e0b':'#ef4444',cl=diff<=3?'Écart faible — modèles cohérents':diff<=8?'Écart modéré':'Écart élevé — vérifier conversion cash / multiple';cohHtml='<div style="margin:0 0 14px;padding:10px 12px;border:1px solid '+cc+'44;background:'+cc+'0d;border-radius:9px;display:flex;gap:20px;align-items:center;flex-wrap:wrap;font-size:10px"><b style="color:'+cc+'">Cohérence des modèles</b><span>Matrice '+N+'A : <b style="color:var(--text)">'+selRet.toFixed(1)+'%/an</b></span><span>DCF 10A + terminal : <b style="color:var(--text)">'+dcfPreview.irr.toFixed(1)+'%/an</b></span><span style="color:'+cc+'">'+cl+' ('+diff.toFixed(1)+' pts)</span></div>';}
+  var dcfPreview=_dcfCompute(ticker,price,f,fin),cohHtml='';if(dcfPreview&&dcfPreview.irr!=null){var diff=Math.abs(selRet-dcfPreview.irr),target=15,decisionMismatch=(selRet>=target)!==(dcfPreview.irr>=target),qualityAlert=!!(dcfPreview.prof&&dcfPreview.prof.dataAlert),cc,cl;if(qualityAlert){cc='#ef4444';cl='Qualité cash-flow à contrôler';}else if(decisionMismatch){cc='#ef4444';cl='Désaccord de verdict autour du seuil '+target+'%';}else if(diff<=8){cc='#22c55e';cl='Écart faible — modèles cohérents';}else if(diff<=25){cc='#26C5DE';cl='Même verdict — écart de magnitude';}else{cc='#f59e0b';cl='Même verdict mais écart élevé';}cohHtml='<div style="margin:0 0 14px;padding:10px 12px;border:1px solid '+cc+'44;background:'+cc+'0d;border-radius:9px;display:flex;gap:20px;align-items:center;flex-wrap:wrap;font-size:10px"><b style="color:'+cc+'">Cohérence des modèles</b><span>Matrice '+N+'A : <b style="color:var(--text)">'+selRet.toFixed(1)+'%/an</b></span><span>DCF 10A + terminal : <b style="color:var(--text)">'+dcfPreview.irr.toFixed(1)+'%/an</b></span><span style="color:'+cc+'">'+cl+' ('+diff.toFixed(1)+' pts)</span></div>';}
   var scenarioName=scale===75?'Bear':scale===125?'Bull':scale===100?'Base':'Personnalisé '+scale+'%';
   var html='<div style="display:flex;align-items:center;gap:6px;margin-bottom:14px">'+tog('5 ans',5)+tog('10 ans',10)+'<div style="margin-left:16px;display:flex;gap:26px;flex-wrap:wrap"><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Mon scénario — prix max ('+rC+'%/an)</div><div style="font-size:20px;font-weight:800;color:#634BE4" class="mono">'+cSym+fN(fair)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Mon scénario — rendement '+N+' ans</div><div style="font-size:20px;font-weight:800;color:'+cellColor(selRet)+'" class="mono">'+selRet.toFixed(2)+' %/an</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Écart au prix max</div><div style="font-size:20px;font-weight:800;color:'+(gap>=0?'#22c55e':'#f59e0b')+'" class="mono">'+(gap>=0?'+':'')+gap.toFixed(2)+' %</div></div></div></div>'+peRefs+
     '<div style="padding:9px 12px;margin-bottom:12px;border:1px solid rgba(38,197,222,.18);background:rgba(38,197,222,.045);border-radius:8px;font-size:10px;color:var(--muted);line-height:1.55"><b style="color:var(--text)">Projection commune ('+scenarioName+') :</b> '+proj.baseSrc+' · EPS '+cSym+fN(eps0)+' · '+centralPathTxt+' · multiple auto '+mCur.toFixed(1)+'x.'+(proj.cyclical?' <span style="color:#f59e0b">Titre cyclique : EPS normalisé mi-cycle.</span>':'')+'</div>'+
