@@ -2156,9 +2156,39 @@ function sortSC(col){
   // Re-render screener rows with sort
   renderScreenerTable(scSort);
 }
+var _valuationSignals={};
+var _valuationFinCache={};
+function _valuationSignalColor(v){return v>=20?'#22c55e':v>=15?'#26C5DE':v>=10?'#f59e0b':'#ef4444';}
+function _computeCentralValuationSignal(ticker,price,f,fin){
+  if(!(price>0)||!f||!fin)return null;
+  var proj=_valuationProjection(ticker,f,fin,null);if(!proj)return null;
+  var g5=_projectionGrowths(proj,5,100);if(!g5.length)return null;
+  var mult=estimateExitMultiple(f,g5[g5.length-1],null),epsN=_projectEps(proj.epsBase,g5);
+  var matrix=(epsN>0&&mult>0)?(Math.pow((epsN*mult)/price,1/5)-1)*100:null;
+  var prof=_dcfCashProfile(ticker,price,f,fin,proj),dcf=null;
+  if(prof&&((prof.reported>0)||(prof.normalized>0))){
+    var effective=prof.autoMode||'reported',base=effective==='normalized'?prof.normalized:prof.reported;if(!(base>0))base=prof.normalized||prof.reported;
+    var g10=_projectionGrowths(proj,10,100),plateau=g10[4]!=null?g10[4]:g10[g10.length-1];for(var z=5;z<10;z++)g10[z]=plateau;
+    var r=_dcfSectorRate(f,g10[0]),gt=4.5;if(r<=gt+.5)r=gt+.5;
+    dcf=_dcfImpliedReturnFixedTerminal(price,base,g10,r,gt);
+  }
+  var avg=(matrix!=null&&isFinite(matrix)&&dcf!=null&&isFinite(dcf))?(matrix+dcf)/2:null;
+  return {matrix:matrix,dcf:dcf,avg:avg,gap:(matrix!=null&&dcf!=null)?Math.abs(matrix-dcf):null};
+}
+async function _ensureValuationSignal(ticker){
+  if(_valuationSignals[ticker])return _valuationSignals[ticker];
+  var f=S.fundamentals[ticker];if(!f)return null;
+  var p=S.prices[ticker];if(!p||!(p.price>0))return null;
+  var fin=_valuationFinCache[ticker];
+  if(!fin){try{var r=await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=financials',{signal:AbortSignal.timeout(12000)});var d=await r.json();if(d&&!d.error){fin=d;_valuationFinCache[ticker]=d;}}catch(e){}}
+  if(!fin)return null;
+  var s=_computeCentralValuationSignal(ticker,p.price,f,fin);if(s)_valuationSignals[ticker]=s;return s;
+}
+function _valuationCellHtml(ticker){var s=_valuationSignals[ticker];if(!s||s.avg==null)return '<span style="color:var(--muted)">—</span>';var warn=s.gap!=null&&s.gap>10?' ⚠':'';return '<div class="mono" style="font-weight:800;color:'+_valuationSignalColor(s.avg)+'" title="Matrice '+s.matrix.toFixed(1)+'% · DCF '+s.dcf.toFixed(1)+'% · écart '+s.gap.toFixed(1)+' pts">'+s.avg.toFixed(1)+'%'+warn+'</div><div style="font-size:8px;color:var(--muted2)">M '+s.matrix.toFixed(1)+' · D '+s.dcf.toFixed(1)+'</div>';}
 function getSortVal(ticker, col){
   if(col==='poids'){var ep=S.enrichedPos.find(function(x){return x.ticker===ticker;});return ep?(ep.valueEur||0):0;}
   if(col==='price') return (S.prices[ticker]&&S.prices[ticker].price)||0;
+  if(col==='valiorend') return (_valuationSignals[ticker]&&_valuationSignals[ticker].avg!=null)?_valuationSignals[ticker].avg:null;
   var f=S.fundamentals[ticker]; if(!f) return null;
   var map={per:'trailingPE',fwdpe:'forwardPE',peg:'pegRatio',pocf:'pocf',marge:'profitMarginPct',ca1a:'revenueGrowthYoY',cafwd:'revenueGrowthFwd1Y',eps1a:'epsGrowth1Y',epsfwd:'epsGrowthFwd1Y',debt:'netDebtToEBITDA'};
   return f[map[col]]??null;
@@ -2180,6 +2210,17 @@ function thSort(label,col,sortState,fn){
 }
 // ═══ WATCHLIST ═══
 var watchlistItems = [];
+var wlCategoryFilter='all';
+var WL_DEFAULT_CATEGORIES=['Core portefeuille','Candidats renforcement','Paris / Bets','Autres'];
+function _wlCatStorageKey(){var u=getUser();return 'valio_watch_categories_'+(u&&u.id?u.id:'local');}
+function _wlCatMap(){try{return JSON.parse(localStorage.getItem(_wlCatStorageKey())||'{}')||{};}catch(e){return {};}}
+function _wlSaveLocalCategory(ticker,cat){try{var m=_wlCatMap();m[ticker]=cat||'Autres';localStorage.setItem(_wlCatStorageKey(),JSON.stringify(m));}catch(e){}}
+function _wlCategory(w){return (w&&w.category)||_wlCatMap()[w&&w.ticker]||'Autres';}
+function _wlCatColor(cat){var c=(cat||'').toLowerCase();if(c.indexOf('core')>=0)return '#8b5cf6';if(c.indexOf('renfor')>=0)return '#22c55e';if(c.indexOf('bet')>=0||c.indexOf('pari')>=0)return '#26C5DE';return '#94a3b8';}
+function _wlCatBadge(w){var cat=_wlCategory(w),col=_wlCatColor(cat);return '<button onclick="event.stopPropagation();editWatchCategory(\''+w.id+'\')" title="Changer de catégorie" style="border:1px solid '+col+'55;background:'+col+'16;color:'+col+';border-radius:999px;padding:3px 8px;font-size:9px;font-weight:750;cursor:pointer;white-space:nowrap">'+_esc(cat)+'</button>';}
+window.setWatchCategoryFilter=function(cat){wlCategoryFilter=cat||'all';renderWatchlistTable();};
+window.editWatchCategory=function(wid){var w=watchlistItems.find(function(x){return String(x.id)===String(wid);});if(!w)return;var cur=_wlCategory(w);showModal('<div class="modal-hd"><h2>Catégorie — '+_esc(w.ticker)+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div><label class="form-label">Catégorie</label><input class="form-input" id="wl-cat-edit" list="wl-cat-options" value="'+_esc(cur)+'" placeholder="Ex : Core portefeuille"><datalist id="wl-cat-options">'+WL_DEFAULT_CATEGORIES.map(function(c){return '<option value="'+_esc(c)+'">';}).join('')+'</datalist><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveWatchCategory(\''+wid+'\')">Enregistrer</button></div>');};
+window.saveWatchCategory=async function(wid){var w=watchlistItems.find(function(x){return String(x.id)===String(wid);});if(!w)return;var el=document.getElementById('wl-cat-edit'),cat=(el&&el.value||'Autres').trim()||'Autres';w.category=cat;_wlSaveLocalCategory(w.ticker,cat);try{await dbPatch('watchlist','id=eq.'+wid,{category:cat});}catch(e){/* Compatibilité anciennes tables : fallback localStorage */}closeModal();renderWatchlistTable();showToast('✅ Catégorie mise à jour');};
 
 function mkLogoCell(ticker) {
   var t = ticker.replace(/[^A-Z0-9]/gi,'').slice(0,3).toUpperCase();
@@ -2190,7 +2231,7 @@ async function renderWatchlist(){
   var pg=document.getElementById('page');
   var u=getUser(); if(!u) return;
   pg.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;flex-wrap:wrap;gap:10px">'+
-    '<div><h2 style="font-size:18px;font-weight:700">🎯 Cibles d\u0027achat</h2><p style="color:var(--muted);font-size:13px;margin-top:3px">Watchlist + niveaux de renforcement : prix, P/E ou Fwd P/E cible — badge ATTEINT quand ça touche</p></div>'+
+    '<div><h2 style="font-size:18px;font-weight:700">👁️ Watchlist</h2><p style="color:var(--muted);font-size:13px;margin-top:3px">Classe tes idées par rôle : core, candidats au renforcement, paris/bets ou catégories personnalisées.</p></div>'+
     '<button class="btn btn-primary" onclick="openAddWatch()">+ Ajouter un titre</button>'+
     '</div><div id="wl-content"><div style="text-align:center;padding:40px"><div class="spinner"></div></div></div>';
   await loadWatchlist();
@@ -2200,6 +2241,7 @@ async function loadWatchlist(){
   var u=getUser(); if(!u) return;
   try {
     watchlistItems = await dbGet('watchlist','user_id=eq.'+u.id+'&order=created_at') || [];
+    watchlistItems.forEach(function(w){if(!w.category)w.category=_wlCategory(w);});
     renderWatchlistTable();
     await Promise.all(watchlistItems.map(async function(w){
       if(S.prices[w.ticker]) return;
@@ -2217,8 +2259,11 @@ function renderWatchlistTable(){
     el.innerHTML='<div style="text-align:center;padding:60px;color:var(--muted)">Aucun titre en watchlist.<br>Clique "+ Ajouter un titre" pour commencer.</div>';
     return;
   }
-// rows will be built inside the sort block below
-  var sorted=sortItems(watchlistItems.slice(),wlSort);
+// Catégories + filtre
+  var cats=[];watchlistItems.forEach(function(w){var c=_wlCategory(w);if(cats.indexOf(c)<0)cats.push(c);});
+  WL_DEFAULT_CATEGORIES.forEach(function(c){if(cats.indexOf(c)<0&&watchlistItems.some(function(w){return _wlCategory(w)===c;}))cats.push(c);});
+  var filtered=wlCategoryFilter==='all'?watchlistItems.slice():watchlistItems.filter(function(w){return _wlCategory(w)===wlCategoryFilter;});
+  var sorted=sortItems(filtered,wlSort);
   var rows=sorted.map(function(w){
     var d=S.prices[w.ticker];
     var _sc=d&&d.currency||'USD'; var _sdp=(_sc==='USD'||_sc==='EUR')?d&&d.price:d&&toEur(d.price,_sc); var _ss=_sc==='USD'?'$':'€';
@@ -2237,6 +2282,7 @@ function renderWatchlistTable(){
       '<td style="text-align:left;padding-left:20px"><div class="ticker-cell">'+
       mkLogoCell(w.ticker)+
       '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+w.ticker+'">'+w.name+'</div><div class="ticker-sym">'+w.ticker+'</div></div></div></td>'+
+      '<td>'+_wlCatBadge(w)+'</td>'+
       '<td>'+priceStr+'</td>'+
       '<td style="text-align:left">'+tgtCell+'</td>'+
       ['per','fwdpe','peg','pocf','marge','ca1a','cafwd','eps1a','epsfwd','debt'].map(function(k){return '<td id="wr-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
@@ -2244,9 +2290,12 @@ function renderWatchlistTable(){
       '<button class="btn btn-danger btn-sm" onclick="removeWatch(this)" data-id="'+w.id+'" data-ticker="'+w.ticker+'" title="Retirer de la watchlist">✕</button></td>'+
       '</tr>';
   }).join('');
-  el.innerHTML='<div class="card"><div class="tbl-wrap"><table>'+
-    '<thead><tr>'+
-    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+
+  var filterHtml='<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px">'+
+    '<button onclick="setWatchCategoryFilter(\'all\')" style="padding:5px 10px;border-radius:999px;border:1px solid '+(wlCategoryFilter==='all'?'rgba(99,75,228,.55)':'var(--border2)')+';background:'+(wlCategoryFilter==='all'?'rgba(99,75,228,.16)':'transparent')+';color:'+(wlCategoryFilter==='all'?'#c4b5fd':'var(--muted)')+';cursor:pointer;font-size:10px">Toutes · '+watchlistItems.length+'</button>'+cats.map(function(c){var n=watchlistItems.filter(function(w){return _wlCategory(w)===c;}).length,col=_wlCatColor(c);return '<button onclick="setWatchCategoryFilter(\''+String(c).replace(/'/g,"\\'")+'\')" style="padding:5px 10px;border-radius:999px;border:1px solid '+(wlCategoryFilter===c?col+'88':'var(--border2)')+';background:'+(wlCategoryFilter===c?col+'18':'transparent')+';color:'+(wlCategoryFilter===c?col:'var(--muted)')+';cursor:pointer;font-size:10px">'+_esc(c)+' · '+n+'</button>';}).join('')+'</div>';
+  el.innerHTML=filterHtml+'<div class="card"><div class="tbl-wrap"><table>'+ 
+    '<thead><tr>'+ 
+    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+ 
+    '<th style="text-align:left;min-width:150px">Catégorie</th>'+ 
     thSort('Cours','price',wlSort,'sortWL')+
     '<th style="text-align:left">🎯 Cible</th>'+
     thSort('PER','per',wlSort,'sortWL')+
@@ -2269,7 +2318,8 @@ window.editTargets=function(wid){
   var w=watchlistItems.find(function(x){return String(x.id)===String(wid);}); if(!w) return;
   showModal('<div class="modal-hd"><h2>🎯 Cibles — '+w.ticker+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div>'+
     '<p style="font-size:12px;color:var(--muted);margin-bottom:12px">Le badge ATTEINT s\u0027affiche dès qu\u0027UN des niveaux touche (laisser vide = pas de cible). Les P/E se vérifient après « Charger les ratios ».</p>'+
-    '<label class="form-label">Prix cible (devise du titre)</label><input class="form-input" id="tg-price" value="'+(w.target_price!=null?w.target_price:'')+'" placeholder="ex : 550">'+
+    '<label class="form-label">Catégorie</label><input class="form-input" id="tg-cat" list="tg-cat-options" value="'+_esc(_wlCategory(w))+'"><datalist id="tg-cat-options">'+WL_DEFAULT_CATEGORIES.map(function(c){return '<option value="'+_esc(c)+'">';}).join('')+'</datalist>'+
+    '<label class="form-label" style="margin-top:8px">Prix cible (devise du titre)</label><input class="form-input" id="tg-price" value="'+(w.target_price!=null?w.target_price:'')+'" placeholder="ex : 550">'+
     '<label class="form-label" style="margin-top:8px">P/E cible</label><input class="form-input" id="tg-pe" value="'+(w.target_pe!=null?w.target_pe:'')+'" placeholder="ex : 20">'+
     '<label class="form-label" style="margin-top:8px">Fwd P/E cible</label><input class="form-input" id="tg-fwdpe" value="'+(w.target_fwdpe!=null?w.target_fwdpe:'')+'" placeholder="ex : 16">'+
     '<button class="btn btn-primary" style="width:100%;margin-top:14px" onclick="saveTargets(\''+wid+'\')">Enregistrer</button>');
@@ -2277,7 +2327,10 @@ window.editTargets=function(wid){
 window.saveTargets=async function(wid){
   function fv(id){ var v=document.getElementById(id).value.replace(',','.').trim(); return v===''?null:parseFloat(v); }
   try{
-    await dbPatch('watchlist','id=eq.'+wid,{target_price:fv('tg-price'),target_pe:fv('tg-pe'),target_fwdpe:fv('tg-fwdpe')});
+    var w=watchlistItems.find(function(x){return String(x.id)===String(wid);}),cat=((document.getElementById('tg-cat')||{}).value||'Autres').trim()||'Autres';
+    if(w){w.category=cat;_wlSaveLocalCategory(w.ticker,cat);}
+    try{await dbPatch('watchlist','id=eq.'+wid,{target_price:fv('tg-price'),target_pe:fv('tg-pe'),target_fwdpe:fv('tg-fwdpe'),category:cat});}
+    catch(_catErr){await dbPatch('watchlist','id=eq.'+wid,{target_price:fv('tg-price'),target_pe:fv('tg-pe'),target_fwdpe:fv('tg-fwdpe')});}
     closeModal(); showToast('🎯 Cibles enregistrées'); loadWatchlist();
   }catch(e){
     var m=(e.message||'')+'';
@@ -2330,16 +2383,19 @@ function openAddWatch(){
     '<div class="form-group"><label class="form-label">Ticker *</label><input type="text" id="w-ticker" class="form-input" placeholder="ex: AAPL" oninput="this.value=this.value.toUpperCase()"></div>'+
     '<div class="form-group"><label class="form-label">Nom *</label><input type="text" id="w-name" class="form-input" placeholder="ex: Apple"></div>'+
     '</div>'+
+    '<div class="form-group"><label class="form-label">Catégorie</label><input id="w-category" class="form-input" list="w-cat-options" value="Core portefeuille" placeholder="Ex : Core portefeuille"><datalist id="w-cat-options">'+WL_DEFAULT_CATEGORIES.map(function(c){return '<option value="'+_esc(c)+'">';}).join('')+'</datalist></div>'+
     '<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveWatch()">Ajouter</button></div>');
 }
 
 async function saveWatch(){
   var ticker=document.getElementById('w-ticker').value.trim().toUpperCase();
   var name=document.getElementById('w-name').value.trim();
+  var category=((document.getElementById('w-category')||{}).value||'Autres').trim()||'Autres';
   if(!ticker||!name){showToast('Remplis les deux champs');return;}
   var u=getUser(); if(!u) return;
   try{
-    var d=await dbPost('watchlist',{user_id:u.id,ticker:ticker,name:name});
+    var d=null;try{d=await dbPost('watchlist',{user_id:u.id,ticker:ticker,name:name,category:category});}catch(_catErr){d=await dbPost('watchlist',{user_id:u.id,ticker:ticker,name:name});}
+    d.category=category;_wlSaveLocalCategory(ticker,category);
     watchlistItems.push(d);
     closeModal();showToast('✅ '+ticker+' ajouté');renderWatchlistTable();
   } catch(e){ showToast('Erreur: '+e.message); }
@@ -2441,6 +2497,7 @@ async function renderScreener(){
       '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+p.ticker+'">'+p.name+badge+'</div><div class="ticker-sym">'+p.ticker+(TICKER_SUBSECTOR[p.ticker]?' · <span style="color:var(--muted2);font-size:10px">'+TICKER_SUBSECTOR[p.ticker]+'</span>':'')+'</div></div></div></td>'+
       '<td>'+poidsStr+'</td>'+
       '<td>'+priceStr+'</td>'+
+      '<td id="sc-'+tid+'-valiorend">'+_valuationCellHtml(p.ticker)+'</td>'+
       (p._isWatch?'<td style="color:var(--muted2);font-size:11px;text-align:center">—</td>':'<td style="text-align:center">'+_coreSatSelector(p.ticker)+'</td>')+
       ['per','fwdpe','peg','pocf','marge','ca1a','cafwd','eps1a','epsfwd','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '</tr>';
@@ -2449,10 +2506,10 @@ async function renderScreener(){
   document.getElementById('sc-content').innerHTML=
     '<div id="coresat-kpi" style="margin-bottom:16px;padding:14px 16px;background:var(--bg2);border-radius:10px;border:1px solid var(--border)"></div>'+
     '<div style="display:flex;justify-content:flex-end;margin-bottom:12px">'+
-    '<button class="btn btn-primary" onclick="loadScreenerRatios()">⟳ Charger les ratios</button></div>'+
+    '<button class="btn btn-primary" onclick="loadScreenerRatios()">⟳ Charger ratios & valorisation</button></div>'+
     '<div class="card"><div class="tbl-wrap"><table>'+
     '<thead><tr>'+
-    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+thSort('Poids','poids',scSort,'sortSC')+thSort('Cours','price',scSort,'sortSC')+'<th style="min-width:120px;text-align:center">Classe ⚖️</th>'+thSort('PER','per',scSort,'sortSC')+thSort('Fwd PER','fwdpe',scSort,'sortSC')+thSort('PEG','peg',scSort,'sortSC')+thSort('P/OCF','pocf',scSort,'sortSC')+thSort('M. Nette','marge',scSort,'sortSC')+thSort('CA 1A','ca1a',scSort,'sortSC')+thSort('CA FWD','cafwd',scSort,'sortSC')+thSort('EPS 1A','eps1a',scSort,'sortSC')+thSort('EPS Fwd','epsfwd',scSort,'sortSC')+thSort('D/EBITDA','debt',scSort,'sortSC')+
+    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+thSort('Poids','poids',scSort,'sortSC')+thSort('Cours','price',scSort,'sortSC')+thSort('Rend. Valio','valiorend',scSort,'sortSC')+'<th style="min-width:120px;text-align:center">Classe ⚖️</th>'+thSort('PER','per',scSort,'sortSC')+thSort('Fwd PER','fwdpe',scSort,'sortSC')+thSort('PEG','peg',scSort,'sortSC')+thSort('P/OCF','pocf',scSort,'sortSC')+thSort('M. Nette','marge',scSort,'sortSC')+thSort('CA 1A','ca1a',scSort,'sortSC')+thSort('CA FWD','cafwd',scSort,'sortSC')+thSort('EPS 1A','eps1a',scSort,'sortSC')+thSort('EPS Fwd','epsfwd',scSort,'sortSC')+thSort('D/EBITDA','debt',scSort,'sortSC')+
     '</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
 
   allItems.forEach(function(p){ updateRatioRowById('sc',p.ticker); });
@@ -2472,7 +2529,9 @@ async function loadScreenerRatios(){
         S.fundamentalsAttempted.add(p.ticker);
         try{var r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker)+'&type=fundamentals',{signal:AbortSignal.timeout(10000)});var d=await r.json();if(d&&!d.error)S.fundamentals[p.ticker]=d;}catch(e){}
       }
+      try{await _ensureValuationSignal(p.ticker);}catch(e){}
       updateRatioRowById('sc',p.ticker);
+      var ve=document.getElementById('sc-'+p.ticker.replace(/[^a-zA-Z0-9]/g,'_')+'-valiorend');if(ve)ve.innerHTML=_valuationCellHtml(p.ticker);
     }));
     if(i+BATCH<allItems.length) await new Promise(function(r){setTimeout(r,DELAY);});
   }
@@ -2495,17 +2554,24 @@ var MOAT2030_CRIT=[
 ];
 function _esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function _scoreColor(s){ return s>=80?'var(--green)':s>=60?'var(--yellow)':s>=40?'#f59e0b':'var(--red)'; }
+function _moatStrictCalibrate(raw){
+  raw=Math.max(0,Math.min(100,raw||0));
+  if(raw<80)return raw;
+  // Échelle volontairement exigeante : dépasser 95 nécessite un score brut proche de 97–100.
+  return 80+20*Math.pow((raw-80)/20,1.35);
+}
 function _moat2030Score(vals){
   vals=vals||{};
   var scores=MOAT2030_CRIT.map(function(c){return {k:c.k,label:c.label,v:Math.max(0,Math.min(100,Number(vals[c.k])||0))};})
     .filter(function(x){return x.v>=40;}).sort(function(a,b){return b.v-a.v;}).slice(0,3);
-  var score=0;
-  if(scores.length===1) score=scores[0].v;
-  else if(scores.length===2) score=scores[0].v*.625+scores[1].v*.375;
-  else if(scores.length>=3) score=scores[0].v*.50+scores[1].v*.30+scores[2].v*.20;
-  return {score:Math.round(score),selected:scores};
+  var raw=0;
+  if(scores.length===1) raw=scores[0].v;
+  else if(scores.length===2) raw=scores[0].v*.625+scores[1].v*.375;
+  else if(scores.length>=3) raw=scores[0].v*.50+scores[1].v*.30+scores[2].v*.20;
+  var calibrated=_moatStrictCalibrate(raw);
+  return {score:Math.round(calibrated),rawScore:Math.round(raw),selected:scores};
 }
-function _moat2030Label(s){return s>=90?'Exceptionnel':s>=80?'Très fort':s>=70?'Fort':s>=60?'Correct':s>=50?'Faible à moyen':s>=40?'Barrière limitée':'Pas de moat durable';}
+function _moat2030Label(s){return s>=95?'Exceptionnel / quasi parfait':s>=90?'Élite / très rare':s>=80?'Très fort':s>=70?'Fort':s>=60?'Correct':s>=50?'Faible à moyen':s>=40?'Barrière limitée':'Pas de moat durable';}
 
 async function loadAnalysis(ticker){
   var u=getUser(); if(!u) return null;
@@ -2541,14 +2607,14 @@ async function renderAnalysisCard(ticker,name){
   var notes=data.moat2030_notes||{};
   var rep=data.reports_url&&/^https?:\/\//.test(data.reports_url)?'<a href="'+_esc(data.reports_url)+'" target="_blank" rel="noopener" class="btn btn-ghost btn-sm" style="text-decoration:none">📄 Source / IR</a>':'';
   var cards=MOAT2030_CRIT.map(function(c){var v=Number(data.moat2030[c.k])||0,note=notes[c.k]||'';return '<div class="panel-card" style="border-color:'+(selected[c.k]?'rgba(38,197,222,.34)':'var(--border)')+'"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px"><div style="font-size:12px;font-weight:750">'+c.label+'</div><div class="mono" style="font-size:16px;font-weight:850;color:'+_scoreColor(v)+'">'+v+'/100</div></div>'+_moatBar(v,selected[c.k])+(note?'<div style="font-size:10px;color:var(--muted);line-height:1.45;margin-top:8px">'+_esc(note)+'</div>':'')+'</div>';}).join('');
-  el.innerHTML='<div class="card" style="padding:20px"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px"><div><div style="font-size:15px;font-weight:800">🏰 Moat 2030</div><div style="font-size:11px;color:var(--muted);margin-top:3px">Résilience de l’avantage concurrentiel dans un monde où code, logiciels et agents IA deviennent plus abondants.</div></div><div style="display:flex;align-items:center;gap:8px">'+rep+'<button class="btn btn-ghost btn-sm" onclick="editAnalysis()">✏️ Éditer</button></div></div><div style="display:flex;align-items:baseline;gap:9px;margin-bottom:14px"><span style="font-size:36px;font-weight:900;color:'+_scoreColor(calc.score)+'">'+calc.score+'</span><span style="color:var(--muted)">/100</span><span style="font-size:12px;color:var(--muted)">'+_moat2030Label(calc.score)+'</span><span style="font-size:10px;color:var(--cyan);margin-left:6px">Top '+calc.selected.length+' barrière'+(calc.selected.length>1?'s':'')+' significative'+(calc.selected.length>1?'s':'')+'</span></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px">'+cards+'</div>'+(data.moat2030_note?'<div style="font-size:11px;color:var(--muted);margin-top:12px;padding-top:10px;border-top:1px solid var(--border2);white-space:pre-wrap">'+_esc(data.moat2030_note)+'</div>':'')+(row&&row.updated_at?'<div style="font-size:9px;color:var(--muted2);margin-top:10px">Mis à jour le '+new Date(row.updated_at).toLocaleDateString('fr-FR')+'</div>':'')+'</div>';
+  el.innerHTML='<div class="card" style="padding:20px"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px"><div><div style="font-size:15px;font-weight:800">🏰 Moat 2030</div><div style="font-size:11px;color:var(--muted);margin-top:3px">Résilience de l’avantage concurrentiel dans un monde où code, logiciels et agents IA deviennent plus abondants.</div></div><div style="display:flex;align-items:center;gap:8px">'+rep+'<button class="btn btn-ghost btn-sm" onclick="editAnalysis()">✏️ Éditer</button></div></div><div style="display:flex;align-items:baseline;gap:9px;margin-bottom:14px"><span style="font-size:36px;font-weight:900;color:'+_scoreColor(calc.score)+'">'+calc.score+'</span><span style="color:var(--muted)">/100</span><span style="font-size:12px;color:var(--muted)">'+_moat2030Label(calc.score)+'</span><span style="font-size:10px;color:var(--cyan);margin-left:6px">Top '+calc.selected.length+' barrière'+(calc.selected.length>1?'s':'')+' significative'+(calc.selected.length>1?'s':'')+'</span><span style="font-size:9px;color:var(--muted2);margin-left:6px">brut '+calc.rawScore+' → échelle stricte '+calc.score+'</span></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px">'+cards+'</div>'+(data.moat2030_note?'<div style="font-size:11px;color:var(--muted);margin-top:12px;padding-top:10px;border-top:1px solid var(--border2);white-space:pre-wrap">'+_esc(data.moat2030_note)+'</div>':'')+(row&&row.updated_at?'<div style="font-size:9px;color:var(--muted2);margin-top:10px">Mis à jour le '+new Date(row.updated_at).toLocaleDateString('fr-FR')+'</div>':'')+'</div>';
 }
 function _moat2030Input(c,v,note){
   return '<div style="padding:10px 0;border-bottom:1px solid var(--border2)"><div style="display:grid;grid-template-columns:minmax(180px,1fr) 90px;gap:10px;align-items:start"><div><div style="font-size:13px;font-weight:700">'+c.label+'</div><div style="font-size:10px;color:var(--muted);line-height:1.4;margin-top:2px">'+c.hint+'</div></div><input id="moat2030-'+c.k+'" class="form-input mono" type="number" min="0" max="100" step="1" value="'+(v!=null?v:'')+'" placeholder="0–100" oninput="_recalcAna()" style="padding:6px 7px;text-align:right"></div><textarea id="moat2030-note-'+c.k+'" class="form-input" rows="2" placeholder="Justification / preuves / métriques (optionnel)" style="width:100%;resize:vertical;margin-top:7px;font-size:10px">'+_esc(note||'')+'</textarea></div>';
 }
 window.editAnalysis=function(){
   var ticker=window._cdAnaTicker,name=window._cdAnaName||ticker,d=window._cdAnaData||{},m=d.moat2030||{},notes=d.moat2030_notes||{};
-  var h='<div class="modal-hd"><h2>Moat 2030 — '+name+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:12px">Note chaque source de 0 à 100. Seules les barrières ≥40 sont significatives ; le score final retient au maximum les 3 meilleures (50% / 30% / 20%, renormalisé s’il n’y en a que 1 ou 2). Le Levier IA n’existe plus comme score séparé.</div><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><div style="font-size:11px;font-weight:750;text-transform:uppercase;color:var(--muted)">Score final</div><div id="moat2030-total" class="mono" style="font-size:22px;font-weight:900">—</div></div>'+MOAT2030_CRIT.map(function(c){return _moat2030Input(c,m[c.k],notes[c.k]);}).join('')+'<textarea id="moat2030-overall-note" class="form-input" rows="2" placeholder="Synthèse globale (optionnel)" style="width:100%;resize:vertical;margin-top:12px">'+_esc(d.moat2030_note||'')+'</textarea><div class="form-group" style="margin:14px 0 8px"><label class="form-label">📄 Lien source / Investor Relations</label><input id="ana-reports" class="form-input" placeholder="https://..." value="'+_esc(d.reports_url||'')+'"></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveAnalysisForm()">Enregistrer</button></div>';
+  var h='<div class="modal-hd"><h2>Moat 2030 — '+name+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:12px">Note chaque source de 0 à 100. Seules les barrières ≥40 sont significatives ; le score final retient au maximum les 3 meilleures (50% / 30% / 20%, renormalisé s’il n’y en a que 1 ou 2). Le Levier IA n’existe plus comme score séparé.<br><b style="color:var(--text)">Échelle stricte :</b> 95–100 = quasi perfection / extrêmement rare · 90–94 = élite · 80–89 = très fort. Le score final est légèrement comprimé au-dessus de 80 pour éviter les notes trop faciles.</div><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><div style="font-size:11px;font-weight:750;text-transform:uppercase;color:var(--muted)">Score final</div><div id="moat2030-total" class="mono" style="font-size:22px;font-weight:900">—</div></div>'+MOAT2030_CRIT.map(function(c){return _moat2030Input(c,m[c.k],notes[c.k]);}).join('')+'<textarea id="moat2030-overall-note" class="form-input" rows="2" placeholder="Synthèse globale (optionnel)" style="width:100%;resize:vertical;margin-top:12px">'+_esc(d.moat2030_note||'')+'</textarea><div class="form-group" style="margin:14px 0 8px"><label class="form-label">📄 Lien source / Investor Relations</label><input id="ana-reports" class="form-input" placeholder="https://..." value="'+_esc(d.reports_url||'')+'"></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveAnalysisForm()">Enregistrer</button></div>';
   showModal(h);_recalcAna();
 };
 window._recalcAna=function(){var m={};MOAT2030_CRIT.forEach(function(c){var e=document.getElementById('moat2030-'+c.k);m[c.k]=e?Math.max(0,Math.min(100,Number(e.value)||0)):0;});var r=_moat2030Score(m),el=document.getElementById('moat2030-total');if(el){el.textContent=r.score+' /100';el.style.color=_scoreColor(r.score);}};
@@ -7628,6 +7694,7 @@ function renderScreenerTable(sort){
       '<div><div class="ticker-name cd-link" style="cursor:pointer;color:var(--blue)" data-ticker="'+p.ticker+'">'+(p.name||p.ticker)+badge+'</div><div class="ticker-sym">'+p.ticker+(TICKER_SUBSECTOR[p.ticker]?' · <span style="color:var(--muted2);font-size:10px">'+TICKER_SUBSECTOR[p.ticker]+'</span>':'')+'</div></div></div></td>'+
       '<td>'+poidsStr+'</td>'+
       '<td>'+priceStr+'</td>'+
+      '<td id="sc-'+tid+'-valiorend">'+_valuationCellHtml(p.ticker)+'</td>'+
       (p._isWatch?'<td style="color:var(--muted2);font-size:11px;text-align:center">—</td>':'<td style="text-align:center">'+_coreSatSelector(p.ticker)+'</td>')+
       ['per','fwdpe','peg','pocf','marge','ca1a','cafwd','eps1a','epsfwd','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '</tr>';
