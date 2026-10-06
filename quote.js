@@ -76,7 +76,10 @@ async function setCache(ticker, data) {
 // ───────────────────────────────────────────────────────────────────────
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.setHeader('X-Valio-Quote-Version', '13');
   const { symbol, type } = req.query;
+  if (type === 'health') return res.json({ ok: true, quoteVersion: 13, engine: 'Valio V27' });
   if (!symbol) return res.status(400).json({ error: 'symbol requis' });
   const sym = encodeURIComponent(symbol); // Disponible pour tous les endpoints
 
@@ -101,7 +104,7 @@ module.exports = async (req, res) => {
   if (type === 'fundamentals') {
     try {
       // Cache Supabase → réponse instantanée si données < 24h
-      const CACHE_V = 12; // v12 = correction croissance LT Yahoo (+5y / growth) + invalidation cache
+      const CACHE_V = 13; // v13 = +5y Yahoo corrigé + payload de compatibilité Valio V27
       const cached = await getCache(symbol);
       const cacheValid = cached
         && cached._v === CACHE_V
