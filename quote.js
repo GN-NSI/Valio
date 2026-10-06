@@ -101,7 +101,7 @@ module.exports = async (req, res) => {
   if (type === 'fundamentals') {
     try {
       // Cache Supabase → réponse instantanée si données < 24h
-      const CACHE_V = 12; // v11 = analyst revisions + recommendation breakdown + PE FY0/FY1 explicites
+      const CACHE_V = 12; // v12 = correction croissance LT Yahoo (+5y / growth) + invalidation cache
       const cached = await getCache(symbol);
       const cacheValid = cached
         && cached._v === CACHE_V
@@ -136,8 +136,6 @@ module.exports = async (req, res) => {
       const totalDebt = raw(fd.totalDebt);
       const totalCash = raw(fd.totalCash);
       const ebitda    = raw(ks.ebitda);
-      const netIncomeToCommon = raw(ks.netIncomeToCommon);
-      const financialCurrency = fd.financialCurrency || null;
 
       const pfcf = (mktCap && fcf && fcf > 0) ? mktCap / fcf : null;
       const pocf = (mktCap && ocf && ocf > 0) ? mktCap / ocf : null;
@@ -147,11 +145,11 @@ module.exports = async (req, res) => {
       // Croissance EPS prévisionnelle via earningsTrend
       const trends = et.trend || [];
       const trend1y = trends.find(t => t.period === '+1y');
-      const trend5y = trends.find(t => t.period === '5y');
-      const epsGrowthFwd1Y = trend1y?.earningsEstimate?.growth?.raw != null
-        ? trend1y.earningsEstimate.growth.raw * 100 : null;
-      const epsGrowthFwd5Y = trend5y?.earningsEstimate?.growth?.raw != null
-        ? trend5y.earningsEstimate.growth.raw * 100 : null;
+      const trend5y = trends.find(t => t.period === '+5y') || trends.find(t => t.period === '5y');
+      const epsGrowthFwd1YRaw = trend1y?.earningsEstimate?.growth?.raw ?? trend1y?.growth?.raw ?? null;
+      const epsGrowthFwd1Y = epsGrowthFwd1YRaw != null ? epsGrowthFwd1YRaw * 100 : null;
+      const epsGrowthFwd5YRaw = trend5y?.growth?.raw ?? trend5y?.earningsEstimate?.growth?.raw ?? null;
+      const epsGrowthFwd5Y = epsGrowthFwd5YRaw != null ? epsGrowthFwd5YRaw * 100 : null;
       const revenueGrowthFwd1Y = trend1y?.revenueEstimate?.growth?.raw != null
         ? trend1y.revenueEstimate.growth.raw * 100 : null;
 
@@ -295,8 +293,9 @@ module.exports = async (req, res) => {
         revenueFY1: trend1y?.revenueEstimate?.avg?.raw ?? null,
         revenueGrowthFY1: trend1y?.revenueEstimate?.growth?.raw != null ? trend1y.revenueEstimate.growth.raw*100 : null,
         epsGrowthFwd5Y,
+        epsGrowthFwd5YSource: trend5y ? ('Yahoo earningsTrend '+trend5y.period+' · growth') : null,
         revenueGrowthFwd1Y,
-        freeCashflow: fcf, operatingCashFlow: ocf, netIncomeToCommon, financialCurrency,
+        freeCashflow: fcf, operatingCashFlow: ocf,
         mktCap, sharesOutstanding, fcfGrowth: null, roic: null,
         nextEarningsTs,
         // Nouvelles données analystes
@@ -598,4 +597,3 @@ Rules:
     return res.json({ symbol, price, prevClose: prev, changeAbs, changePct, change1M, changeYTD, change1Y, currency: meta.currency||'USD', exchange: meta.exchangeName, chartData: chartPts, timestamp: Date.now() });
   } catch (e) { return res.status(500).json({ error: e.message }); }
 };
-
