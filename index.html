@@ -2181,8 +2181,8 @@ function _computeCentralValuationSignal(ticker,price,f,fin){
   var hasM=matrix!=null&&isFinite(matrix),hasD=dcf!=null&&isFinite(dcf),count=(hasM?1:0)+(hasD?1:0);
   var avg=count===2?(matrix+dcf)/2:(hasM?matrix:(hasD?dcf:null));
   var gap=hasM&&hasD?Math.abs(matrix-dcf):null,target=15,decisionMismatch=hasM&&hasD?((matrix>=target)!==(dcf>=target)):false;
-  var projectionWarn=proj.projectionQuality==='extrapolated',warn=qualityAlert||projectionWarn||decisionMismatch||(gap!=null&&gap>25)||count<2;
-  return {matrix:matrix,dcf:dcf,avg:avg,gap:gap,warn:warn,decisionMismatch:decisionMismatch,qualityAlert:qualityAlert,projectionWarn:projectionWarn,modelsCount:count,projectionLabel:proj.projectionLabel,mult:mult,moat:_moatPEBonusPct(analysis)};
+  var projectionWarn=proj.rankable===false,rankable=proj.rankable!==false,rankValue=rankable?avg:null,warn=qualityAlert||projectionWarn||decisionMismatch||(gap!=null&&gap>25)||count<2;
+  return {matrix:matrix,dcf:dcf,avg:avg,rankValue:rankValue,rankable:rankable,confidence:proj.confidence||'low',gap:gap,warn:warn,decisionMismatch:decisionMismatch,qualityAlert:qualityAlert,projectionWarn:projectionWarn,modelsCount:count,projectionLabel:proj.projectionLabel,mult:mult,moat:_moatPEBonusPct(analysis)};
 }
 async function _ensureValuationSignal(ticker){
   if(_valuationSignals[ticker])return _valuationSignals[ticker];
@@ -2197,14 +2197,16 @@ async function _ensureValuationSignal(ticker){
 function _valuationCellHtml(ticker){
   var s=_valuationSignals[ticker];if(!s||s.avg==null)return '<span style="color:var(--muted)">—</span>';
   var warn=s.warn?' ⚠':'',mTxt=s.matrix!=null&&isFinite(s.matrix)?s.matrix.toFixed(1):'—',dTxt=s.dcf!=null&&isFinite(s.dcf)?s.dcf.toFixed(1):'—';
-  var why=s.qualityAlert?'qualité cash-flow à contrôler':s.projectionWarn?'consensus 5 ans absent : extrapolation FY1':s.decisionMismatch?'désaccord autour du seuil 15%':(s.gap!=null&&s.gap>25?'écart de modèles élevé':(s.modelsCount<2?'1 seul modèle exploitable':'modèles exploitables'));
-  var gapTxt=s.gap!=null?s.gap.toFixed(1)+' pts':'n/a';
-  return '<div class="mono" style="font-weight:800;color:'+_valuationSignalColor(s.avg)+'" title="Matrice '+mTxt+'% · DCF '+dTxt+'% · écart '+gapTxt+' · '+why+'">'+s.avg.toFixed(1)+'%'+warn+'</div><div style="font-size:8px;color:var(--muted2)">M '+mTxt+' · D '+dTxt+(s.modelsCount<2?' · '+s.modelsCount+'/2':'')+'</div>';
+  var why=s.qualityAlert?'qualité cash-flow à contrôler':s.projectionWarn?'projection 5 ans insuffisante : estimation hors classement':s.decisionMismatch?'désaccord autour du seuil 15%':(s.gap!=null&&s.gap>25?'écart de modèles élevé':(s.modelsCount<2?'1 seul modèle exploitable':'modèles exploitables'));
+  var gapTxt=s.gap!=null?s.gap.toFixed(1)+' pts':'n/a',prefix=s.rankable?'':'≈ ';
+  var sub=(s.rankable?'M ':'HORS CLASSEMENT · M ')+mTxt+' · D '+dTxt+(s.modelsCount<2?' · '+s.modelsCount+'/2':'');
+  var mainColor=s.rankable?_valuationSignalColor(s.avg):'#f59e0b';
+  return '<div class="mono" style="font-weight:800;color:'+mainColor+'" title="Matrice '+mTxt+'% · DCF '+dTxt+'% · écart '+gapTxt+' · '+why+'">'+prefix+s.avg.toFixed(1)+'%'+warn+'</div><div style="font-size:8px;color:'+(s.rankable?'var(--muted2)':'#f59e0b')+'">'+sub+'</div>';
 }
 function getSortVal(ticker, col){
   if(col==='poids'){var ep=S.enrichedPos.find(function(x){return x.ticker===ticker;});return ep?(ep.valueEur||0):0;}
   if(col==='price') return (S.prices[ticker]&&S.prices[ticker].price)||0;
-  if(col==='valiorend') return (_valuationSignals[ticker]&&_valuationSignals[ticker].avg!=null)?_valuationSignals[ticker].avg:null;
+  if(col==='valiorend') return (_valuationSignals[ticker]&&_valuationSignals[ticker].rankValue!=null)?_valuationSignals[ticker].rankValue:null;
   var f=S.fundamentals[ticker]; if(!f) return null;
   var map={per:'trailingPE',fwdpe:'forwardPE',peg:'pegRatio',pocf:'pocf',marge:'profitMarginPct',ca1a:'revenueGrowthYoY',cafwd:'revenueGrowthFwd1Y',eps1a:'epsGrowth1Y',epsfwd:'epsGrowthFwd1Y',debt:'netDebtToEBITDA'};
   return f[map[col]]??null;
@@ -5532,19 +5534,37 @@ function _valuationProjection(ticker,f,fin,epsFallback){
   var ae=(f&&f.analystEstimates)||{}, yNow=new Date().getFullYear(),analysis=_analysisDataFor(ticker)||{},ov=analysis.valuation_override||{};
   function ok(v){return v!=null&&isFinite(v)&&v>0;}
   function med(a){var x=(a||[]).filter(ok).slice().sort(function(a,b){return a-b;});if(!x.length)return null;var m=Math.floor(x.length/2);return x.length%2?x[m]:(x[m-1]+x[m])/2;}
-  var fy0Yahoo=(ae.thisYear&&ok(ae.thisYear.epsAvg))?ae.thisYear.epsAvg:(ok(f&&f.epsFY0)?f.epsFY0:null);
-  var fy1=(ae.currentYear&&ok(ae.currentYear.epsAvg))?ae.currentYear.epsAvg:(ok(f&&f.epsFY1)?f.epsFY1:null);
-  var n0=(ae.thisYear&&ae.thisYear.epsCount)||null,n1=(ae.currentYear&&(ae.currentYear.epsCount||ae.currentYear.count))||null;
+  function epsOf(obj){return obj&&ok(obj.epsAvg)?+obj.epsAvg:null;}
+  function countOf(obj){return obj&&(obj.epsCount||obj.count||obj.numAnalysts)||null;}
+
+  // Yahoo : FY0 = exercice courant/base ; A1 = exercice suivant quand disponible.
+  var fy0Yahoo=epsOf(ae.thisYear)||(ok(f&&f.epsFY0)?+f.epsFY0:null);
+  var a1Obj=ae.currentYear||ae.nextYear||null;
+  var fy1=epsOf(a1Obj)||(ok(f&&f.epsFY1)?+f.epsFY1:null);
+  var n0=countOf(ae.thisYear),n1=countOf(a1Obj);
+  var hasYahooFY1=!!(epsOf(a1Obj)||(ok(f&&f.epsFY1)?+f.epsFY1:null));
+
+  // Récupère d'éventuels consensus EPS explicites A2-A5 si l'API en fournit.
+  // Les clés sont volontairement tolérantes : le frontend reste compatible avec plusieurs formes d'API Yahoo.
+  var explicitFuture=[];
+  function addFuture(v,label,count){if(ok(v))explicitFuture.push({eps:+v,label:label,count:count||null});}
+  addFuture(fy1,'A1',n1);
+  var yearObjs=[ae.nextYear,ae.next2Year,ae.next3Year,ae.next4Year,ae.next5Year,ae.year2,ae.year3,ae.year4,ae.year5];
+  var yearF=[f&&f.epsFY2,f&&f.epsFY3,f&&f.epsFY4,f&&f.epsFY5];
+  // Si currentYear a déjà servi pour A1, ne répète pas nextYear lorsqu'il s'agit du même objet/du même chiffre.
+  yearObjs.forEach(function(o,i){var v=epsOf(o);if(!ok(v))return;if(explicitFuture.length&&Math.abs(explicitFuture[explicitFuture.length-1].eps-v)<1e-10&&i===0)return;addFuture(v,'A'+(explicitFuture.length+1),countOf(o));});
+  yearF.forEach(function(v){if(explicitFuture.length>=5)return;if(ok(v)){var dup=explicitFuture.some(function(x){return Math.abs(x.eps-v)<1e-10;});if(!dup)addFuture(v,'A'+(explicitFuture.length+1),null);}});
+  explicitFuture=explicitFuture.slice(0,5);
+
   var manualTtm=null,manualKind=null;
   try{
     var qs=(window._cdLastManual||[]).filter(function(m){return m.period&&/^\d{4}-Q[1-4]$/.test(m.period)&&ok(m.eps_diluted);}).map(function(m){var z=m.period.split('-Q');return {y:+z[0],q:+z[1],v:+m.eps_diluted,idx:(+z[0])*4+(+z[1])};}).sort(function(a,b){return a.idx-b.idx;});
     if(qs.length>=4){var l=qs.slice(-4),now=new Date(),curIdx=now.getFullYear()*4+(Math.floor(now.getMonth()/3)+1);if(l[3].idx-l[0].idx===3&&l[3].idx>=curIdx-5){manualTtm=l.reduce(function(t,x){return t+x.v;},0);manualKind='TTM manuel récent';}}
   }catch(e){}
 
-  // Yahoo reste TOUJOURS la base par défaut. L'override manuel ne s'active que si l'utilisateur le choisit explicitement.
+  // Yahoo reste la base par défaut. L'override manuel ne s'active que sur choix explicite.
   var fy0=fy0Yahoo;
   if(!(fy0>0)&&epsFallback>0)fy0=epsFallback;
-  if(!(fy1>0)&&epsFallback>0&&f&&f.trailingPE>0&&f.forwardPE>0){fy1=epsFallback*(f.trailingPE/f.forwardPE);}
 
   var symbol=(ticker||f&&f.symbol||'').toUpperCase(),industry=((f&&f.industry)||'').toLowerCase();
   var cyclicalMemory=(symbol==='000660.KS'||symbol==='SKHYNIX'||industry.includes('memory'))&&symbol!=='PENG';
@@ -5560,41 +5580,67 @@ function _valuationProjection(ticker,f,fin,epsFallback){
   if(cyclicalMemory){
     var hist=((fin&&fin.eps)||[]).filter(function(v){return v>0;}).slice(-3),norm=med(hist.concat([fy0,fy1]));
     if(norm>0&&ov.epsMode!=='manual'){base=norm;baseSrc='EPS normalisé mi-cycle';}
-    return {epsBase:base,epsNext:fy1,baseYear:yNow,baseSrc:baseSrc,nBase:n0,nNext:n1,growths:[15,12,9,7,6],sustainable:null,cyclical:true,g5:null,manualActive:manualActive,projectionQuality:'model',projectionLabel:'Modèle cyclique mi-cycle'};
+    return {epsBase:base,epsNext:fy1,baseYear:yNow,baseSrc:baseSrc,nBase:n0,nNext:n1,growths:[15,12,9,7,6],sustainable:null,cyclical:true,g5:null,manualActive:manualActive,projectionQuality:'model',projectionLabel:'Modèle cyclique mi-cycle',rankable:false,confidence:'low',explicitYears:0};
   }
 
-  var quotedG=(f&&isFinite(f.epsGrowthFwd1Y))?f.epsGrowthFwd1Y:((ae.currentYear&&isFinite(ae.currentYear.epsGrowth))?ae.currentYear.epsGrowth:null);
-  var explicitFY1=(fy1>0&&base>0);
-  var g1=explicitFY1?(fy1/base-1)*100:null;
-  if(!(isFinite(g1)&&g1>-60&&g1<180))g1=quotedG;
-  if(isFinite(g1))g1=Math.max(-60,Math.min(120,g1));
+  var quotedG=(f&&isFinite(f.epsGrowthFwd1Y))?+f.epsGrowthFwd1Y:((ae.currentYear&&isFinite(ae.currentYear.epsGrowth))?+ae.currentYear.epsGrowth:null);
+  // Un "0%" isolé sans EPS FY1 explicite est généralement une absence de donnée normalisée par l'API.
+  if(!hasYahooFY1&&quotedG===0)quotedG=null;
+  var g1=(hasYahooFY1&&fy1>0&&base>0)?(fy1/base-1)*100:null;
+  if(!(g1!=null&&isFinite(g1)&&g1>-60&&g1<180))g1=quotedG;
+  if(g1!=null&&isFinite(g1))g1=Math.max(-60,Math.min(120,g1));
 
-  var g5=(f&&isFinite(f.epsGrowthFwd5Y)&&f.epsGrowthFwd5Y>-20&&f.epsGrowthFwd5Y<100)?f.epsGrowthFwd5Y:null;
-  var gs=[],projectionQuality='',projectionLabel='';
-  if(g5!=null){
-    // Yahoo 5Y est un CAGR annuel sur cinq ans, PAS la croissance de l'année 5.
-    // On respecte exactement ce CAGR. Si FY1 est connu, A2-A5 prennent un taux constant
-    // calculé pour que la croissance cumulée sur 5 ans égale le CAGR Yahoo.
-    if(explicitFY1&&isFinite(g1)&&g1>-95){
-      var total=Math.pow(1+g5/100,5),first=Math.max(.05,1+g1/100),rest=Math.pow(total/first,1/4)-1;
-      rest=Math.max(-.60,Math.min(1.20,rest));
-      gs=[g1,rest*100,rest*100,rest*100,rest*100];
-    }else{
-      gs=[g5,g5,g5,g5,g5];
+  var g5=(f&&isFinite(f.epsGrowthFwd5Y)&&f.epsGrowthFwd5Y>-20&&f.epsGrowthFwd5Y<100)?+f.epsGrowthFwd5Y:null;
+  var gs=[],projectionQuality='',projectionLabel='',rankable=false,confidence='low',explicitYears=0;
+
+  // 1) Priorité maximale : EPS explicites année par année, si cinq exercices sont réellement disponibles.
+  if(explicitFuture.length>=5){
+    var prev=base,valid=true;
+    for(var i=0;i<5;i++){
+      var ep=explicitFuture[i].eps,gg=(ep/prev-1)*100;
+      if(!(isFinite(gg)&&gg>-80&&gg<200)){valid=false;break;}
+      gs.push(gg);prev=ep;
     }
-    projectionQuality='consensus5y';
-    projectionLabel='Yahoo : consensus CAGR EPS 5 ans';
-  }else if(isFinite(g1)){
-    // Pas de CAGR 5 ans : aucun fade arbitraire caché. On maintient le seul consensus explicite disponible
-    // et on signale clairement que A2-A5 sont une extrapolation Valio.
-    gs=[g1,g1,g1,g1,g1];
-    projectionQuality='extrapolated';
-    projectionLabel='Yahoo FY1 uniquement · extrapolation constante A2-A5';
-  }else{
-    return null;
+    if(valid&&gs.length===5){
+      projectionQuality='explicit5y';projectionLabel='Yahoo : EPS explicites A1–A5';rankable=true;confidence='high';explicitYears=5;
+    }else gs=[];
   }
+
+  // 2) CAGR EPS 5 ans Yahoo : source long terme prioritaire lorsqu'on n'a pas 5 EPS explicites.
+  if(!gs.length&&g5!=null){
+    // Si A1 Yahoo existe, on le respecte puis on résout A2-A5 afin de retomber EXACTEMENT sur le CAGR 5 ans.
+    if(hasYahooFY1&&g1!=null&&isFinite(g1)&&g1>-95){
+      var total=Math.pow(1+g5/100,5),first=Math.max(.05,1+g1/100),rest=Math.pow(total/first,1/4)-1;
+      if(isFinite(rest)&&rest>-.80&&rest<2){gs=[g1,rest*100,rest*100,rest*100,rest*100];}
+      else gs=[g5,g5,g5,g5,g5];
+    }else gs=[g5,g5,g5,g5,g5];
+    projectionQuality='consensus5y';projectionLabel='Yahoo : consensus CAGR EPS 5 ans';rankable=true;confidence='high';explicitYears=hasYahooFY1?1:0;
+  }
+
+  // 3) Plusieurs exercices explicites mais pas de consensus 5 ans : on montre une estimation de secours,
+  // sans la traiter comme un vrai Rend. Valio classable.
+  if(!gs.length&&explicitFuture.length>=2){
+    var prev2=base;
+    for(var j=0;j<explicitFuture.length&&j<5;j++){
+      var e2=explicitFuture[j].eps,g2=(e2/prev2-1)*100;
+      if(!(isFinite(g2)&&g2>-80&&g2<200)){gs=[];break;}
+      gs.push(g2);prev2=e2;
+    }
+    if(gs.length){var lastG=gs[gs.length-1];while(gs.length<5)gs.push(lastG);projectionQuality='partial';projectionLabel='Yahoo : consensus partiel · fin extrapolée';rankable=false;confidence='medium';explicitYears=explicitFuture.length;}
+  }
+
+  // 4) FY1 seul : estimation visible pour diagnostiquer le dossier, mais HORS classement Rend. Valio.
+  if(!gs.length&&g1!=null&&isFinite(g1)){
+    gs=[g1,g1,g1,g1,g1];
+    projectionQuality='fy1only';
+    projectionLabel=hasYahooFY1?'Yahoo FY1 uniquement · A2-A5 extrapolées':'Croissance FY1 uniquement · A1-A5 extrapolées';
+    rankable=false;confidence='low';explicitYears=hasYahooFY1?1:0;
+  }
+
+  // 5) Pas de croissance exploitable : aucune valorisation automatique plutôt qu'un faux 0%.
+  if(!gs.length)return null;
   gs=gs.map(function(g){return Math.max(-60,Math.min(120,g));});
-  return {epsBase:base,epsNext:fy1,baseYear:baseYear,baseSrc:baseSrc,nBase:n0,nNext:n1,growths:gs,sustainable:null,cyclical:false,g5:g5,manualActive:manualActive,projectionQuality:projectionQuality,projectionLabel:projectionLabel};
+  return {epsBase:base,epsNext:fy1,baseYear:baseYear,baseSrc:baseSrc,nBase:n0,nNext:n1,growths:gs,sustainable:null,cyclical:false,g5:g5,manualActive:manualActive,projectionQuality:projectionQuality,projectionLabel:projectionLabel,rankable:rankable,confidence:confidence,explicitYears:explicitYears};
 }
 function _scaleProjectionGrowth(g,scale){
   scale=(scale==null?100:scale);var k=scale/100;
@@ -5810,7 +5856,7 @@ function renderYieldMatrix(ticker, price, f, fin){
   var el=document.getElementById('cd-yield-matrix');if(!el)return;
   var st=_ymSel[ticker]||{},N=5,rC=(st.r!=null&&st.r>0)?st.r:15;
   var quoteCur=(S.prices[ticker]&&S.prices[ticker].currency)||_currencyFromSuffix(ticker)||'USD',cSym=currSymbol(quoteCur),epsFallback=(f&&f.trailingPE>0&&price>0)?price/f.trailingPE:null,analysis=_analysisDataFor(ticker),proj=_valuationProjection(ticker,f,fin,epsFallback);
-  if(!proj||!(price>0)){el.innerHTML='<div style="color:var(--muted);font-size:12px">Projection centrale indisponible — Yahoo ne fournit pas assez de données exploitables. Tu peux saisir une base EPS normalisée manuelle pour les cas exceptionnels.</div>';return;}
+  if(!proj||!(price>0)){el.innerHTML='<div style="color:var(--muted);font-size:12px">Projection centrale indisponible — Yahoo ne fournit ni CAGR EPS 5 ans ni trajectoire future suffisante. Valio préfère ne rien classer plutôt que d\'inventer une croissance à 0%.</div>';return;}
   var titleEl=document.getElementById('cd-matrix-title');if(titleEl)titleEl.textContent='🎯 Matrice de rendement & DCF — 5 ans';
   var eps0=(st.eps>0)?st.eps:proj.epsBase,centralGrowths=_projectionGrowths(proj,N,100),terminalG=centralGrowths[centralGrowths.length-1],moatInfo=_moatPEBonusPct(analysis);
   var medPE=_medianPE5y(fin,window._cdChartPts||[]),autoMult=estimateExitMultiple(f,terminalG,medPE,analysis),mCur=(st.mManual&&st.mC!=null)?st.mC:autoMult;
@@ -5825,15 +5871,17 @@ function renderYieldMatrix(ticker, price, f, fin){
   function tog(label,n){return '<button onclick="window._ymSetN(\''+tName+'\','+n+')" style="padding:4px 12px;font-size:11px;font-weight:700;border-radius:6px;cursor:pointer;border:none;'+(N===n?'background:#634BE4;color:white;':'background:rgba(255,255,255,.08);color:var(--muted);')+'">'+label+'</button>';}
   function scenarioBtn(label,sc){var active=Math.round(scale)===sc;return '<button onclick="window._ymScenario(\''+tName+'\','+sc+')" class="btn btn-ghost btn-sm" style="'+(active?'border-color:var(--blue);background:rgba(99,75,228,.15);color:#fff':'')+'">'+label+'</button>';}
   var ov=(analysis&&analysis.valuation_override)||{},epsMode=ov.epsMode==='manual'?'manual':'yahoo',manualEps=(ov.epsNormalized!=null&&isFinite(+ov.epsNormalized))?+ov.epsNormalized:'';
-  var qCol=proj.projectionQuality==='consensus5y'?'#22c55e':proj.projectionQuality==='extrapolated'?'#f59e0b':'#26C5DE';
-  var sourceBadge='<span style="display:inline-block;margin-left:8px;padding:2px 7px;border-radius:999px;border:1px solid '+qCol+'55;background:'+qCol+'12;color:'+qCol+';font-size:9px;font-weight:750">'+(proj.projectionQuality==='consensus5y'?'● Consensus Yahoo 5 ans':proj.projectionQuality==='extrapolated'?'⚠ Yahoo FY1 · A2-A5 extrapolées':'● '+proj.projectionLabel)+'</span>';
+  var qHigh=(proj.projectionQuality==='consensus5y'||proj.projectionQuality==='explicit5y'),qLow=(proj.rankable===false),qCol=qHigh?'#22c55e':qLow?'#f59e0b':'#26C5DE';
+  var qTxt=proj.projectionQuality==='explicit5y'?'● Yahoo EPS explicites A1–A5':proj.projectionQuality==='consensus5y'?'● Consensus Yahoo 5 ans':proj.projectionQuality==='partial'?'⚠ Consensus partiel · fin extrapolée':proj.projectionQuality==='fy1only'?'⚠ Yahoo FY1 seul · extrapolation faible confiance':proj.projectionQuality==='model'?'⚠ Modèle cyclique Valio · contrôle recommandé':'● '+proj.projectionLabel;
+  var sourceBadge='<span style="display:inline-block;margin-left:8px;padding:2px 7px;border-radius:999px;border:1px solid '+qCol+'55;background:'+qCol+'12;color:'+qCol+';font-size:9px;font-weight:750">'+qTxt+'</span>';
+  var confidenceNotice=proj.rankable===false?'<div style="margin:-2px 0 12px;padding:9px 12px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.07);border-radius:8px;font-size:10px;color:var(--muted);line-height:1.5"><b style="color:#f59e0b">⚠ Projection 5 ans de faible confiance.</b> Le chiffre reste visible pour diagnostiquer le dossier, mais il est <b style="color:var(--text)">exclu du classement Rend. Valio</b>. Il faut un CAGR 5 ans Yahoo, cinq EPS explicites, ou une saisie plus complète avant d’en faire un signal principal.</div>':'';
   var manualBadge=proj.manualActive?'<span style="display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;border:1px solid rgba(99,75,228,.45);background:rgba(99,75,228,.12);color:#a78bfa;font-size:9px;font-weight:750">EPS normalisé manuel</span>':'';
   var moatBadge=moatInfo.score!=null?'<span style="display:inline-block;margin-left:6px;color:var(--cyan);font-size:9px;font-weight:750">Moat '+moatInfo.score+'/100 → +'+moatInfo.bonus.toFixed(1)+'% sur le P/E</span>':'<span style="display:inline-block;margin-left:6px;color:var(--muted2);font-size:9px">Moat non renseigné → bonus 0%</span>';
   var baseControls='<div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin:-2px 0 12px;padding:9px 11px;border:1px solid var(--border2);border-radius:8px;background:rgba(255,255,255,.018)"><div><label style="font-size:8px;color:var(--muted);text-transform:uppercase">Base EPS persistante</label><br><select id="ym-base-source" class="form-input" style="min-width:170px;padding:5px"><option value="yahoo"'+(epsMode==='yahoo'?' selected':'')+'>Yahoo (défaut)</option><option value="manual"'+(epsMode==='manual'?' selected':'')+'>Normalisé manuel</option></select></div><div><label style="font-size:8px;color:var(--muted);text-transform:uppercase">EPS normalisé manuel ('+cSym+')</label><br><input id="ym-eps-normalized" class="form-input mono" style="width:125px;padding:5px" value="'+manualEps+'" placeholder="ex : 12.50"></div><button class="btn btn-ghost btn-sm" onclick="window._saveValuationBase(\''+tName+'\')">💾 Enregistrer la base</button><div style="font-size:9px;color:var(--muted);max-width:420px;line-height:1.4">Yahoo reste la source par défaut. Le mode manuel sert uniquement aux résultats réellement exceptionnels/retraités.</div></div>';
-  var dcfPreview=_dcfCompute(ticker,price,f,fin),cohHtml='';if(dcfPreview&&dcfPreview.irr!=null){var diff=Math.abs(selRet-dcfPreview.irr),target=15,decisionMismatch=(selRet>=target)!==(dcfPreview.irr>=target),qualityAlert=!!(dcfPreview.prof&&dcfPreview.prof.dataAlert),cc,cl;if(qualityAlert){cc='#ef4444';cl='Qualité cash-flow à contrôler';}else if(decisionMismatch){cc='#ef4444';cl='Désaccord de verdict autour du seuil '+target+'%';}else if(diff<=8){cc='#22c55e';cl='Écart faible — modèles cohérents';}else if(diff<=25){cc='#26C5DE';cl='Même verdict — écart de magnitude';}else{cc='#f59e0b';cl='Même verdict mais écart élevé';}cohHtml='<div style="margin:0 0 14px;padding:10px 12px;border:1px solid '+cc+'44;background:'+cc+'0d;border-radius:9px;display:flex;gap:20px;align-items:center;flex-wrap:wrap;font-size:10px"><b style="color:'+cc+'">Cohérence des modèles</b><span>Matrice '+N+'A : <b style="color:var(--text)">'+selRet.toFixed(1)+'%/an</b></span><span>DCF 5A + terminal : <b style="color:var(--text)">'+dcfPreview.irr.toFixed(1)+'%/an</b></span><span style="color:'+cc+'">'+cl+' ('+diff.toFixed(1)+' pts)</span></div>';}
+  var dcfPreview=_dcfCompute(ticker,price,f,fin),cohHtml='';if(dcfPreview&&dcfPreview.irr!=null){var diff=Math.abs(selRet-dcfPreview.irr),target=15,decisionMismatch=(selRet>=target)!==(dcfPreview.irr>=target),qualityAlert=!!(dcfPreview.prof&&dcfPreview.prof.dataAlert),cc,cl;if(proj.rankable===false){cc='#f59e0b';cl='Projection de croissance faible confiance — comparaison indicative';}else if(qualityAlert){cc='#ef4444';cl='Qualité cash-flow à contrôler';}else if(decisionMismatch){cc='#ef4444';cl='Désaccord de verdict autour du seuil '+target+'%';}else if(diff<=8){cc='#22c55e';cl='Écart faible — modèles cohérents';}else if(diff<=25){cc='#26C5DE';cl='Même verdict — écart de magnitude';}else{cc='#f59e0b';cl='Même verdict mais écart élevé';}cohHtml='<div style="margin:0 0 14px;padding:10px 12px;border:1px solid '+cc+'44;background:'+cc+'0d;border-radius:9px;display:flex;gap:20px;align-items:center;flex-wrap:wrap;font-size:10px"><b style="color:'+cc+'">Cohérence des modèles</b><span>Matrice '+N+'A : <b style="color:var(--text)">'+selRet.toFixed(1)+'%/an</b></span><span>DCF 5A + terminal : <b style="color:var(--text)">'+dcfPreview.irr.toFixed(1)+'%/an</b></span><span style="color:'+cc+'">'+cl+' ('+diff.toFixed(1)+' pts)</span></div>';}
   var scenarioName=scale===75?'Bear':scale===125?'Bull':scale===100?'Base':'Personnalisé '+scale+'%';
   var html='<div style="display:flex;align-items:center;gap:6px;margin-bottom:14px">'+tog('5 ans',5)+'<div style="margin-left:16px;display:flex;gap:26px;flex-wrap:wrap"><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Mon scénario — prix max ('+rC+'%/an)</div><div style="font-size:20px;font-weight:800;color:#634BE4" class="mono">'+cSym+fN(fair)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Mon scénario — rendement '+N+' ans</div><div style="font-size:20px;font-weight:800;color:'+cellColor(selRet)+'" class="mono">'+selRet.toFixed(2)+' %/an</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Écart au prix max</div><div style="font-size:20px;font-weight:800;color:'+(gap>=0?'#22c55e':'#f59e0b')+'" class="mono">'+(gap>=0?'+':'')+gap.toFixed(2)+' %</div></div></div></div>'+peRefs+
-    '<div style="padding:9px 12px;margin-bottom:12px;border:1px solid rgba(38,197,222,.18);background:rgba(38,197,222,.045);border-radius:8px;font-size:10px;color:var(--muted);line-height:1.55"><b style="color:var(--text)">Projection commune ('+scenarioName+') :</b> '+proj.baseSrc+' · EPS '+cSym+fN(eps0)+' · '+centralPathTxt+' · multiple auto '+mCur.toFixed(1)+'x.'+sourceBadge+manualBadge+moatBadge+(proj.g5!=null?' <span style="color:var(--muted2)">CAGR Yahoo 5 ans : '+proj.g5.toFixed(1)+'%</span>':'')+(proj.cyclical?' <span style="color:#f59e0b">Titre cyclique : EPS normalisé mi-cycle.</span>':'')+'</div>'+baseControls+
+    '<div style="padding:9px 12px;margin-bottom:12px;border:1px solid rgba(38,197,222,.18);background:rgba(38,197,222,.045);border-radius:8px;font-size:10px;color:var(--muted);line-height:1.55"><b style="color:var(--text)">Projection commune ('+scenarioName+') :</b> '+proj.baseSrc+' · EPS '+cSym+fN(eps0)+' · '+centralPathTxt+' · multiple auto '+mCur.toFixed(1)+'x.'+sourceBadge+manualBadge+moatBadge+(proj.g5!=null?' <span style="color:var(--muted2)">CAGR Yahoo 5 ans : '+proj.g5.toFixed(1)+'%</span>':'')+(proj.cyclical?' <span style="color:#f59e0b">Titre cyclique : EPS normalisé mi-cycle.</span>':'')+'</div>'+baseControls+confidenceNotice+
     '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin-bottom:10px;padding:10px;background:var(--bg2,rgba(255,255,255,.02));border-radius:8px"><div><label style="font-size:9px;color:var(--muted);text-transform:uppercase">EPS de scénario ('+cSym+')</label><br><input id="ym-eps" class="form-input mono" style="width:90px;padding:5px" value="'+eps0.toFixed(2)+'"></div><div><label style="font-size:9px;color:var(--muted);text-transform:uppercase">Scénario vs central</label><div style="display:flex;gap:5px;margin-top:4px">'+scenarioBtn('Bear 75%',75)+scenarioBtn('Base 100%',100)+scenarioBtn('Bull 125%',125)+'</div></div><div><label style="font-size:9px;color:var(--muted);text-transform:uppercase">Personnalisé %</label><br><input id="ym-scale" class="form-input mono" style="width:90px;padding:5px" value="'+scale+'"></div><div><label style="font-size:9px;color:var(--muted);text-transform:uppercase">Multiple de sortie</label><br><input id="ym-m" class="form-input mono" style="width:90px;padding:5px" value="'+mCur+'"></div><div><label style="font-size:9px;color:var(--muted);text-transform:uppercase">Rendement cible %/an</label><br><input id="ym-r" class="form-input mono" style="width:90px;padding:5px" value="'+rC+'"></div><button class="btn btn-ghost btn-sm" onclick="window._ymApply(\''+tName+'\')">Appliquer</button><button class="btn btn-ghost btn-sm" onclick="window._ymReset(\''+tName+'\')">↺ Base</button><button class="btn btn-ghost btn-sm" onclick="window._ymDetail(\''+tName+'\','+terminalG.toFixed(2)+')">🔍 Multiple</button></div>'+cohHtml+
     _safetyMarginHtml(ticker,price,eps0,f,fin,cSym,mCur,medPE,rC,scale)+_dcfHtml(ticker,price,f,fin,cSym)+_perProjeteHtml(ticker,price,eps0,f,fin,cSym)+
     '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:11px;white-space:nowrap;width:100%" class="mono"><tr><th style="padding:5px 8px;color:var(--muted);font-size:9px;text-align:left">TRAJECTOIRE × CENTRAL</th>'+mCols.map(function(m){return '<th style="padding:5px 8px;color:'+(m===mCur?'#634BE4':'var(--muted)')+'">'+m+'x</th>';}).join('')+'</tr>'+scaleRows.map(function(sc){return '<tr'+(sc===scale?' style="background:rgba(99,75,228,.10)"':'')+'><td style="padding:5px 8px;color:'+(sc===100?'#26C5DE':sc===scale?'#634BE4':'var(--muted)')+';font-weight:700">'+sc+'%'+(sc===100?' · Base':'')+'</td>'+mCols.map(function(m){var rr=annRet(sc,m),isSel=sc===scale&&m===selM;return '<td onclick="window._ymPick(\''+tName+'\','+sc+','+m+')" style="padding:5px 8px;text-align:right;cursor:pointer;color:'+cellColor(rr)+';'+(isSel?'outline:1.5px solid #634BE4;border-radius:4px;font-weight:800;':'')+(m===mCur?'background:rgba(99,75,228,.07);':'')+'">'+rr.toFixed(2)+'%</td>';}).join('')+'</tr>';}).join('')+'</table></div><div style="font-size:10px;color:var(--muted2);margin-top:10px">Bear = 75% · Base = 100% · Bull = 125% de la trajectoire centrale. Pour une croissance négative, Bear rend la baisse plus forte et Bull la réduit. Vert ≥ '+rC+'%/an · orange à moins de 3 points · rouge au-delà.</div>';
@@ -5867,7 +5915,7 @@ window._ymDetail=function(ticker, gTerminal){
   var f=(S.fundamentals&&S.fundamentals[ticker])||null;if(!f){showToast('Données insuffisantes');return;}
   var analysis=_analysisDataFor(ticker),mb=_moatPEBonusPct(analysis),g=+gTerminal,base=Math.max(12,Math.min(40,9+.80*g)),result=estimateExitMultiple(f,g,null,analysis);
   var moatTxt=mb.score==null?'Moat non renseigné : bonus 0%.':'Moat '+mb.score+'/100 : bonus +'+mb.bonus.toFixed(1)+'%.';
-  showModal('<div class="modal-hd"><h2>🔍 Multiple de sortie central</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px"><div class="card"><div style="font-size:10px;color:var(--muted)">Croissance EPS année 5</div><div style="font-size:18px;font-weight:800">'+g.toFixed(1)+'%</div></div><div class="card"><div style="font-size:10px;color:var(--muted)">P/E croissance seul</div><div style="font-size:18px;font-weight:800">'+base.toFixed(1)+'x</div></div><div class="card"><div style="font-size:10px;color:var(--muted)">P/E final avec Moat</div><div style="font-size:18px;font-weight:800;color:var(--cyan)">'+result.toFixed(1)+'x</div></div></div><div style="font-size:12px;color:var(--muted);line-height:1.7">Règle V24 : <b style="color:var(--text)">P/E croissance = 9 + 0,80 × croissance EPS A5</b> (plancher 12x, plafond 40x), puis <b style="color:var(--text)">P/E final = P/E croissance × (1 + bonus Moat)</b>. '+moatTxt+' Le bonus Moat est progressif et plafonné à +30%, puis le P/E final est plafonné à 45x. Le multiple reste modifiable manuellement.</div>');
+  showModal('<div class="modal-hd"><h2>🔍 Multiple de sortie central</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px"><div class="card"><div style="font-size:10px;color:var(--muted)">Croissance EPS année 5</div><div style="font-size:18px;font-weight:800">'+g.toFixed(1)+'%</div></div><div class="card"><div style="font-size:10px;color:var(--muted)">P/E croissance seul</div><div style="font-size:18px;font-weight:800">'+base.toFixed(1)+'x</div></div><div class="card"><div style="font-size:10px;color:var(--muted)">P/E final avec Moat</div><div style="font-size:18px;font-weight:800;color:var(--cyan)">'+result.toFixed(1)+'x</div></div></div><div style="font-size:12px;color:var(--muted);line-height:1.7">Règle V25 : <b style="color:var(--text)">P/E croissance = 9 + 0,80 × croissance EPS A5</b> (plancher 12x, plafond 40x), puis <b style="color:var(--text)">P/E final = P/E croissance × (1 + bonus Moat)</b>. '+moatTxt+' Le bonus Moat est progressif et plafonné à +30%, puis le P/E final est plafonné à 45x. Le multiple reste modifiable manuellement.</div>');
 };
 
 function cdValChart(id, years, vals, currentRatio, label) {
