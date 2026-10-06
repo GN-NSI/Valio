@@ -1226,14 +1226,32 @@ let posSort={col:'value',dir:'desc'};
 let ratiosSort={col:null,dir:'desc'};
 
 
-// ═══ CACHE LOCALSTORAGE (réduit drastiquement les appels FMP) ═══
+// ═══ CACHE LOCALSTORAGE — versionné et expirant ═══
+// IMPORTANT : les fondamentaux alimentent directement la valorisation. Un cache frontend
+// ancien ne doit jamais survivre à une correction du backend Yahoo.
+const VALIO_FUND_CACHE_V=26;
+const VALIO_FUND_CACHE_TTL=6*60*60*1000; // 6 h
 function saveCache(){
-  try{localStorage.setItem('folio_profiles',JSON.stringify(S.profiles));
-      localStorage.setItem('folio_fundamentals',JSON.stringify(S.fundamentals));}catch{}
+  try{
+    localStorage.setItem('folio_profiles',JSON.stringify(S.profiles));
+    localStorage.setItem('folio_fundamentals',JSON.stringify({v:VALIO_FUND_CACHE_V,ts:Date.now(),data:S.fundamentals}));
+  }catch{}
 }
 function loadCache(){
   try{const p=localStorage.getItem('folio_profiles');if(p)S.profiles=JSON.parse(p);}catch{}
-  try{const f=localStorage.getItem('folio_fundamentals');if(f)S.fundamentals=JSON.parse(f);}catch{}
+  try{
+    const raw=localStorage.getItem('folio_fundamentals');
+    if(!raw)return;
+    const obj=JSON.parse(raw);
+    const valid=obj&&obj.v===VALIO_FUND_CACHE_V&&obj.ts&&Date.now()-obj.ts<VALIO_FUND_CACHE_TTL&&obj.data;
+    if(valid)S.fundamentals=obj.data;
+    else{S.fundamentals={};localStorage.removeItem('folio_fundamentals');}
+  }catch{S.fundamentals={};try{localStorage.removeItem('folio_fundamentals');}catch{}}
+}
+function _fundamentalFresh(f){
+  // quote.js v12 corrige la donnée Yahoo « Next 5 Years » (+5y). Les versions antérieures
+  // sont volontairement considérées périmées pour empêcher les faux Rend. Valio.
+  return !!(f&&Number(f._v)>=12);
 }
 // ═══ INIT ═══
 window.addEventListener('load',async()=>{
@@ -1252,11 +1270,12 @@ function showAuth(){document.getElementById('auth-screen').style.display='flex';
 async function bootstrap(){
   const u=getUser();if(!u)return;
   loadCache();
-  // Si les fondamentaux semblent venir de l'ancienne version (pas de currentRatio),
-  // on les efface pour forcer un reload propre
+  // V26 : purge systématique des entrées issues d'un quote.js < v12.
+  // C'est volontaire : avant v12, la croissance Yahoo +5y était lue sur la mauvaise clé.
   const fundEntries=Object.entries(S.fundamentals);
-  if(fundEntries.length>0&&fundEntries.every(([,v])=>v.currentRatio===undefined)){
-    S.fundamentals={};try{localStorage.removeItem('folio_fundamentals');}catch{}
+  if(fundEntries.some(([,v])=>!_fundamentalFresh(v))){
+    S.fundamentals={};S.fundamentalsAttempted=new Set();
+    try{localStorage.removeItem('folio_fundamentals');}catch{}
   }
   try{await dbUpsert('profiles',{id:u.id,username:u.email.split('@')[0],display_name:u.email.split('@')[0]},'id','ignore');}catch{}
   try{const p=(await dbGet('profiles','id=eq.'+u.id))?.[0];if(p){const n=p.display_name||p.username||u.email.split('@')[0];document.getElementById('sidebar-username').textContent=n;document.getElementById('sidebar-avatar').textContent=n[0].toUpperCase();}}catch{}
@@ -2160,7 +2179,8 @@ var _valuationSignals={};
 var _valuationFinCache={};
 function _valuationSignalColor(v){return v>=20?'#22c55e':v>=15?'#26C5DE':v>=10?'#f59e0b':'#ef4444';}
 function _computeCentralValuationSignal(ticker,price,f,fin){
-  if(!(price>0)||!f||!fin)return null;
+  // Ne jamais calculer Rend. Valio avec l'ancien backend : sa croissance +5y Yahoo était erronée/absente.
+  if(!(price>0)||!f||!fin||Number(f._v)<12)return null;
   var epsFallback=(f.trailingPE>0)?price/f.trailingPE:null,proj=_valuationProjection(ticker,f,fin,epsFallback);if(!proj)return null;
   var g5=_projectionGrowths(proj,5,100);if(!g5.length)return null;
   var analysis=_analysisDataFor(ticker),mult=estimateExitMultiple(f,g5[g5.length-1],null,analysis),epsN=_projectEps(proj.epsBase,g5);
@@ -2184,7 +2204,8 @@ function _computeCentralValuationSignal(ticker,price,f,fin){
   var projectionWarn=proj.rankable===false,rankable=proj.rankable!==false,rankValue=rankable?avg:null,warn=qualityAlert||projectionWarn||decisionMismatch||(gap!=null&&gap>25)||count<2;
   return {matrix:matrix,dcf:dcf,avg:avg,rankValue:rankValue,rankable:rankable,confidence:proj.confidence||'low',gap:gap,warn:warn,decisionMismatch:decisionMismatch,qualityAlert:qualityAlert,projectionWarn:projectionWarn,modelsCount:count,projectionLabel:proj.projectionLabel,mult:mult,moat:_moatPEBonusPct(analysis)};
 }
-async function _ensureValuationSignal(ticker){
+async function _ensureValuationSignal(ticker,force){
+  if(force){delete _valuationSignals[ticker];delete _valuationFinCache[ticker];}
   if(_valuationSignals[ticker])return _valuationSignals[ticker];
   var f=S.fundamentals[ticker];if(!f)return null;
   var p=S.prices[ticker];if(!p||!(p.price>0))return null;
@@ -2192,16 +2213,16 @@ async function _ensureValuationSignal(ticker){
   var fin=_valuationFinCache[ticker];
   if(!fin){try{var r=await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=financials',{signal:AbortSignal.timeout(12000)});var d=await r.json();if(d&&!d.error){fin=d;_valuationFinCache[ticker]=d;}}catch(e){}}
   if(!fin)return null;
-  var s=_computeCentralValuationSignal(ticker,p.price,f,fin);if(s)_valuationSignals[ticker]=s;return s;
+  var sig=_computeCentralValuationSignal(ticker,p.price,f,fin);if(sig)_valuationSignals[ticker]=sig;return sig;
 }
 function _valuationCellHtml(ticker){
   var s=_valuationSignals[ticker];if(!s||s.avg==null)return '<span style="color:var(--muted)">—</span>';
   var warn=s.warn?' ⚠':'',mTxt=s.matrix!=null&&isFinite(s.matrix)?s.matrix.toFixed(1):'—',dTxt=s.dcf!=null&&isFinite(s.dcf)?s.dcf.toFixed(1):'—';
   var why=s.qualityAlert?'qualité cash-flow à contrôler':s.projectionWarn?'projection 5 ans insuffisante : estimation hors classement':s.decisionMismatch?'désaccord autour du seuil 15%':(s.gap!=null&&s.gap>25?'écart de modèles élevé':(s.modelsCount<2?'1 seul modèle exploitable':'modèles exploitables'));
   var gapTxt=s.gap!=null?s.gap.toFixed(1)+' pts':'n/a',prefix=s.rankable?'':'≈ ';
-  var sub=(s.rankable?'M ':'HORS CLASSEMENT · M ')+mTxt+' · D '+dTxt+(s.modelsCount<2?' · '+s.modelsCount+'/2':'');
+  var sub=(s.rankable?'M ':'⚠ faible confiance · M ')+mTxt+' · D '+dTxt+(s.modelsCount<2?' · '+s.modelsCount+'/2':'');
   var mainColor=s.rankable?_valuationSignalColor(s.avg):'#f59e0b';
-  return '<div class="mono" style="font-weight:800;color:'+mainColor+'" title="Matrice '+mTxt+'% · DCF '+dTxt+'% · écart '+gapTxt+' · '+why+'">'+prefix+s.avg.toFixed(1)+'%'+warn+'</div><div style="font-size:8px;color:'+(s.rankable?'var(--muted2)':'#f59e0b')+'">'+sub+'</div>';
+  return '<div class="mono" style="font-weight:800;color:'+mainColor+'" title="'+(s.projectionLabel||'')+' · Matrice '+mTxt+'% · DCF '+dTxt+'% · écart '+gapTxt+' · '+why+'">'+prefix+s.avg.toFixed(1)+'%'+warn+'</div><div style="font-size:8px;color:'+(s.rankable?'var(--muted2)':'#f59e0b')+'">'+sub+'</div>';
 }
 function getSortVal(ticker, col){
   if(col==='poids'){var ep=S.enrichedPos.find(function(x){return x.ticker===ticker;});return ep?(ep.valueEur||0):0;}
@@ -2494,7 +2515,7 @@ async function renderScreener(){
   pg.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:22px">'+
     '<div>'+
       '<h2 style="font-size:18px;font-weight:700">Screener</h2>'+
-      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
+      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V26 · Yahoo +5y corrigé · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
     '</div>'+
     '<button onclick="_toggleScrWatch()" style="padding:6px 14px;border:1px solid var(--border2);border-radius:20px;background:'+_wBg+';color:'+_wColor+';font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">'+
       '⭐ Watchlist — '+(_scrShowWatch?'<b>ON</b>':'OFF')+
@@ -2540,18 +2561,18 @@ async function renderScreener(){
   document.getElementById('sc-content').innerHTML=
     '<div id="coresat-kpi" style="margin-bottom:16px;padding:14px 16px;background:var(--bg2);border-radius:10px;border:1px solid var(--border)"></div>'+
     '<div style="display:flex;justify-content:flex-end;margin-bottom:12px">'+
-    '<button class="btn btn-primary" onclick="loadScreenerRatios()">⟳ Charger ratios & valorisation</button></div>'+
+    '<button class="btn btn-primary" onclick="loadScreenerRatios(true)">⟳ Recharger données & valorisation</button></div>'+
     '<div class="card"><div class="tbl-wrap"><table>'+
     '<thead><tr>'+
     '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+thSort('Poids','poids',scSort,'sortSC')+thSort('Cours','price',scSort,'sortSC')+thSort('Rend. Valio','valiorend',scSort,'sortSC')+'<th style="min-width:120px;text-align:center">Classe ⚖️</th>'+thSort('PER','per',scSort,'sortSC')+thSort('Fwd PER','fwdpe',scSort,'sortSC')+thSort('PEG','peg',scSort,'sortSC')+thSort('P/OCF','pocf',scSort,'sortSC')+thSort('M. Nette','marge',scSort,'sortSC')+thSort('CA 1A','ca1a',scSort,'sortSC')+thSort('CA FWD','cafwd',scSort,'sortSC')+thSort('EPS 1A','eps1a',scSort,'sortSC')+thSort('EPS Fwd','epsfwd',scSort,'sortSC')+thSort('D/EBITDA','debt',scSort,'sortSC')+
     '</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
 
   allItems.forEach(function(p){ updateRatioRowById('sc',p.ticker); });
-  setTimeout(loadScreenerRatios, 300);
+  setTimeout(function(){loadScreenerRatios(false);}, 300);
   setTimeout(_renderCoreSatKPI, 150);
 }
 
-async function loadScreenerRatios(){
+async function loadScreenerRatios(force){
   var pfPos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p);});
   var wlOnly=watchlistItems.filter(function(w){return !pfPos.find(function(p){return p.ticker===w.ticker;});});
   var allItems=pfPos.concat(wlOnly.map(function(w){return {ticker:w.ticker,name:w.name};}));
@@ -2559,11 +2580,18 @@ async function loadScreenerRatios(){
   for(var i=0;i<allItems.length;i+=BATCH){
     var batch=allItems.slice(i,i+BATCH);
     await Promise.all(batch.map(async function(p){
-      if(!S.fundamentals[p.ticker] && !S.fundamentalsAttempted.has(p.ticker)){
+      var mustRefresh=!!force||!_fundamentalFresh(S.fundamentals[p.ticker]);
+      if(mustRefresh || (!S.fundamentals[p.ticker] && !S.fundamentalsAttempted.has(p.ticker))){
         S.fundamentalsAttempted.add(p.ticker);
-        try{var r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker)+'&type=fundamentals',{signal:AbortSignal.timeout(10000)});var d=await r.json();if(d&&!d.error)S.fundamentals[p.ticker]=d;}catch(e){}
+        try{
+          var r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker)+'&type=fundamentals&cb='+Date.now(),{signal:AbortSignal.timeout(12000),cache:'no-store'});
+          var d=await r.json();if(d&&!d.error){
+            S.fundamentals[p.ticker]=d;
+            if(Number(d._v)<12&&!window._quoteVersionWarned){window._quoteVersionWarned=true;showToast('⚠ Backend quote.js ancien : déploie quote.js V26 pour activer Rend. Valio fiable');}
+          }
+        }catch(e){}
       }
-      try{await _ensureValuationSignal(p.ticker);}catch(e){}
+      try{await _ensureValuationSignal(p.ticker,!!force);}catch(e){}
       updateRatioRowById('sc',p.ticker);
       var ve=document.getElementById('sc-'+p.ticker.replace(/[^a-zA-Z0-9]/g,'_')+'-valiorend');if(ve)ve.innerHTML=_valuationCellHtml(p.ticker);
     }));
@@ -5583,14 +5611,14 @@ function _valuationProjection(ticker,f,fin,epsFallback){
     return {epsBase:base,epsNext:fy1,baseYear:yNow,baseSrc:baseSrc,nBase:n0,nNext:n1,growths:[15,12,9,7,6],sustainable:null,cyclical:true,g5:null,manualActive:manualActive,projectionQuality:'model',projectionLabel:'Modèle cyclique mi-cycle',rankable:false,confidence:'low',explicitYears:0};
   }
 
-  var quotedG=(f&&isFinite(f.epsGrowthFwd1Y))?+f.epsGrowthFwd1Y:((ae.currentYear&&isFinite(ae.currentYear.epsGrowth))?+ae.currentYear.epsGrowth:null);
+  var quotedG=(f&&f.epsGrowthFwd1Y!=null&&isFinite(f.epsGrowthFwd1Y))?+f.epsGrowthFwd1Y:((ae.currentYear&&ae.currentYear.epsGrowth!=null&&isFinite(ae.currentYear.epsGrowth))?+ae.currentYear.epsGrowth:null);
   // Un "0%" isolé sans EPS FY1 explicite est généralement une absence de donnée normalisée par l'API.
   if(!hasYahooFY1&&quotedG===0)quotedG=null;
   var g1=(hasYahooFY1&&fy1>0&&base>0)?(fy1/base-1)*100:null;
   if(!(g1!=null&&isFinite(g1)&&g1>-60&&g1<180))g1=quotedG;
   if(g1!=null&&isFinite(g1))g1=Math.max(-60,Math.min(120,g1));
 
-  var g5=(f&&isFinite(f.epsGrowthFwd5Y)&&f.epsGrowthFwd5Y>-20&&f.epsGrowthFwd5Y<100)?+f.epsGrowthFwd5Y:null;
+  var g5=(f&&Number(f._v)>=12&&f.epsGrowthFwd5Y!=null&&isFinite(f.epsGrowthFwd5Y)&&f.epsGrowthFwd5Y>-30&&f.epsGrowthFwd5Y<100)?+f.epsGrowthFwd5Y:null;
   var gs=[],projectionQuality='',projectionLabel='',rankable=false,confidence='low',explicitYears=0;
 
   // 1) Priorité maximale : EPS explicites année par année, si cinq exercices sont réellement disponibles.
@@ -5606,15 +5634,13 @@ function _valuationProjection(ticker,f,fin,epsFallback){
     }else gs=[];
   }
 
-  // 2) CAGR EPS 5 ans Yahoo : source long terme prioritaire lorsqu'on n'a pas 5 EPS explicites.
+  // 2) Yahoo « Next 5 Years (per annum) » : c'est déjà un CAGR annualisé.
+  // On NE fabrique plus une courbe A1→A5 : 18%/an Yahoo = 18% chaque année dans le modèle 5 ans.
+  // Cela évite qu'un FY1 exceptionnel/one-off déforme tout le scénario.
   if(!gs.length&&g5!=null){
-    // Si A1 Yahoo existe, on le respecte puis on résout A2-A5 afin de retomber EXACTEMENT sur le CAGR 5 ans.
-    if(hasYahooFY1&&g1!=null&&isFinite(g1)&&g1>-95){
-      var total=Math.pow(1+g5/100,5),first=Math.max(.05,1+g1/100),rest=Math.pow(total/first,1/4)-1;
-      if(isFinite(rest)&&rest>-.80&&rest<2){gs=[g1,rest*100,rest*100,rest*100,rest*100];}
-      else gs=[g5,g5,g5,g5,g5];
-    }else gs=[g5,g5,g5,g5,g5];
-    projectionQuality='consensus5y';projectionLabel='Yahoo : consensus CAGR EPS 5 ans';rankable=true;confidence='high';explicitYears=hasYahooFY1?1:0;
+    gs=[g5,g5,g5,g5,g5];
+    projectionQuality='consensus5y';projectionLabel='Yahoo : Next 5 Years '+g5.toFixed(1)+'%/an';rankable=true;confidence='high';explicitYears=0;
+    if(g5>60||g5<-10){rankable=false;confidence='medium';projectionLabel+=' · extrême, contrôle requis';}
   }
 
   // 3) Plusieurs exercices explicites mais pas de consensus 5 ans : on montre une estimation de secours,
@@ -5633,7 +5659,7 @@ function _valuationProjection(ticker,f,fin,epsFallback){
   if(!gs.length&&g1!=null&&isFinite(g1)){
     gs=[g1,g1,g1,g1,g1];
     projectionQuality='fy1only';
-    projectionLabel=hasYahooFY1?'Yahoo FY1 uniquement · A2-A5 extrapolées':'Croissance FY1 uniquement · A1-A5 extrapolées';
+    projectionLabel=(Number(f&&f._v)<12?'Backend quote.js ancien · ':'')+(hasYahooFY1?'Yahoo FY1 uniquement · A2-A5 extrapolées':'Croissance FY1 uniquement · A1-A5 extrapolées');
     rankable=false;confidence='low';explicitYears=hasYahooFY1?1:0;
   }
 
@@ -5766,14 +5792,14 @@ function _dcfReinvestmentProfile(ticker,price,f,fin,proj,scale,structuralShare){
   var last=rows[rows.length-1],prev=rows[rows.length-2],capRates=rows.map(function(x){return x.cap/x.rev;}).filter(function(x){return x>0&&x<.8;}),ocfMargins=rows.map(function(x){return x.ocf/x.rev;}).filter(function(x){return x>0&&x<1.2;});
   var curCapRate=last.cap/last.rev,curOcfMargin=last.ocf/last.rev,medOcf=_dcfMedian(ocfMargins.slice(-4));if(!(curCapRate>0&&curOcfMargin>0))return null;
   var currentRevGrowth=(prev.rev>0)?(last.rev/prev.rev-1):null;
-  var gEps=_projectionGrowths(proj,5,scale),revG1=(f&&isFinite(f.revenueGrowthFY1))?f.revenueGrowthFY1:((f&&isFinite(f.revenueGrowthFwd1Y))?f.revenueGrowthFwd1Y:((f&&isFinite(f.revenueGrowthYoY))?f.revenueGrowthYoY:null));
-  if(!isFinite(revG1))revG1=isFinite(currentRevGrowth)?currentRevGrowth*100:gEps[0];revG1=Math.max(-20,Math.min(80,revG1));
+  var gEps=_projectionGrowths(proj,5,scale),revG1=(f&&f.revenueGrowthFY1!=null&&isFinite(f.revenueGrowthFY1))?f.revenueGrowthFY1:((f&&f.revenueGrowthFwd1Y!=null&&isFinite(f.revenueGrowthFwd1Y))?f.revenueGrowthFwd1Y:((f&&f.revenueGrowthYoY!=null&&isFinite(f.revenueGrowthYoY))?f.revenueGrowthYoY:null));
+  if(revG1==null||!isFinite(revG1))revG1=(currentRevGrowth!=null&&isFinite(currentRevGrowth))?currentRevGrowth*100:gEps[0];revG1=Math.max(-20,Math.min(80,revG1));
   var delta=gEps[0]-revG1,revGs=[];for(var y=0;y<5;y++){var w=1-y/4,rg=gEps[y]-delta*w;revGs.push(Math.max(-20,Math.min(80,rg)));}
 
   // Décompose le taux de capex actuel en plancher structurel + composante liée à la croissance.
   // 50% par défaut = hypothèse prudente/éditable pour reconnaître une part de renouvellement durable.
   var structuralFloor=Math.max(.025,Math.min(.40,curCapRate*structuralShare));
-  var growthDen=Math.max(.05,Math.abs(isFinite(currentRevGrowth)?currentRevGrowth:revGs[0]/100));
+  var growthDen=Math.max(.05,Math.abs((currentRevGrowth!=null&&isFinite(currentRevGrowth))?currentRevGrowth:revGs[0]/100));
   var growthCoeff=Math.max(0,Math.min(2.5,(curCapRate-structuralFloor)/growthDen));
   var ocfTarget=(medOcf>0)?(.55*curOcfMargin+.45*medOcf):curOcfMargin;
 
