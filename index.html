@@ -2194,10 +2194,7 @@ function _valuationConfidence(matrix,dcf,proj,qualityAlert){
   if(proj&&proj.confidence==='medium'&&conf==='high')conf='medium';
   return {confidence:conf,code:conf==='high'?'CE':conf==='medium'?'CM':'CF',modelsCount:count,gap:absGap,relativeGap:relGap,opposite:opposite,decisionMismatch:decisionMismatch,rankable:!!rankable};
 }
-function _valuationConfidenceBadge(conf){
-  var code=conf==='high'?'CE':conf==='medium'?'CM':'CF',label=conf==='high'?'Confiance élevée':conf==='medium'?'Confiance moyenne':'Confiance faible',color=conf==='high'?'var(--green)':conf==='medium'?'var(--cyan)':'var(--red)';
-  return '<span title="'+label+'" style="font-size:9px;font-weight:800;color:'+color+';padding:1px 4px;border:1px solid '+color+';border-radius:4px">'+code+'</span>';
-}
+
 function _computeCentralValuationSignal(ticker,price,f,fin){
   if(!(price>0)||!f)return null;
   var epsFallback=(f.trailingPE>0)?price/f.trailingPE:null,
@@ -2265,9 +2262,27 @@ function _valuationCellHtml(ticker){
 
   var title=(s.projectionLabel||'')+' · Matrice '+mTxt+'% · DCF '+dTxt+'%'+relTxt+' · confiance '+confTxt;
   return '<div class="mono" style="font-weight:800;color:'+mainColor+'" title="'+title+'">'+prefix+s.avg.toFixed(1)+'%</div>'+
-         '<div style="font-size:8px;color:var(--muted2)">M '+mTxt+' · D '+dTxt+methodTxt+' · '+_valuationConfidenceBadge(s.confidence)+'</div>';
+         '<div style="font-size:8px;color:var(--muted2)">M '+mTxt+' · D '+dTxt+'</div>';
+}
+function _moatCellHtml(ticker){
+  var result=_moatPEBonusPct(_analysisDataFor(ticker));
+  return result.score==null?'<span title="Moat 2030 non renseigné" style="color:var(--muted)">—</span>':'<span class="mono" title="Moat 2030 · note enregistrée sur 100">'+result.score+'/100</span>';
+}
+function _updateMoatCell(prefix,ticker){
+  var el=document.getElementById(prefix+'-'+ticker.replace(/[^a-zA-Z0-9]/g,'_')+'-moat');
+  if(el)el.innerHTML=_moatCellHtml(ticker);
+}
+async function _refreshMoatCells(prefix,items){
+  var uncached=items.filter(function(p){return !Object.prototype.hasOwnProperty.call(_analysisCache,p.ticker);});
+  await Promise.all(uncached.map(function(p){return loadAnalysis(p.ticker);}));
+  items.forEach(function(p){_updateMoatCell(prefix,p.ticker);});
+  if(uncached.length){
+    if(prefix==='sc'&&scSort.col==='moat')renderScreenerTable(scSort);
+    if(prefix==='wr'&&wlSort.col==='moat')renderWatchlistTable();
+  }
 }
 function getSortVal(ticker, col){
+  if(col==='moat')return _moatPEBonusPct(_analysisDataFor(ticker)).score;
   if(col==='poids'){var ep=S.enrichedPos.find(function(x){return x.ticker===ticker;});return ep?(ep.valueEur||0):0;}
   if(col==='price') return (S.prices[ticker]&&S.prices[ticker].price)||0;
   if(col==='valiorend') return (_valuationSignals[ticker]&&_valuationSignals[ticker].avg!=null&&isFinite(_valuationSignals[ticker].avg))?_valuationSignals[ticker].avg:null;
@@ -2380,7 +2395,7 @@ function renderWatchlistTable(){
       '<td>'+priceStr+'</td>'+
       '<td id="wr-'+tid+'-valiorend">'+_valuationCellHtml(w.ticker)+'</td>'+
       '<td style="text-align:left">'+tgtCell+'</td>'+
-      ['per','fwdpe','peg','pocf','marge','ca1a','cafwd','eps1a','epsfwd','debt'].map(function(k){return '<td id="wr-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
+      ['per','fwdpe','peg','moat','pocf','marge','ca1a','cafwd','eps1a','epsfwd'].map(function(k){return '<td id="wr-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '<td style="white-space:nowrap;position:sticky;right:0;background:var(--card);box-shadow:-6px 0 12px -4px rgba(0,0,0,.5);z-index:2"><button class="btn btn-ghost btn-sm" onclick="editTargets(\''+w.id+'\')" title="Définir les cibles">🎯</button>'+
       '<button class="btn btn-danger btn-sm" onclick="removeWatch(this)" data-id="'+w.id+'" data-ticker="'+w.ticker+'" title="Retirer de la watchlist">✕</button></td>'+
       '</tr>';
@@ -2396,18 +2411,18 @@ function renderWatchlistTable(){
     '<th style="text-align:left">🎯 Cible</th>'+
     thSort('PER','per',wlSort,'sortWL')+
     thSort('Fwd PER','fwdpe',wlSort,'sortWL')+
-    thSort('PEG','peg',wlSort,'sortWL')+
+    thSort('PEG','peg',wlSort,'sortWL')+thSort('Moat /100','moat',wlSort,'sortWL')+
     thSort('P/OCF','pocf',wlSort,'sortWL')+
     thSort('M. Nette','marge',wlSort,'sortWL')+
     thSort('CA 1A','ca1a',wlSort,'sortWL')+
     thSort('EPS 1A','eps1a',wlSort,'sortWL')+thSort('EPS Fwd','epsfwd',wlSort,'sortWL')+
-    thSort('D/EBITDA','debt',wlSort,'sortWL')+
     '<th style="position:sticky;right:0;background:var(--card);box-shadow:-6px 0 12px -4px rgba(0,0,0,.5);z-index:3;min-width:90px">Actions</th>'+
     '</tr></thead><tbody>'+rows+'</tbody></table></div></div>'+
     '<div style="margin-top:12px;display:flex;justify-content:flex-end">'+
     '<button class="btn btn-primary" onclick="loadWatchRatios()">⟳ Charger ratios & valorisation</button></div>';
   // Restaurer les ratios depuis le cache (S.fundamentals)
-  sorted.forEach(function(w){ if(S.fundamentals[w.ticker]) updateRatioRowById('wr',w.ticker); });
+  sorted.forEach(function(w){updateRatioRowById('wr',w.ticker);});
+  _refreshMoatCells('wr',sorted);
 }
 
 window.editTargets=function(wid){
@@ -2454,6 +2469,7 @@ async function loadWatchRatios(){
 }
 
 function updateRatioRowById(prefix,ticker){
+  _updateMoatCell(prefix,ticker);
   var f=S.fundamentals[ticker]; if(!f) return;
   var tid=ticker.replace(/[^a-zA-Z0-9]/g,'_');
   function set(key,val,fmt,colorFn){
@@ -2558,7 +2574,7 @@ async function renderScreener(){
   pg.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:22px">'+
     '<div>'+
       '<h2 style="font-size:18px;font-weight:700">Screener</h2>'+
-      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V30 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
+      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V32 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
     '</div>'+
     '<button onclick="_toggleScrWatch()" style="padding:6px 14px;border:1px solid var(--border2);border-radius:20px;background:'+_wBg+';color:'+_wColor+';font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">'+
       '⭐ Watchlist — '+(_scrShowWatch?'<b>ON</b>':'OFF')+
@@ -2597,7 +2613,7 @@ async function renderScreener(){
       '<td>'+priceStr+'</td>'+
       '<td id="sc-'+tid+'-valiorend">'+_valuationCellHtml(p.ticker)+'</td>'+
       (p._isWatch?'<td style="color:var(--muted2);font-size:11px;text-align:center">—</td>':'<td style="text-align:center">'+_coreSatSelector(p.ticker)+'</td>')+
-      ['per','fwdpe','peg','pocf','marge','ca1a','cafwd','eps1a','epsfwd','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
+      ['per','fwdpe','peg','moat','pocf','marge','ca1a','cafwd','eps1a','epsfwd'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '</tr>';
   }).join('');
 
@@ -2607,10 +2623,11 @@ async function renderScreener(){
     '<button class="btn btn-primary" onclick="loadScreenerRatios(true)">⟳ Recharger données & valorisation</button></div>'+
     '<div class="card"><div class="tbl-wrap"><table>'+
     '<thead><tr>'+
-    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+thSort('Poids','poids',scSort,'sortSC')+thSort('Cours','price',scSort,'sortSC')+thSort('Rend. Valio','valiorend',scSort,'sortSC')+'<th style="min-width:120px;text-align:center">Classe ⚖️</th>'+thSort('PER','per',scSort,'sortSC')+thSort('Fwd PER','fwdpe',scSort,'sortSC')+thSort('PEG','peg',scSort,'sortSC')+thSort('P/OCF','pocf',scSort,'sortSC')+thSort('M. Nette','marge',scSort,'sortSC')+thSort('CA 1A','ca1a',scSort,'sortSC')+thSort('CA FWD','cafwd',scSort,'sortSC')+thSort('EPS 1A','eps1a',scSort,'sortSC')+thSort('EPS Fwd','epsfwd',scSort,'sortSC')+thSort('D/EBITDA','debt',scSort,'sortSC')+
+    '<th style="text-align:left;padding-left:20px;min-width:200px">Titre</th>'+thSort('Poids','poids',scSort,'sortSC')+thSort('Cours','price',scSort,'sortSC')+thSort('Rend. Valio','valiorend',scSort,'sortSC')+'<th style="min-width:120px;text-align:center">Classe ⚖️</th>'+thSort('PER','per',scSort,'sortSC')+thSort('Fwd PER','fwdpe',scSort,'sortSC')+thSort('PEG','peg',scSort,'sortSC')+thSort('Moat /100','moat',scSort,'sortSC')+thSort('P/OCF','pocf',scSort,'sortSC')+thSort('M. Nette','marge',scSort,'sortSC')+thSort('CA 1A','ca1a',scSort,'sortSC')+thSort('CA FWD','cafwd',scSort,'sortSC')+thSort('EPS 1A','eps1a',scSort,'sortSC')+thSort('EPS Fwd','epsfwd',scSort,'sortSC')+
     '</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
 
   allItems.forEach(function(p){ updateRatioRowById('sc',p.ticker); });
+  _refreshMoatCells('sc',allItems);
   setTimeout(function(){loadScreenerRatios(false);}, 300);
   setTimeout(_renderCoreSatKPI, 150);
 }
@@ -2644,6 +2661,7 @@ async function loadScreenerRatios(force){
       var ve=document.getElementById('sc-'+p.ticker.replace(/[^a-zA-Z0-9]/g,'_')+'-valiorend');if(ve)ve.innerHTML=_valuationCellHtml(p.ticker);
       try{await _ensureValuationSignal(p.ticker,!!force);}catch(e){}
       if(ve)ve.innerHTML=_valuationCellHtml(p.ticker);
+      _updateMoatCell('sc',p.ticker);
     }));
     if(i+BATCH<allItems.length) await new Promise(function(r){setTimeout(r,DELAY);});
   }
@@ -6164,7 +6182,7 @@ function renderYieldMatrix(ticker, price, f, fin){
   var baseControls='<div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin:-2px 0 12px;padding:9px 11px;border:1px solid var(--border2);border-radius:8px;background:rgba(255,255,255,.018)"><div><label style="font-size:8px;color:var(--muted);text-transform:uppercase">Base EPS persistante</label><br><select id="ym-base-source" class="form-input" style="min-width:170px;padding:5px"><option value="yahoo"'+(epsMode==='yahoo'?' selected':'')+'>Yahoo (défaut)</option><option value="manual"'+(epsMode==='manual'?' selected':'')+'>Normalisé manuel</option></select></div><div><label style="font-size:8px;color:var(--muted);text-transform:uppercase">EPS normalisé manuel ('+cSym+')</label><br><input id="ym-eps-normalized" class="form-input mono" style="width:125px;padding:5px" value="'+manualEps+'" placeholder="ex : 12.50"></div><button class="btn btn-ghost btn-sm" onclick="window._saveValuationBase(\''+tName+'\')">💾 Enregistrer la base</button><div style="font-size:9px;color:var(--muted);max-width:420px;line-height:1.4">Yahoo reste la source par défaut. Le mode manuel sert uniquement aux résultats réellement exceptionnels/retraités.</div></div>';
   var dcfPreview=_dcfCompute(ticker,price,f,fin),dcfReturn=dcfPreview&&dcfPreview.irr!=null?dcfPreview.irr:null;
   var scenarioConf=_valuationConfidence(selRet,dcfReturn,proj,!!(dcfPreview&&dcfPreview.prof&&dcfPreview.prof.dataAlert));
-  var cohHtml='<div style="margin:0 0 14px;padding:10px 12px;border:1px solid var(--border);border-radius:9px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;font-size:10px"><b>Cohérence des modèles</b><span>Matrice 5A : '+selRet.toFixed(1)+'%/an</span><span>DCF 5A : '+(dcfReturn==null?'indisponible':dcfReturn.toFixed(1)+'%/an')+'</span>'+_valuationConfidenceBadge(scenarioConf.confidence)+(scenarioConf.modelsCount<2?'<span>1 méthode · Matrice seule</span>':'<span>Écart relatif '+scenarioConf.relativeGap.toFixed(0)+'%</span>')+'</div>';
+  var cohHtml='<div style="margin:0 0 14px;padding:10px 12px;border:1px solid var(--border);border-radius:9px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;font-size:10px"><b>Cohérence des modèles</b><span>Matrice 5A : '+selRet.toFixed(1)+'%/an</span><span>DCF 5A : '+(dcfReturn==null?'indisponible':dcfReturn.toFixed(1)+'%/an')+'</span>'+(scenarioConf.modelsCount<2?'<span>1 méthode · Matrice seule</span>':'<span>Écart relatif '+scenarioConf.relativeGap.toFixed(0)+'%</span>')+'</div>';
 
   var scenarioName=scale===75?'Bear':scale===125?'Bull':scale===100?'Base':'Personnalisé '+scale+'%';
   var html='<div style="display:flex;align-items:center;gap:6px;margin-bottom:14px">'+tog('5 ans',5)+'<div style="margin-left:16px;display:flex;gap:26px;flex-wrap:wrap"><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Mon scénario — prix max ('+rC+'%/an)</div><div style="font-size:20px;font-weight:800;color:#634BE4" class="mono">'+cSym+fN(fair)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Mon scénario — rendement '+N+' ans</div><div style="font-size:20px;font-weight:800;color:'+cellColor(selRet)+'" class="mono">'+selRet.toFixed(2)+' %/an</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Écart au prix max</div><div style="font-size:20px;font-weight:800;color:'+(gap>=0?'#22c55e':'#f59e0b')+'" class="mono">'+(gap>=0?'+':'')+gap.toFixed(2)+' %</div></div></div></div>'+peRefs+
@@ -8174,7 +8192,7 @@ function renderScreenerTable(sort){
   if(!tbody) return;
   var pfPos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p);});
   var wlOnly=watchlistItems.filter(function(w){return !pfPos.find(function(p){return p.ticker===w.ticker;});});
-  var allItems=sortItems(pfPos.concat(wlOnly.map(function(w){return {ticker:w.ticker,name:w.name,_isWatch:true};})),sort);
+  var allItems=sortItems(pfPos.concat(_scrShowWatch?wlOnly.map(function(w){return {ticker:w.ticker,name:w.name,_isWatch:true};}):[]),sort);
   var _totalPf=S.enrichedPos.reduce(function(s,p){return s+(p.valueEur||0);},0);
   tbody.innerHTML=allItems.map(function(p){
     var d=S.prices[p.ticker];
@@ -8192,7 +8210,7 @@ function renderScreenerTable(sort){
       '<td>'+priceStr+'</td>'+
       '<td id="sc-'+tid+'-valiorend">'+_valuationCellHtml(p.ticker)+'</td>'+
       (p._isWatch?'<td style="color:var(--muted2);font-size:11px;text-align:center">—</td>':'<td style="text-align:center">'+_coreSatSelector(p.ticker)+'</td>')+
-      ['per','fwdpe','peg','pocf','marge','ca1a','cafwd','eps1a','epsfwd','debt'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
+      ['per','fwdpe','peg','moat','pocf','marge','ca1a','cafwd','eps1a','epsfwd'].map(function(k){return '<td id="sc-'+tid+'-'+k+'" style="color:var(--muted)">—</td>';}).join('')+
       '</tr>';
   }).join('');
   allItems.forEach(function(p){ updateRatioRowById('sc',p.ticker); });
