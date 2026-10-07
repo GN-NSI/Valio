@@ -2177,7 +2177,7 @@ function sortSC(col){
 }
 var _valuationSignals={};
 var _valuationFinCache={};
-function _valuationSignalColor(v){return v>=20?'#22c55e':v>=15?'#26C5DE':v>=10?'#f59e0b':'#ef4444';}
+function _valuationSignalColor(v){return v>=25?'#22c55e':v>=20?'#eab308':v>=15?'#f97316':'#ef4444';}
 function _computeCentralValuationSignal(ticker,price,f,fin){
   // V27 : ne jamais rendre le Screener inutilisable à cause d'une version backend.
   // Les données v11 utilisent FY0/FY1 ; v12+ ajoute le consensus Yahoo +5y corrigé.
@@ -2186,23 +2186,18 @@ function _computeCentralValuationSignal(ticker,price,f,fin){
   var g5=_projectionGrowths(proj,5,100);if(!g5.length)return null;
   var analysis=_analysisDataFor(ticker),mult=estimateExitMultiple(f,g5[g5.length-1],null,analysis),epsN=_projectEps(proj.epsBase,g5);
   var matrix=(epsN>0&&mult>0)?(Math.pow((epsN*mult)/price,1/5)-1)*100:null;
-  var wantsReinv=_dcfIsReinvestmentCandidate(ticker,f),r=_dcfSectorRate(f,g5[0]),gt=4.5,dcf=null,qualityAlert=false,usedModel=wantsReinv?'reinvestment':'standard';
-  if(wantsReinv){
-    var rp=_dcfReinvestmentProfile(ticker,price,f,fin,proj,100,.50),v=(rp&&rp.cfs&&rp.cfs[rp.cfs.length-1]>0)?_dcfValueSeries(rp.cfs,r,gt):null;
-    if(v) dcf=_dcfImpliedReturnFromVal(price,v);
-    else usedModel='standard'; // fallback automatique : un modèle réinvestissement incomplet ne supprime plus la valorisation
-  }
-  if(usedModel==='standard'){
-    var prof=_dcfCashProfile(ticker,price,f,fin,proj);qualityAlert=!!(prof&&prof.dataAlert);
-    if(prof&&((prof.reported>0)||(prof.normalized>0))){
-      var eff=prof.autoMode||'reported',base=eff==='normalized'?prof.normalized:prof.reported;if(!(base>0))base=prof.normalized||prof.reported;
-      var v2=_dcfValuePath(base,g5,r,gt);if(v2)dcf=_dcfImpliedReturnFromVal(price,v2);
-    }
+  // V28 : une seule source de vérité pour le DCF. Le Screener utilise exactement
+  // le même moteur que la fiche société, avec les paramètres automatiques Base 100%.
+  // Cela supprime les écarts du type « Screener DCF 2,6% / fiche DCF 14,3% ».
+  var dcfCalc=_dcfCompute(ticker,price,f,fin,{useState:false}),dcf=null,qualityAlert=false;
+  if(dcfCalc){
+    dcf=dcfCalc.irr;
+    qualityAlert=!!(dcfCalc.prof&&dcfCalc.prof.dataAlert);
   }
   var hasM=matrix!=null&&isFinite(matrix),hasD=dcf!=null&&isFinite(dcf),count=(hasM?1:0)+(hasD?1:0);
   var avg=count===2?(matrix+dcf)/2:(hasM?matrix:(hasD?dcf:null));
   var gap=hasM&&hasD?Math.abs(matrix-dcf):null,target=15,decisionMismatch=hasM&&hasD?((matrix>=target)!==(dcf>=target)):false;
-  var projectionWarn=proj.rankable===false,rankable=proj.rankable!==false,rankValue=(avg!=null&&isFinite(avg))?avg:null,warn=qualityAlert||projectionWarn||decisionMismatch||(gap!=null&&gap>25)||count<2;
+  var projectionWarn=proj.rankable===false,rankable=proj.rankable!==false,rankValue=(rankable&&avg!=null&&isFinite(avg))?avg:null,warn=qualityAlert||projectionWarn||decisionMismatch||(gap!=null&&gap>25)||count<2;
   return {matrix:matrix,dcf:dcf,avg:avg,rankValue:rankValue,rankable:rankable,confidence:proj.confidence||'low',gap:gap,warn:warn,decisionMismatch:decisionMismatch,qualityAlert:qualityAlert,projectionWarn:projectionWarn,modelsCount:count,projectionLabel:proj.projectionLabel,mult:mult,moat:_moatPEBonusPct(analysis)};
 }
 async function _ensureValuationSignal(ticker,force){
@@ -2221,7 +2216,7 @@ function _valuationCellHtml(ticker){
   var why=s.qualityAlert?'qualité cash-flow à contrôler':s.projectionWarn?'projection 5 ans insuffisante : estimation hors classement':s.decisionMismatch?'désaccord autour du seuil 15%':(s.gap!=null&&s.gap>25?'écart de modèles élevé':(s.modelsCount<2?'1 seul modèle exploitable':'modèles exploitables'));
   var gapTxt=s.gap!=null?s.gap.toFixed(1)+' pts':'n/a',prefix=s.rankable?'':'≈ ';
   var sub=(s.rankable?'M ':'≈ ')+mTxt+' · D '+dTxt+(s.modelsCount<2?' · DCF en cours/indispo':'');
-  var mainColor=s.rankable?_valuationSignalColor(s.avg):'#f59e0b';
+  var mainColor=_valuationSignalColor(s.avg);
   return '<div class="mono" style="font-weight:800;color:'+mainColor+'" title="'+(s.projectionLabel||'')+' · Matrice '+mTxt+'% · DCF '+dTxt+'% · écart '+gapTxt+' · '+why+'">'+prefix+s.avg.toFixed(1)+'%'+warn+'</div><div style="font-size:8px;color:'+(s.rankable?'var(--muted2)':'#f59e0b')+'">'+sub+'</div>';
 }
 function getSortVal(ticker, col){
@@ -2515,7 +2510,7 @@ async function renderScreener(){
   pg.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:22px">'+
     '<div>'+
       '<h2 style="font-size:18px;font-weight:700">Screener</h2>'+
-      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V27 · compatibilité API renforcée · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
+      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V28 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
     '</div>'+
     '<button onclick="_toggleScrWatch()" style="padding:6px 14px;border:1px solid var(--border2);border-radius:20px;background:'+_wBg+';color:'+_wColor+';font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">'+
       '⭐ Watchlist — '+(_scrShowWatch?'<b>ON</b>':'OFF')+
@@ -2587,7 +2582,7 @@ async function loadScreenerRatios(force){
           var r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker)+'&type=fundamentals&cb='+Date.now(),{signal:AbortSignal.timeout(12000),cache:'no-store'});
           var d=await r.json();if(d&&!d.error){
             S.fundamentals[p.ticker]=d;
-            if(Number(d._v)<12&&!window._quoteVersionWarned){window._quoteVersionWarned=true;console.info('Valio V27: backend legacy détecté, mode compatibilité FY0/FY1 activé.');}
+            if(Number(d._v)<14&&!window._quoteVersionWarned){window._quoteVersionWarned=true;console.info('Valio V28: backend legacy détecté. Pour des consensus FY0/FY1 fiables, déployer quote.js V28.');}
           }
         }catch(e){}
       }
@@ -5573,7 +5568,7 @@ function _valuationProjection(ticker,f,fin,epsFallback){
 
   // Yahoo : FY0 = exercice courant/base ; A1 = exercice suivant quand disponible.
   var fy0Yahoo=epsOf(ae.thisYear)||(ok(f&&f.epsFY0)?+f.epsFY0:null);
-  var a1Obj=ae.currentYear||ae.nextYear||null;
+  var a1Obj=ae.nextYear||ae.currentYear||null;
   var fy1=epsOf(a1Obj)||(ok(f&&f.epsFY1)?+f.epsFY1:null);
   var n0=countOf(ae.thisYear),n1=countOf(a1Obj);
   var hasYahooFY1=!!(epsOf(a1Obj)||(ok(f&&f.epsFY1)?+f.epsFY1:null));
@@ -5620,8 +5615,10 @@ function _valuationProjection(ticker,f,fin,epsFallback){
   var quotedG=(f&&f.epsGrowthFwd1Y!=null&&isFinite(f.epsGrowthFwd1Y))?+f.epsGrowthFwd1Y:((ae.currentYear&&ae.currentYear.epsGrowth!=null&&isFinite(ae.currentYear.epsGrowth))?+ae.currentYear.epsGrowth:null);
   // Un "0%" isolé sans EPS FY1 explicite est généralement une absence de donnée normalisée par l'API.
   if(!hasYahooFY1&&quotedG===0)quotedG=null;
-  var g1=(hasYahooFY1&&fy1>0&&base>0)?(fy1/base-1)*100:null;
-  if(!(g1!=null&&isFinite(g1)&&g1>-60&&g1<180))g1=quotedG;
+  // V28 : privilégier le taux de croissance publié par Yahoo pour l'exercice suivant.
+  // Le ratio FY1/FY0 reste un fallback. Cela évite notamment les faux signaux quand FY0
+  // contient une base comptable/normalisée différente (cas META/GOOGL observés en V27).
+  var g1=(quotedG!=null&&isFinite(quotedG)&&quotedG>-60&&quotedG<180)?quotedG:((hasYahooFY1&&fy1>0&&base>0)?(fy1/base-1)*100:null);
   if(g1!=null&&isFinite(g1))g1=Math.max(-60,Math.min(120,g1));
 
   var g5=(f&&f.epsGrowthFwd5Y!=null&&isFinite(f.epsGrowthFwd5Y)&&f.epsGrowthFwd5Y>-30&&f.epsGrowthFwd5Y<100)?+f.epsGrowthFwd5Y:null;
@@ -5823,9 +5820,10 @@ function _dcfReinvestmentProfile(ticker,price,f,fin,proj,scale,structuralShare){
   }
   return {cfs:cfs,revenues:revenues,revGrowths:revGs,ocfMargins:ocfMarginsF,capexRates:capRatesF,ocfPs:ocfPs,capexPs:capexPs,currentCapexRate:curCapRate,currentOcfMargin:curOcfMargin,structuralFloor:structuralFloor,structuralShare:structuralShare,growthCoeff:growthCoeff,revps0:revenues[0]/(1+revGs[0]/100),source:'croissance CA → OCF → capex requis'};
 }
-function _dcfCompute(ticker,price,f,fin){
-  var fallback=(f&&f.trailingPE>0&&price>0)?price/f.trailingPE:null,proj=_valuationProjection(ticker,f,fin,fallback),st=_dcfState[ticker]||{};if(!proj)return null;
-  var ym=_ymSel[ticker]||{},scale=ym.scale!=null?ym.scale:100,modelMode=st.model||'auto',reinvestCandidate=_dcfIsReinvestmentCandidate(ticker,f),model=modelMode==='auto'?(reinvestCandidate?'reinvestment':'standard'):modelMode;
+function _dcfCompute(ticker,price,f,fin,opts){
+  opts=opts||{};var useState=opts.useState!==false;
+  var fallback=(f&&f.trailingPE>0&&price>0)?price/f.trailingPE:null,proj=_valuationProjection(ticker,f,fin,fallback),st=useState?(_dcfState[ticker]||{}):{};if(!proj)return null;
+  var ym=useState?(_ymSel[ticker]||{}):{},scale=ym.scale!=null?ym.scale:100,modelMode=st.model||'auto',reinvestCandidate=_dcfIsReinvestmentCandidate(ticker,f),model=modelMode==='auto'?(reinvestCandidate?'reinvestment':'standard'):modelMode;
   var growths=_projectionGrowths(proj,5,scale),r=st.r!=null?st.r:_dcfSectorRate(f,growths[0]),gt=st.gt!=null?st.gt:_dcfTerminalGrowthDefault(f),target=ym.r!=null&&ym.r>0?ym.r:15;if(r<=gt+.5)r=gt+.5;
   var val=null,targetVal=null,irr=null,prof=null,base=null,effective=null,reinv=null,mode=st.mode||'auto',autoFallback=false;
 
