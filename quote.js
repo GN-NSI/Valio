@@ -104,7 +104,7 @@ module.exports = async (req, res) => {
   if (type === 'fundamentals') {
     try {
       // Cache Supabase → réponse instantanée si données < 24h
-      const CACHE_V = 15; // v15 = refresh forcé + sémantique FY0/FY1 utilisée par Valio V29
+      const CACHE_V = 15; // v15 = refresh forcé + sémantique FY0/FY1 utilisée par Valio V30
       const cached = await getCache(symbol);
       const cacheValid = cached
         && cached._v === CACHE_V
