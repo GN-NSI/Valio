@@ -104,7 +104,7 @@ module.exports = async (req, res) => {
   if (type === 'fundamentals') {
     try {
       // Cache Supabase → réponse instantanée si données < 24h
-      const CACHE_V = 13; // v13 = +5y Yahoo corrigé + payload de compatibilité Valio V27
+      const CACHE_V = 14; // v14 = consensus FY0/FY1 Yahoo explicites + compatibilité Valio V28
       const cached = await getCache(symbol);
       const cacheValid = cached
         && cached._v === CACHE_V
@@ -219,7 +219,23 @@ module.exports = async (req, res) => {
           ...trendMeta(trendP1q),
         } : null,
         // Exercice suivant (+1y) — ex: FY2027 pour GOOGL
+        nextYear: trend1y ? {
+          period:    '+1y',
+          epsAvg:    trend1y.earningsEstimate?.avg?.raw ?? null,
+          epsLow:    trend1y.earningsEstimate?.low?.raw ?? null,
+          epsHigh:   trend1y.earningsEstimate?.high?.raw ?? null,
+          epsCount:  trend1y.earningsEstimate?.numberOfAnalysts?.raw ?? null,
+          epsGrowth: trend1y.earningsEstimate?.growth?.raw != null ? trend1y.earningsEstimate.growth.raw * 100 : null,
+          revAvg:    trend1y.revenueEstimate?.avg?.raw ?? null,
+          revLow:    trend1y.revenueEstimate?.low?.raw ?? null,
+          revHigh:   trend1y.revenueEstimate?.high?.raw ?? null,
+          revGrowth: trend1y.revenueEstimate?.growth?.raw != null ? trend1y.revenueEstimate.growth.raw * 100 : null,
+          count:     trend1y.earningsEstimate?.numberOfAnalysts?.raw ?? null,
+          ...trendMeta(trend1y),
+        } : null,
+        // Alias historique conservé pour les anciennes versions du frontend.
         currentYear: trend1y ? {
+          period:    '+1y',
           epsAvg:    trend1y.earningsEstimate?.avg?.raw ?? null,
           epsLow:    trend1y.earningsEstimate?.low?.raw ?? null,
           epsHigh:   trend1y.earningsEstimate?.high?.raw ?? null,
