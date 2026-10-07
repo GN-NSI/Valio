@@ -2179,26 +2179,54 @@ var _valuationSignals={};
 var _valuationFinCache={};
 function _valuationSignalColor(v){return v>=25?'#22c55e':v>=20?'#eab308':v>=15?'#f97316':'#ef4444';}
 function _computeCentralValuationSignal(ticker,price,f,fin){
-  // V27 : ne jamais rendre le Screener inutilisable à cause d'une version backend.
-  // Les données v11 utilisent FY0/FY1 ; v12+ ajoute le consensus Yahoo +5y corrigé.
   if(!(price>0)||!f)return null;
-  var epsFallback=(f.trailingPE>0)?price/f.trailingPE:null,proj=_valuationProjection(ticker,f,fin,epsFallback);if(!proj)return null;
-  var g5=_projectionGrowths(proj,5,100);if(!g5.length)return null;
-  var analysis=_analysisDataFor(ticker),mult=estimateExitMultiple(f,g5[g5.length-1],null,analysis),epsN=_projectEps(proj.epsBase,g5);
-  var matrix=(epsN>0&&mult>0)?(Math.pow((epsN*mult)/price,1/5)-1)*100:null;
-  // V28 : une seule source de vérité pour le DCF. Le Screener utilise exactement
-  // le même moteur que la fiche société, avec les paramètres automatiques Base 100%.
-  // Cela supprime les écarts du type « Screener DCF 2,6% / fiche DCF 14,3% ».
-  var dcfCalc=_dcfCompute(ticker,price,f,fin,{useState:false}),dcf=null,qualityAlert=false;
-  if(dcfCalc){
-    dcf=dcfCalc.irr;
-    qualityAlert=!!(dcfCalc.prof&&dcfCalc.prof.dataAlert);
+  var epsFallback=(f.trailingPE>0)?price/f.trailingPE:null,
+      proj=_valuationProjection(ticker,f,fin,epsFallback);
+  if(!proj)return null;
+
+  var g5=_projectionGrowths(proj,5,100);
+  if(!g5.length)return null;
+
+  var analysis=_analysisDataFor(ticker),
+      mult=estimateExitMultiple(f,g5[g5.length-1],null,analysis),
+      epsN=_projectEps(proj.epsBase,g5),
+      matrix=(epsN>0&&mult>0)?(Math.pow((epsN*mult)/price,1/5)-1)*100:null;
+
+  var dcfCalc=_dcfCompute(ticker,price,f,fin,{useState:false}),
+      dcf=(dcfCalc&&dcfCalc.irr!=null&&isFinite(dcfCalc.irr))?dcfCalc.irr:null,
+      qualityAlert=!!(dcfCalc&&dcfCalc.prof&&dcfCalc.prof.dataAlert);
+
+  var hasM=matrix!=null&&isFinite(matrix),
+      hasD=dcf!=null&&isFinite(dcf),
+      count=(hasM?1:0)+(hasD?1:0),
+      avg=count===2?(matrix+dcf)/2:(hasM?matrix:(hasD?dcf:null)),
+      absGap=hasM&&hasD?Math.abs(matrix-dcf):null,
+      gapBase=hasM&&hasD?Math.max(10,(Math.abs(matrix)+Math.abs(dcf))/2):null,
+      relGap=hasM&&hasD?(absGap/gapBase*100):null,
+      target=15,
+      decisionMismatch=hasM&&hasD?((matrix>=target)!==(dcf>=target)):false,
+      projectionWarn=proj.rankable===false,
+      rankable=proj.rankable!==false,
+      rankValue=(rankable&&avg!=null&&isFinite(avg))?avg:null;
+
+  var conf='low';
+  if(rankable){
+    if(count<2) conf='medium';
+    else if(decisionMismatch||qualityAlert||(relGap!=null&&relGap>60)) conf='low';
+    else if(proj.confidence==='high'&&relGap!=null&&relGap<=30) conf='high';
+    else conf='medium';
   }
-  var hasM=matrix!=null&&isFinite(matrix),hasD=dcf!=null&&isFinite(dcf),count=(hasM?1:0)+(hasD?1:0);
-  var avg=count===2?(matrix+dcf)/2:(hasM?matrix:(hasD?dcf:null));
-  var gap=hasM&&hasD?Math.abs(matrix-dcf):null,target=15,decisionMismatch=hasM&&hasD?((matrix>=target)!==(dcf>=target)):false;
-  var projectionWarn=proj.rankable===false,rankable=proj.rankable!==false,rankValue=(rankable&&avg!=null&&isFinite(avg))?avg:null,warn=qualityAlert||projectionWarn||decisionMismatch||(gap!=null&&gap>25)||count<2;
-  return {matrix:matrix,dcf:dcf,avg:avg,rankValue:rankValue,rankable:rankable,confidence:proj.confidence||'low',gap:gap,warn:warn,decisionMismatch:decisionMismatch,qualityAlert:qualityAlert,projectionWarn:projectionWarn,modelsCount:count,projectionLabel:proj.projectionLabel,mult:mult,moat:_moatPEBonusPct(analysis)};
+  if(proj.confidence==='low')conf='low';
+  if(proj.confidence==='medium'&&conf==='high')conf='medium';
+
+  var warn=projectionWarn||decisionMismatch||qualityAlert||(relGap!=null&&relGap>60)||count<2;
+  return {
+    matrix:matrix,dcf:dcf,avg:avg,rankValue:rankValue,rankable:rankable,
+    confidence:conf,projectionConfidence:proj.confidence||'low',
+    gap:absGap,relativeGap:relGap,warn:warn,decisionMismatch:decisionMismatch,
+    qualityAlert:qualityAlert,projectionWarn:projectionWarn,modelsCount:count,
+    projectionLabel:proj.projectionLabel,mult:mult,moat:_moatPEBonusPct(analysis)
+  };
 }
 async function _ensureValuationSignal(ticker,force){
   if(force){delete _valuationSignals[ticker];delete _valuationFinCache[ticker];}
@@ -2212,13 +2240,20 @@ async function _ensureValuationSignal(ticker,force){
   var sig=_computeCentralValuationSignal(ticker,p.price,f,fin||null);if(sig){sig.provisional=!fin;_valuationSignals[ticker]=sig;}return sig;
 }
 function _valuationCellHtml(ticker){
-  var s=_valuationSignals[ticker];if(!s||s.avg==null)return '<span style="color:var(--muted)">—</span>';
-  var mTxt=s.matrix!=null&&isFinite(s.matrix)?s.matrix.toFixed(1):'—',dTxt=s.dcf!=null&&isFinite(s.dcf)?s.dcf.toFixed(1):'—';
-  var why=s.qualityAlert?'cash-flow à contrôler':s.projectionWarn?'projection indicative':s.decisionMismatch?'désaccord autour du seuil 15%':(s.gap!=null&&s.gap>25?'écart de modèles élevé':(s.modelsCount<2?'1 seul modèle exploitable':'modèles exploitables'));
-  var gapTxt=s.gap!=null?s.gap.toFixed(1)+' pts':'n/a',prefix=s.rankable?'':'≈ ';
-  var mainColor=_valuationSignalColor(s.avg);
-  return '<div class="mono" style="font-weight:800;color:'+mainColor+'" title="'+(s.projectionLabel||'')+' · Matrice '+mTxt+'% · DCF '+dTxt+'% · écart '+gapTxt+' · '+why+'">'+prefix+s.avg.toFixed(1)+'%</div>'+
-         '<div style="font-size:8px;color:var(--muted2)">M '+mTxt+' · D '+dTxt+'</div>';
+  var s=_valuationSignals[ticker];
+  if(!s||s.avg==null)return '<span style="color:var(--muted)">—</span>';
+
+  var mTxt=s.matrix!=null&&isFinite(s.matrix)?s.matrix.toFixed(1):'—',
+      dTxt=s.dcf!=null&&isFinite(s.dcf)?s.dcf.toFixed(1):'—',
+      confTxt=s.confidence==='high'?'haute':s.confidence==='medium'?'moy.':'faible',
+      methodTxt=s.modelsCount<2?' · 1 méthode':'',
+      relTxt=s.relativeGap!=null?' · écart relatif '+s.relativeGap.toFixed(0)+'%':'',
+      prefix=s.rankable?'':'≈ ',
+      mainColor=_valuationSignalColor(s.avg);
+
+  var title=(s.projectionLabel||'')+' · Matrice '+mTxt+'% · DCF '+dTxt+'%'+relTxt+' · confiance '+confTxt;
+  return '<div class="mono" style="font-weight:800;color:'+mainColor+'" title="'+title+'">'+prefix+s.avg.toFixed(1)+'%</div>'+
+         '<div style="font-size:8px;color:var(--muted2)">M '+mTxt+' · D '+dTxt+methodTxt+' · C '+confTxt+'</div>';
 }
 function getSortVal(ticker, col){
   if(col==='poids'){var ep=S.enrichedPos.find(function(x){return x.ticker===ticker;});return ep?(ep.valueEur||0):0;}
@@ -2511,7 +2546,7 @@ async function renderScreener(){
   pg.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:22px">'+
     '<div>'+
       '<h2 style="font-size:18px;font-weight:700">Screener</h2>'+
-      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V29 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
+      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V30 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
     '</div>'+
     '<button onclick="_toggleScrWatch()" style="padding:6px 14px;border:1px solid var(--border2);border-radius:20px;background:'+_wBg+';color:'+_wColor+';font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">'+
       '⭐ Watchlist — '+(_scrShowWatch?'<b>ON</b>':'OFF')+
@@ -2584,7 +2619,7 @@ async function loadScreenerRatios(force){
           var d=await r.json();if(d&&!d.error){
             S.fundamentals[p.ticker]=d;
             delete _valuationSignals[p.ticker];
-            if(Number(d._v)<15&&!window._quoteVersionWarned){window._quoteVersionWarned=true;console.info('Valio V29: backend legacy détecté. Déploie quote.js V29 puis recharge les données.');}
+            if(Number(d._v)<15&&!window._quoteVersionWarned){window._quoteVersionWarned=true;console.info('Valio V30: backend legacy détecté. Déploie quote.js V30 puis recharge les données.');}
           }
         }catch(e){}
       }
@@ -5792,18 +5827,29 @@ function _perProjeteHtml(ticker, price, eps0, f, fin, cSym){
 var _dcfState={};
 function _dcfLastNN(arr){if(!arr)return null;for(var i=arr.length-1;i>=0;i--){if(arr[i]!=null&&isFinite(arr[i]))return arr[i];}return null;}
 function _dcfMedian(a){var x=(a||[]).filter(function(v){return v!=null&&isFinite(v);}).sort(function(a,b){return a-b;});if(!x.length)return null;var m=Math.floor(x.length/2);return x.length%2?x[m]:(x[m-1]+x[m])/2;}
-function _dcfTerminalGrowthDefault(f){return 4.5;}
-function _dcfValuePath(fcfps,growths,r,gt){
-  if(!(fcfps>0)||!growths||!growths.length)return null;r/=100;gt/=100;if(r<=gt)return null;
-  var pv=0,cf=fcfps,cfs=[];for(var i=0;i<growths.length;i++){cf*=1+growths[i]/100;cfs.push(cf);pv+=cf/Math.pow(1+r,i+1);}
-  var tv=cf*(1+gt)/(r-gt),tvPv=tv/Math.pow(1+r,growths.length);
-  return {fair:pv+tvPv,terminal:tvPv,terminalAtHorizon:tv,fcfN:cf,cfs:cfs,terminalMultiple:(1+gt)/(r-gt)};
+function _dcfTerminalGrowthDefault(f){return null;}
+function _dcfValuePath(fcfps,growths,r,exitMultiple){
+  if(!(fcfps>0)||!growths||!growths.length||!(exitMultiple>0))return null;
+  r/=100;
+  var pv=0,cf=fcfps,cfs=[];
+  for(var i=0;i<growths.length;i++){
+    cf*=1+growths[i]/100;
+    cfs.push(cf);
+    pv+=cf/Math.pow(1+r,i+1);
+  }
+  var tv=cf*exitMultiple,tvPv=tv/Math.pow(1+r,growths.length);
+  return {fair:pv+tvPv,terminal:tvPv,terminalAtHorizon:tv,fcfN:cf,cfs:cfs,terminalMultiple:exitMultiple};
 }
-function _dcfValueSeries(cfs,r,gt){
-  if(!cfs||!cfs.length)return null;r/=100;gt/=100;if(r<=gt)return null;var pv=0;
-  for(var i=0;i<cfs.length;i++){if(!isFinite(cfs[i]))return null;pv+=cfs[i]/Math.pow(1+r,i+1);}
-  var cfN=cfs[cfs.length-1];if(!(cfN>0))return null;var tv=cfN*(1+gt)/(r-gt),tvPv=tv/Math.pow(1+r,cfs.length);
-  return {fair:pv+tvPv,terminal:tvPv,terminalAtHorizon:tv,fcfN:cfN,cfs:cfs.slice(),terminalMultiple:(1+gt)/(r-gt)};
+function _dcfValueSeries(cfs,r,exitMultiple){
+  if(!cfs||!cfs.length||!(exitMultiple>0))return null;
+  r/=100;var pv=0;
+  for(var i=0;i<cfs.length;i++){
+    if(!isFinite(cfs[i]))return null;
+    pv+=cfs[i]/Math.pow(1+r,i+1);
+  }
+  var cfN=cfs[cfs.length-1];if(!(cfN>0))return null;
+  var tv=cfN*exitMultiple,tvPv=tv/Math.pow(1+r,cfs.length);
+  return {fair:pv+tvPv,terminal:tvPv,terminalAtHorizon:tv,fcfN:cfN,cfs:cfs.slice(),terminalMultiple:exitMultiple};
 }
 function _dcfTargetPriceFromVal(val,targetR){
   if(!val||!val.cfs||!val.cfs.length)return null;var tr=targetR/100,pv=0;
@@ -5817,8 +5863,8 @@ function _dcfImpliedReturnFromVal(price,val){
   var lo=-.90,hi=2.0,vlo=pv(lo),vhi=pv(hi);if(!isFinite(vlo)||!isFinite(vhi)||price>vlo||price<vhi)return null;
   for(var k=0;k<100;k++){var mid=(lo+hi)/2,vm=pv(mid);if(vm>price)lo=mid;else hi=mid;}return (lo+hi)/2*100;
 }
-function _dcfTargetPriceFixedTerminal(fcfps,growths,econR,gt,targetR){var v=_dcfValuePath(fcfps,growths,econR,gt);return _dcfTargetPriceFromVal(v,targetR);}
-function _dcfImpliedReturnFixedTerminal(price,fcfps,growths,econR,gt){var v=_dcfValuePath(fcfps,growths,econR,gt);return _dcfImpliedReturnFromVal(price,v);}
+function _dcfTargetPriceFixedTerminal(fcfps,growths,econR,exitMultiple,targetR){var v=_dcfValuePath(fcfps,growths,econR,exitMultiple);return _dcfTargetPriceFromVal(v,targetR);}
+function _dcfImpliedReturnFixedTerminal(price,fcfps,growths,econR,exitMultiple){var v=_dcfValuePath(fcfps,growths,econR,exitMultiple);return _dcfImpliedReturnFromVal(price,v);}
 function _dcfSectorRate(f,growth0){var sec=_valuationSectorKey(f)||'',map={'Technology':10.2,'Communication Services':9.7,'Consumer Discretionary':9.5,'Consumer Staples':8.5,'Healthcare':9.0,'Financials':10.0,'Industrials':9.5,'Materials':10.0,'Energy':10.5,'Utilities':8.0,'Real Estate':8.5};var r=map[sec]||10;if(growth0>30)r+=.4;if(f&&f.mktCap>5e11)r-=.2;if(f&&f.mktCap>0&&f.mktCap<2e10)r+=.7;return Math.max(7.5,Math.min(13,r));}
 function _dcfIsReinvestmentCandidate(ticker,f){
   var s=(ticker||f&&f.symbol||'').toUpperCase().replace(/\..*$/,'');
@@ -5879,60 +5925,190 @@ function _dcfReinvestmentProfile(ticker,price,f,fin,proj,scale,structuralShare){
 }
 function _dcfCompute(ticker,price,f,fin,opts){
   opts=opts||{};var useState=opts.useState!==false;
-  var fallback=(f&&f.trailingPE>0&&price>0)?price/f.trailingPE:null,proj=_valuationProjection(ticker,f,fin,fallback),st=useState?(_dcfState[ticker]||{}):{};if(!proj)return null;
-  var ym=useState?(_ymSel[ticker]||{}):{},scale=ym.scale!=null?ym.scale:100,modelMode=st.model||'auto',reinvestCandidate=_dcfIsReinvestmentCandidate(ticker,f),model=modelMode==='auto'?(reinvestCandidate?'reinvestment':'standard'):modelMode;
-  var growths=_projectionGrowths(proj,5,scale),r=st.r!=null?st.r:_dcfSectorRate(f,growths[0]),gt=st.gt!=null?st.gt:_dcfTerminalGrowthDefault(f),target=ym.r!=null&&ym.r>0?ym.r:15;if(r<=gt+.5)r=gt+.5;
-  var val=null,targetVal=null,irr=null,prof=null,base=null,effective=null,reinv=null,mode=st.mode||'auto',autoFallback=false;
+  var fallback=(f&&f.trailingPE>0&&price>0)?price/f.trailingPE:null,
+      proj=_valuationProjection(ticker,f,fin,fallback),
+      st=useState?(_dcfState[ticker]||{}):{};
+  if(!proj)return null;
+
+  var ym=useState?(_ymSel[ticker]||{}):{},
+      scale=ym.scale!=null?ym.scale:100,
+      modelMode=st.model||'auto',
+      reinvestCandidate=_dcfIsReinvestmentCandidate(ticker,f),
+      model=modelMode==='auto'?(reinvestCandidate?'reinvestment':'standard'):modelMode,
+      growths=_projectionGrowths(proj,5,scale),
+      r=st.r!=null?st.r:_dcfSectorRate(f,growths[0]),
+      target=ym.r!=null&&ym.r>0?ym.r:15,
+      analysis=_analysisDataFor(ticker),
+      terminalG=growths[growths.length-1],
+      autoExit=estimateExitMultiple(f,terminalG,null,analysis),
+      exitMultiple=(useState&&ym.m!=null&&ym.m>0)?ym.m:autoExit;
+
+  if(!(exitMultiple>0))return null;
+
+  var val=null,targetVal=null,irr=null,prof=null,base=null,effective=null,reinv=null,mode=st.mode||'auto';
 
   if(model==='reinvestment'){
     reinv=_dcfReinvestmentProfile(ticker,price,f,fin,proj,scale,st.structuralShare);
-    if(reinv&&reinv.cfs&&reinv.cfs.length&&reinv.cfs[reinv.cfs.length-1]>0){
-      val=_dcfValueSeries(reinv.cfs,r,gt);
-      if(val){targetVal=_dcfTargetPriceFromVal(val,target);irr=_dcfImpliedReturnFromVal(price,val);base=reinv.cfs[0];effective='reinvestment';}
+    if(!(reinv&&reinv.cfs&&reinv.cfs.length&&reinv.cfs[reinv.cfs.length-1]>0)){
+      // V30 : pas de fallback silencieux vers Standard FCF sur les sociétés de réinvestissement.
+      // Si le second modèle n'est pas robuste, Rend. Valio repose sur la matrice seule.
+      return null;
     }
-    // En Auto, un manque de données réinvestissement ne doit jamais supprimer le DCF :
-    // on repasse proprement en Standard FCF. Si l'utilisateur force Réinvestissement, on garde N/A.
-    if(!val&&modelMode==='auto'){model='standard';autoFallback=true;reinv=null;}
-    else if(!val)return null;
+    val=_dcfValueSeries(reinv.cfs,r,exitMultiple);
+    if(!val)return null;
+    targetVal=_dcfTargetPriceFromVal(val,target);
+    irr=_dcfImpliedReturnFromVal(price,val);
+    base=reinv.cfs[0];
+    effective='reinvestment';
   }
 
   if(model==='standard'){
-    prof=_dcfCashProfile(ticker,price,f,fin,proj);if(!prof||(!(prof.reported>0)&&!(prof.normalized>0)))return null;
-    effective=mode==='auto'?prof.autoMode:mode;base=st.fcfps!=null?st.fcfps:(effective==='normalized'?prof.normalized:prof.reported);if(!(base>0))base=prof.normalized||prof.reported;
-    val=_dcfValuePath(base,growths,r,gt);if(!val)return null;targetVal=_dcfTargetPriceFromVal(val,target);irr=_dcfImpliedReturnFromVal(price,val);
+    prof=_dcfCashProfile(ticker,price,f,fin,proj);
+    if(!prof||(!(prof.reported>0)&&!(prof.normalized>0)))return null;
+    effective=mode==='auto'?prof.autoMode:mode;
+    base=st.fcfps!=null?st.fcfps:(effective==='normalized'?prof.normalized:prof.reported);
+    if(!(base>0))base=prof.normalized||prof.reported;
+    if(!(base>0))return null;
+    val=_dcfValuePath(base,growths,r,exitMultiple);
+    if(!val)return null;
+    targetVal=_dcfTargetPriceFromVal(val,target);
+    irr=_dcfImpliedReturnFromVal(price,val);
   }
-  return {proj:proj,prof:prof,reinv:reinv,st:st,ym:ym,scale:scale,modelMode:modelMode,model:model,reinvestCandidate:reinvestCandidate,autoFallback:autoFallback,mode:mode,effective:effective,base:base,growths:growths,r:r,gt:gt,target:target,val:val,targetVal:targetVal,irr:irr};
+
+  return {
+    proj:proj,prof:prof,reinv:reinv,st:st,ym:ym,scale:scale,
+    modelMode:modelMode,model:model,reinvestCandidate:reinvestCandidate,
+    mode:mode,effective:effective,base:base,growths:growths,r:r,target:target,
+    exitMultiple:exitMultiple,autoExitMultiple:autoExit,
+    moat:_moatPEBonusPct(analysis),val:val,targetVal:targetVal,irr:irr
+  };
 }
 function _dcfHtml(ticker,price,f,fin,cSym){
-  if(!(price>0))return '';var d=_dcfCompute(ticker,price,f,fin);if(!d)return '<div style="margin:16px 0;padding:14px 16px;border:1px solid var(--border);border-radius:10px;color:var(--muted)"><b style="color:var(--text)">💵 DCF cash-flow 5 ans</b> — base cash-flow/action ou données de réinvestissement insuffisantes.</div>';
-  var prof=d.prof,reinv=d.reinv,mode=d.mode,model=d.model,base=d.base,growths=d.growths,r=d.r,gt=d.gt,target=d.target,val=d.val,targetVal=d.targetVal,irr=d.irr,up=(val.fair/price-1)*100,targetGap=targetVal?(targetVal.fair/price-1)*100:null,term=val.terminal/val.fair*100;
+  if(!(price>0))return '';
+  var d=_dcfCompute(ticker,price,f,fin);
+  if(!d){
+    var reinvCandidate=_dcfIsReinvestmentCandidate(ticker,f);
+    var reason=reinvCandidate
+      ?'données de réinvestissement insuffisantes pour construire un second modèle robuste'
+      :'base de free cash-flow/action insuffisante ou incohérente';
+    return '<div style="margin:16px 0;padding:12px 14px;border:1px solid rgba(100,116,139,.22);border-radius:10px;background:rgba(100,116,139,.035);color:var(--muted);font-size:10px;line-height:1.5"><b style="color:var(--text)">💵 DCF non exploitable automatiquement.</b> '+reason+'. <span style="color:var(--muted2)">Rend. Valio utilise donc la matrice seule ; la fiche reste classable, mais avec une seule méthode de valorisation.</span></div>';
+  }
+
+  var prof=d.prof,reinv=d.reinv,mode=d.mode,model=d.model,base=d.base,growths=d.growths,r=d.r,target=d.target,
+      exitMult=d.exitMultiple,val=d.val,targetVal=d.targetVal,irr=d.irr,
+      up=(val.fair/price-1)*100,targetGap=targetVal?(targetVal.fair/price-1)*100:null,
+      term=val.terminal/val.fair*100,moatInfo=d.moat||{score:null,bonus:0};
+
   function col(v){return v>=20?'#16a34a':v>=0?'#22c55e':v>=-20?'#f59e0b':'#ef4444';}
-  var rates=[r-2,r-1,r,r+1,r+2].map(function(x){return Math.max(gt+1,x);}),tgs=[3.5,4.0,4.5,5.0,5.5];if(tgs.indexOf(+gt.toFixed(1))<0)tgs.push(+gt.toFixed(1));tgs=tgs.sort(function(a,b){return a-b;});
-  function sensVal(rr,tg){return model==='reinvestment'?_dcfValueSeries(reinv.cfs,rr,tg):_dcfValuePath(base,growths,rr,tg);}
-  var table='<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:10px" class="mono"><tr><th style="padding:5px 7px;color:var(--muted)">r \\ g∞</th>'+tgs.map(function(x){return '<th style="padding:5px 7px;color:var(--muted)">'+x.toFixed(1)+'%</th>';}).join('')+'</tr>'+rates.map(function(rr){return '<tr><td style="padding:5px 7px;color:var(--muted);font-weight:700">'+rr.toFixed(1)+'%</td>'+tgs.map(function(tg){var x=sensVal(rr,tg),u=x?(x.fair/price-1)*100:null;return '<td style="padding:5px 7px;text-align:right;color:'+(u==null?'var(--muted)':col(u))+';background:'+(Math.abs(rr-r)<.1&&Math.abs(tg-gt)<.1?'rgba(99,75,228,.12)':'transparent')+'">'+(x?cSym+fN(x.fair):'—')+'</td>';}).join('')+'</tr>';}).join('')+'</table></div>';
-  var t=ticker.replace(/'/g,"\\'"),scenarioLabel=d.scale===75?'Bear 75%':d.scale===125?'Bull 125%':d.scale===100?'Base 100%':'Personnalisé '+d.scale+'%';
-  var modelLabel=model==='reinvestment'?'Réinvestissement':'Standard FCF',modeLabel=model==='reinvestment'?'croissance → capital requis':(d.effective==='normalized'?'FCF normalisé':'FCF reporté');
+
+  var rates=[r-2,r-1,r,r+1,r+2].map(function(x){return Math.max(4,x);});
+  var mults=[exitMult*.80,exitMult*.90,exitMult,exitMult*1.10,exitMult*1.20]
+    .map(function(x){return Math.max(6,Math.min(60,Math.round(x*2)/2));})
+    .filter(function(x,i,a){return a.indexOf(x)===i;});
+
+  function sensVal(rr,mm){
+    return model==='reinvestment'
+      ?_dcfValueSeries(reinv.cfs,rr,mm)
+      :_dcfValuePath(base,growths,rr,mm);
+  }
+
+  var table='<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:10px" class="mono"><tr><th style="padding:5px 7px;color:var(--muted)">r \\ multiple</th>'+
+    mults.map(function(x){return '<th style="padding:5px 7px;color:var(--muted)">'+x.toFixed(1)+'x</th>';}).join('')+'</tr>'+
+    rates.map(function(rr){
+      return '<tr><td style="padding:5px 7px;color:var(--muted);font-weight:700">'+rr.toFixed(1)+'%</td>'+
+        mults.map(function(mm){
+          var x=sensVal(rr,mm),u=x?(x.fair/price-1)*100:null;
+          return '<td style="padding:5px 7px;text-align:right;color:'+(u==null?'var(--muted)':col(u))+';background:'+(Math.abs(rr-r)<.1&&Math.abs(mm-exitMult)<.1?'rgba(99,75,228,.12)':'transparent')+'">'+(x?cSym+fN(x.fair):'—')+'</td>';
+        }).join('')+'</tr>';
+    }).join('')+'</table></div>';
+
+  var t=ticker.replace(/'/g,"\\'"),
+      scenarioLabel=d.scale===75?'Bear 75%':d.scale===125?'Bull 125%':d.scale===100?'Base 100%':'Personnalisé '+d.scale+'%',
+      modelLabel=model==='reinvestment'?'Réinvestissement':'Standard FCF',
+      modeLabel=model==='reinvestment'?'croissance → capital requis':(d.effective==='normalized'?'FCF normalisé':'FCF reporté');
+
+  var cashConfidence='Élevée',cashConfidenceColor='#22c55e';
+  if(model==='standard'&&prof&&prof.dataAlert){cashConfidence='Moyenne';cashConfidenceColor='#f59e0b';}
+  if(model==='standard'&&d.effective==='normalized'&&cashConfidence==='Élevée'){cashConfidence='Bonne';cashConfidenceColor='#26C5DE';}
+  if(model==='reinvestment'){cashConfidence='Modèle structurel';cashConfidenceColor='#26C5DE';}
+
   var caution='';
-  if(model==='standard'&&prof&&prof.reasons.length)caution='<div style="margin:0 0 12px;padding:10px 12px;border:1px solid rgba(245,158,11,.30);background:rgba(245,158,11,.08);border-radius:9px;font-size:10px;color:var(--muted);line-height:1.55"><b style="color:#f59e0b">⚠ Contrôle cash-flow.</b> '+prof.reasons.join(' · ')+'.</div>';
-  if(d.autoFallback)caution+='<div style="margin:0 0 12px;padding:9px 11px;border:1px solid rgba(38,197,222,.25);background:rgba(38,197,222,.06);border-radius:8px;font-size:10px;color:var(--muted)"><b style="color:var(--cyan)">↪ Fallback automatique.</b> Données insuffisantes pour le modèle Réinvestissement : Valio utilise le Standard FCF au lieu de supprimer la valorisation.</div>';
-  if(model==='reinvestment')caution='<div style="margin:0 0 12px;padding:10px 12px;border:1px solid rgba(38,197,222,.28);background:rgba(38,197,222,.07);border-radius:9px;font-size:10px;color:var(--muted);line-height:1.55"><b style="color:var(--cyan)">🏗️ Mode réinvestissement.</b> Le FCF n’est pas extrapolé depuis son niveau actuel : Valio projette le CA, estime l’OCF puis soustrait un capex lié à la croissance + un plancher structurel de renouvellement.</div>';
-  if(term>85)caution+='<div style="margin:0 0 12px;padding:8px 11px;border:1px solid rgba(245,158,11,.28);background:rgba(245,158,11,.06);border-radius:8px;font-size:10px;color:#f59e0b">⚠ La valeur terminale représente '+term.toFixed(0)+'% de la valeur : le DCF est très sensible au taux terminal et au coût du capital.</div>';
-  var modelBtns='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"><span style="font-size:9px;color:var(--muted);align-self:center;margin-right:3px">MODÈLE</span><button class="btn btn-ghost btn-sm" style="'+(d.modelMode==='auto'?'border-color:var(--blue);color:#fff':'')+'" onclick="_dcfSetModel(&quot;'+t+'&quot;,&quot;auto&quot;)">Auto</button><button class="btn btn-ghost btn-sm" style="'+(d.modelMode==='standard'?'border-color:var(--blue);color:#fff':'')+'" onclick="_dcfSetModel(&quot;'+t+'&quot;,&quot;standard&quot;)">Standard FCF</button><button class="btn btn-ghost btn-sm" style="'+(d.modelMode==='reinvestment'?'border-color:var(--blue);color:#fff':'')+'" onclick="_dcfSetModel(&quot;'+t+'&quot;,&quot;reinvestment&quot;)">Réinvestissement</button></div>';
-  var sourceBtns=model==='standard'?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"><span style="font-size:9px;color:var(--muted);align-self:center;margin-right:3px">BASE FCF</span><button class="btn btn-ghost btn-sm" style="'+(mode==='auto'?'border-color:var(--cyan);color:#fff':'')+'" onclick="_dcfSetMode(&quot;'+t+'&quot;,&quot;auto&quot;)">Auto</button><button class="btn btn-ghost btn-sm" style="'+(mode==='reported'?'border-color:var(--cyan);color:#fff':'')+'" onclick="_dcfSetMode(&quot;'+t+'&quot;,&quot;reported&quot;)">Reporté</button><button class="btn btn-ghost btn-sm" style="'+(mode==='normalized'?'border-color:var(--cyan);color:#fff':'')+'" onclick="_dcfSetMode(&quot;'+t+'&quot;,&quot;normalized&quot;)">Normalisé</button></div>':'';
+  if(model==='standard'&&prof&&prof.reasons.length){
+    caution='<div style="margin:0 0 12px;padding:9px 11px;border:1px solid rgba(245,158,11,.24);background:rgba(245,158,11,.055);border-radius:8px;font-size:9px;color:var(--muted);line-height:1.5"><b style="color:#f59e0b">Contrôle cash-flow :</b> '+prof.reasons.join(' · ')+'.</div>';
+  }
+  if(model==='reinvestment'){
+    caution='<div style="margin:0 0 12px;padding:9px 11px;border:1px solid rgba(38,197,222,.24);background:rgba(38,197,222,.055);border-radius:8px;font-size:9px;color:var(--muted);line-height:1.5"><b style="color:var(--cyan)">Mode réinvestissement.</b> Le FCF est reconstruit à partir du CA, de la marge OCF et du capex requis ; il n’est pas extrapolé depuis le FCF courant.</div>';
+  }
+  if(term>90){
+    caution+='<div style="margin:0 0 12px;padding:8px 11px;border:1px solid rgba(245,158,11,.20);background:rgba(245,158,11,.045);border-radius:8px;font-size:9px;color:var(--muted)">Part terminale élevée ('+term.toFixed(0)+'%) : le résultat reste sensible au multiple de sortie.</div>';
+  }
+
+  var modelBtns='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"><span style="font-size:9px;color:var(--muted);align-self:center;margin-right:3px">MODÈLE</span>'+
+    '<button class="btn btn-ghost btn-sm" style="'+(d.modelMode==='auto'?'border-color:var(--blue);color:#fff':'')+'" onclick="_dcfSetModel(&quot;'+t+'&quot;,&quot;auto&quot;)">Auto</button>'+
+    '<button class="btn btn-ghost btn-sm" style="'+(d.modelMode==='standard'?'border-color:var(--blue);color:#fff':'')+'" onclick="_dcfSetModel(&quot;'+t+'&quot;,&quot;standard&quot;)">Standard FCF</button>'+
+    '<button class="btn btn-ghost btn-sm" style="'+(d.modelMode==='reinvestment'?'border-color:var(--blue);color:#fff':'')+'" onclick="_dcfSetModel(&quot;'+t+'&quot;,&quot;reinvestment&quot;)">Réinvestissement</button></div>';
+
+  var sourceBtns=model==='standard'
+    ?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"><span style="font-size:9px;color:var(--muted);align-self:center;margin-right:3px">BASE FCF</span>'+
+      '<button class="btn btn-ghost btn-sm" style="'+(mode==='auto'?'border-color:var(--cyan);color:#fff':'')+'" onclick="_dcfSetMode(&quot;'+t+'&quot;,&quot;auto&quot;)">Auto</button>'+
+      '<button class="btn btn-ghost btn-sm" style="'+(mode==='reported'?'border-color:var(--cyan);color:#fff':'')+'" onclick="_dcfSetMode(&quot;'+t+'&quot;,&quot;reported&quot;)">Reporté</button>'+
+      '<button class="btn btn-ghost btn-sm" style="'+(mode==='normalized'?'border-color:var(--cyan);color:#fff':'')+'" onclick="_dcfSetMode(&quot;'+t+'&quot;,&quot;normalized&quot;)">Normalisé</button></div>'
+    :'';
+
+  var moatSub=moatInfo.score!=null
+    ?'Moat '+moatInfo.score+'/100 · bonus +'+moatInfo.bonus.toFixed(1)+'%'
+    :'Moat non renseigné · bonus 0%';
+
   var details='';
   if(model==='reinvestment'){
-    var rg=reinv.revGrowths.map(function(x){return Math.round(x)+'%';}).join(' → '),cr=reinv.capexRates.map(function(x){return Math.round(x*100)+'%';}).join(' → '),om=reinv.ocfMargins.map(function(x){return Math.round(x*100)+'%';}).join(' → '),cfp=reinv.cfs.map(function(x){return cSym+fN(x);}).join(' → ');
-    details='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:12px"><div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Croissance CA A1–A5</div><div class="mono" style="font-size:11px;font-weight:800">'+rg+'</div></div><div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Marge OCF</div><div class="mono" style="font-size:11px;font-weight:800">'+om+'</div></div><div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Capex / CA</div><div class="mono" style="font-size:11px;font-weight:800">'+cr+'</div><div style="font-size:8px;color:var(--muted2)">plancher structurel '+(reinv.structuralFloor*100).toFixed(1)+'%</div></div><div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">FCF/action A1–A5</div><div class="mono" style="font-size:11px;font-weight:800">'+cfp+'</div></div><div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Part structurelle capex</div><div class="mono" style="font-size:15px;font-weight:800">'+(reinv.structuralShare*100).toFixed(0)+'%</div><div style="font-size:8px;color:var(--muted2)">éditable · défaut 50%</div></div><div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Taux d’actualisation</div><div class="mono" style="font-size:15px;font-weight:800">'+r.toFixed(1)+'%</div></div><div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Terminal g∞</div><div class="mono" style="font-size:15px;font-weight:800">'+gt.toFixed(1)+'%</div><div style="font-size:8px;color:var(--muted2)">≈ '+val.terminalMultiple.toFixed(1)+'x FCF</div></div><div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">FCF/action année 5</div><div class="mono" style="font-size:15px;font-weight:800">'+cSym+fN(val.fcfN)+'</div></div></div>';
+    var rg=reinv.revGrowths.map(function(x){return Math.round(x)+'%';}).join(' → '),
+        cr=reinv.capexRates.map(function(x){return Math.round(x*100)+'%';}).join(' → '),
+        om=reinv.ocfMargins.map(function(x){return Math.round(x*100)+'%';}).join(' → '),
+        cfp=reinv.cfs.map(function(x){return cSym+fN(x);}).join(' → ');
+    details='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:12px">'+
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Croissance CA A1–A5</div><div class="mono" style="font-size:11px;font-weight:800">'+rg+'</div></div>'+
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Marge OCF</div><div class="mono" style="font-size:11px;font-weight:800">'+om+'</div></div>'+
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Capex / CA</div><div class="mono" style="font-size:11px;font-weight:800">'+cr+'</div><div style="font-size:8px;color:var(--muted2)">plancher structurel '+(reinv.structuralFloor*100).toFixed(1)+'%</div></div>'+
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">FCF/action A1–A5</div><div class="mono" style="font-size:11px;font-weight:800">'+cfp+'</div></div>'+
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Part structurelle capex</div><div class="mono" style="font-size:15px;font-weight:800">'+(reinv.structuralShare*100).toFixed(0)+'%</div><div style="font-size:8px;color:var(--muted2)">éditable · défaut 50%</div></div>'+
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Taux d’actualisation</div><div class="mono" style="font-size:15px;font-weight:800">'+r.toFixed(1)+'%</div></div>'+
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Multiple FCF de sortie</div><div class="mono" style="font-size:15px;font-weight:800">'+exitMult.toFixed(1)+'x</div><div style="font-size:8px;color:var(--muted2)">'+moatSub+'</div></div>'+
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">FCF/action année 5</div><div class="mono" style="font-size:15px;font-weight:800">'+cSym+fN(val.fcfN)+'</div></div></div>';
   }else{
     var gFirst=growths.map(function(g){return Math.round(g)+'%';}).join(' → ');
-    details='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:12px"><div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Cash-flow/action retenu</div><div class="mono" style="font-size:15px;font-weight:800">'+cSym+fN(base)+'</div><div style="font-size:8px;color:var(--muted2)">'+(d.effective==='normalized'?'conversion historique FCF/bénéfice':prof.reportedSource)+'</div></div><div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Croissance FCF A1–A5</div><div class="mono" style="font-size:11px;font-weight:800">'+gFirst+'</div><div style="font-size:8px;color:var(--muted2)">'+scenarioLabel+'</div></div><div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Taux d’actualisation</div><div class="mono" style="font-size:15px;font-weight:800">'+r.toFixed(1)+'%</div></div><div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Terminal g∞</div><div class="mono" style="font-size:15px;font-weight:800">'+gt.toFixed(1)+'%</div><div style="font-size:8px;color:var(--muted2)">≈ '+val.terminalMultiple.toFixed(1)+'x FCF</div></div><div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">FCF/action année 5</div><div class="mono" style="font-size:15px;font-weight:800">'+cSym+fN(val.fcfN)+'</div></div></div>';
+    details='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:12px">'+
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Cash-flow/action retenu</div><div class="mono" style="font-size:15px;font-weight:800">'+cSym+fN(base)+'</div><div style="font-size:8px;color:var(--muted2)">'+(d.effective==='normalized'?'conversion historique FCF/bénéfice':prof.reportedSource)+'</div></div>'+
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Croissance FCF A1–A5</div><div class="mono" style="font-size:11px;font-weight:800">'+gFirst+'</div><div style="font-size:8px;color:var(--muted2)">'+scenarioLabel+'</div></div>'+
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Taux d’actualisation</div><div class="mono" style="font-size:15px;font-weight:800">'+r.toFixed(1)+'%</div></div>'+
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Multiple FCF de sortie</div><div class="mono" style="font-size:15px;font-weight:800">'+exitMult.toFixed(1)+'x</div><div style="font-size:8px;color:var(--muted2)">'+moatSub+'</div></div>'+
+      '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">FCF/action année 5</div><div class="mono" style="font-size:15px;font-weight:800">'+cSym+fN(val.fcfN)+'</div></div></div>';
   }
-  var targetBox='<div style="display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:8px;margin-bottom:12px"><div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Valeur intrinsèque estimée</div><div class="mono" style="font-size:20px;font-weight:900;color:'+col(up)+'">'+cSym+fN(val.fair)+'</div><div style="font-size:9px;color:'+col(up)+'">'+(up>=0?'+':'')+up.toFixed(1)+'% vs cours</div></div><div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Prix max pour viser '+target+'%/an</div><div class="mono" style="font-size:18px;font-weight:900;color:'+(targetGap!=null?col(targetGap):'var(--text)')+'">'+(targetVal?cSym+fN(targetVal.fair):'—')+'</div></div><div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Rendement implicite</div><div class="mono" style="font-size:18px;font-weight:900;color:'+(irr!=null?col(irr-target):'var(--text)')+'">'+(irr==null?'—':(irr>=0?'+':'')+irr.toFixed(1)+'%/an')+'</div></div></div>';
-  var inputs=model==='reinvestment'?'<div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;padding:10px;background:rgba(255,255,255,.025);border-radius:9px;margin-bottom:10px"><div><label style="font-size:8px;color:var(--muted)">PART STRUCTURELLE CAPEX %</label><br><input id="dcf-struct" class="form-input mono" style="width:110px;padding:5px" value="'+(reinv.structuralShare*100).toFixed(0)+'"></div><div><label style="font-size:8px;color:var(--muted)">TAUX ACTUAL. %</label><br><input id="dcf-r" class="form-input mono" style="width:88px;padding:5px" value="'+r.toFixed(1)+'"></div><div><label style="font-size:8px;color:var(--muted)">G TERMINAL %</label><br><input id="dcf-gt" class="form-input mono" style="width:82px;padding:5px" value="'+gt.toFixed(1)+'"></div><button class="btn btn-ghost btn-sm" onclick="_dcfApply(&quot;'+t+'&quot;)">Appliquer</button><button class="btn btn-ghost btn-sm" onclick="_dcfReset(&quot;'+t+'&quot;)">↺ Auto</button></div>':'<div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;padding:10px;background:rgba(255,255,255,.025);border-radius:9px;margin-bottom:10px"><div><label style="font-size:8px;color:var(--muted)">CASH-FLOW/ACTION</label><br><input id="dcf-fcf" class="form-input mono" style="width:92px;padding:5px" value="'+base.toFixed(2)+'"></div><div><label style="font-size:8px;color:var(--muted)">TAUX ACTUAL. %</label><br><input id="dcf-r" class="form-input mono" style="width:88px;padding:5px" value="'+r.toFixed(1)+'"></div><div><label style="font-size:8px;color:var(--muted)">G TERMINAL %</label><br><input id="dcf-gt" class="form-input mono" style="width:82px;padding:5px" value="'+gt.toFixed(1)+'"></div><button class="btn btn-ghost btn-sm" onclick="_dcfApply(&quot;'+t+'&quot;)">Appliquer</button><button class="btn btn-ghost btn-sm" onclick="_dcfReset(&quot;'+t+'&quot;)">↺ Auto</button></div>';
-  return '<div style="margin:18px 0;padding:16px 18px;border:1px solid rgba(38,197,222,.28);border-radius:12px;background:linear-gradient(135deg,rgba(38,197,222,.06),rgba(99,75,228,.05))"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px"><div><div style="font-size:14px;font-weight:800">💵 DCF cash-flow 5 ans — '+modelLabel+'</div><div style="font-size:10px;color:var(--muted);margin-top:3px">'+scenarioLabel+' · '+modeLabel+' · terminal Gordon '+gt.toFixed(1)+'% après A5.</div></div><div style="font-size:9px;color:var(--muted);text-align:right">Part terminale <b style="color:var(--text)">'+term.toFixed(0)+'%</b></div></div>'+modelBtns+sourceBtns+caution+details+targetBox+inputs+'<div style="display:grid;grid-template-columns:minmax(280px,.9fr) minmax(380px,1.1fr);gap:14px;align-items:start"><div style="font-size:10px;color:var(--muted);line-height:1.55">DCF = 5 années explicites + valeur terminale Gordon. Le terminal à 4,5% reste le fallback Valio tant que le Moat 2030 n’est pas renseigné.<br>'+(model==='reinvestment'?'Le mode réinvestissement ne suppose pas un retour vers l’ancien FCF historique : le capex futur dépend de la croissance du CA et d’un plancher structurel de renouvellement.':'Le mode standard extrapole le FCF/action sur la même trajectoire que la projection centrale EPS.')+'</div><div><div style="font-size:9px;color:var(--muted);margin-bottom:4px">Sensibilité — valeur intrinsèque</div>'+table+'</div></div></div>';
-}
 
-window._dcfApply=function(ticker){function v(id){var e=document.getElementById(id),x=parseFloat((e&&e.value||'').replace(',','.'));return isFinite(x)?x:null;}var st=_dcfState[ticker]||{},a=v('dcf-fcf'),r=v('dcf-r'),gt=v('dcf-gt'),ss=v('dcf-struct');if(a>0)st.fcfps=a;if(r!=null)st.r=Math.max(4,Math.min(50,r));if(gt!=null)st.gt=Math.max(0,Math.min(6,gt));if(ss!=null)st.structuralShare=Math.max(.25,Math.min(.80,ss/100));if(st.r<=st.gt+.5)st.r=st.gt+.5;_dcfState[ticker]=st;_dcfRerender(ticker);};
+  var targetBox='<div style="display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:8px;margin-bottom:12px">'+
+    '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Valeur intrinsèque estimée</div><div class="mono" style="font-size:20px;font-weight:900;color:'+col(up)+'">'+cSym+fN(val.fair)+'</div><div style="font-size:9px;color:'+col(up)+'">'+(up>=0?'+':'')+up.toFixed(1)+'% vs cours</div></div>'+
+    '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Prix max pour viser '+target+'%/an</div><div class="mono" style="font-size:18px;font-weight:900;color:'+(targetGap!=null?col(targetGap):'var(--text)')+'">'+(targetVal?cSym+fN(targetVal.fair):'—')+'</div></div>'+
+    '<div class="card" style="padding:9px 11px"><div style="font-size:9px;color:var(--muted)">Rendement implicite</div><div class="mono" style="font-size:18px;font-weight:900;color:'+(irr!=null?col(irr-target):'var(--text)')+'">'+(irr==null?'—':(irr>=0?'+':'')+irr.toFixed(1)+'%/an')+'</div></div></div>';
+
+  var inputs=model==='reinvestment'
+    ?'<div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;padding:10px;background:rgba(255,255,255,.025);border-radius:9px;margin-bottom:10px">'+
+      '<div><label style="font-size:8px;color:var(--muted)">PART STRUCTURELLE CAPEX %</label><br><input id="dcf-struct" class="form-input mono" style="width:110px;padding:5px" value="'+(reinv.structuralShare*100).toFixed(0)+'"></div>'+
+      '<div><label style="font-size:8px;color:var(--muted)">TAUX ACTUAL. %</label><br><input id="dcf-r" class="form-input mono" style="width:88px;padding:5px" value="'+r.toFixed(1)+'"></div>'+
+      '<button class="btn btn-ghost btn-sm" onclick="_dcfApply(&quot;'+t+'&quot;)">Appliquer</button><button class="btn btn-ghost btn-sm" onclick="_dcfReset(&quot;'+t+'&quot;)">↺ Auto</button></div>'
+    :'<div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;padding:10px;background:rgba(255,255,255,.025);border-radius:9px;margin-bottom:10px">'+
+      '<div><label style="font-size:8px;color:var(--muted)">CASH-FLOW/ACTION</label><br><input id="dcf-fcf" class="form-input mono" style="width:92px;padding:5px" value="'+base.toFixed(2)+'"></div>'+
+      '<div><label style="font-size:8px;color:var(--muted)">TAUX ACTUAL. %</label><br><input id="dcf-r" class="form-input mono" style="width:88px;padding:5px" value="'+r.toFixed(1)+'"></div>'+
+      '<button class="btn btn-ghost btn-sm" onclick="_dcfApply(&quot;'+t+'&quot;)">Appliquer</button><button class="btn btn-ghost btn-sm" onclick="_dcfReset(&quot;'+t+'&quot;)">↺ Auto</button></div>';
+
+  return '<div style="margin:18px 0;padding:16px 18px;border:1px solid rgba(38,197,222,.28);border-radius:12px;background:linear-gradient(135deg,rgba(38,197,222,.06),rgba(99,75,228,.05))">'+
+    '<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px"><div><div style="font-size:14px;font-weight:800">💵 DCF cash-flow 5 ans — '+modelLabel+'</div>'+
+    '<div style="font-size:10px;color:var(--muted);margin-top:3px">'+scenarioLabel+' · '+modeLabel+' · sortie à '+exitMult.toFixed(1)+'x le FCF A5.</div></div>'+
+    '<div style="font-size:9px;color:var(--muted);text-align:right">Confiance cash-flow <b style="color:'+cashConfidenceColor+'">'+cashConfidence+'</b><br>Part terminale <b style="color:var(--text)">'+term.toFixed(0)+'%</b></div></div>'+
+    modelBtns+sourceBtns+caution+details+targetBox+inputs+
+    '<div style="display:grid;grid-template-columns:minmax(280px,.9fr) minmax(380px,1.1fr);gap:14px;align-items:start"><div style="font-size:10px;color:var(--muted);line-height:1.55">DCF = 5 années de free cash-flow explicites + valeur terminale calculée avec un <b style="color:var(--text)">multiple de sortie</b>, et non plus avec Gordon. Le multiple est issu du même moteur croissance + Moat que la matrice, mais il est appliqué au FCF : le DCF reste donc un contrôle de conversion du bénéfice en cash.'+
+    (model==='reinvestment'?'<br>Le mode réinvestissement projette le CA, l’OCF et le capex requis avant de calculer le FCF.':'<br>Le mode standard applique la trajectoire centrale au FCF/action retenu.')+
+    '</div><div><div style="font-size:9px;color:var(--muted);margin-bottom:4px">Sensibilité — taux d’actualisation × multiple de sortie</div>'+table+'</div></div></div>';
+}
+window._dcfApply=function(ticker){function v(id){var e=document.getElementById(id),x=parseFloat((e&&e.value||'').replace(',','.'));return isFinite(x)?x:null;}var st=_dcfState[ticker]||{},a=v('dcf-fcf'),r=v('dcf-r'),ss=v('dcf-struct');if(a>0)st.fcfps=a;if(r!=null)st.r=Math.max(4,Math.min(50,r));if(ss!=null)st.structuralShare=Math.max(.25,Math.min(.80,ss/100));_dcfState[ticker]=st;_dcfRerender(ticker);};
 window._dcfSetModel=function(ticker,model){var st=_dcfState[ticker]||{};st.model=model;delete st.fcfps;delete st.r;delete st.gt;delete st.structuralShare;_dcfState[ticker]=st;_dcfRerender(ticker);};
 window._dcfSetMode=function(ticker,mode){var st=_dcfState[ticker]||{};st.mode=mode;delete st.fcfps;_dcfState[ticker]=st;_dcfRerender(ticker);};
 window._dcfReset=function(ticker){delete _dcfState[ticker];_dcfRerender(ticker);};
@@ -5965,7 +6141,26 @@ function renderYieldMatrix(ticker, price, f, fin){
   var manualBadge=proj.manualActive?'<span style="display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;border:1px solid rgba(99,75,228,.45);background:rgba(99,75,228,.12);color:#a78bfa;font-size:9px;font-weight:750">EPS normalisé manuel</span>':'';
   var moatBadge=moatInfo.score!=null?'<span style="display:inline-block;margin-left:6px;color:var(--cyan);font-size:9px;font-weight:750">Moat '+moatInfo.score+'/100 → +'+moatInfo.bonus.toFixed(1)+'% sur le P/E</span>':'<span style="display:inline-block;margin-left:6px;color:var(--muted2);font-size:9px">Moat non renseigné → bonus 0%</span>';
   var baseControls='<div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin:-2px 0 12px;padding:9px 11px;border:1px solid var(--border2);border-radius:8px;background:rgba(255,255,255,.018)"><div><label style="font-size:8px;color:var(--muted);text-transform:uppercase">Base EPS persistante</label><br><select id="ym-base-source" class="form-input" style="min-width:170px;padding:5px"><option value="yahoo"'+(epsMode==='yahoo'?' selected':'')+'>Yahoo (défaut)</option><option value="manual"'+(epsMode==='manual'?' selected':'')+'>Normalisé manuel</option></select></div><div><label style="font-size:8px;color:var(--muted);text-transform:uppercase">EPS normalisé manuel ('+cSym+')</label><br><input id="ym-eps-normalized" class="form-input mono" style="width:125px;padding:5px" value="'+manualEps+'" placeholder="ex : 12.50"></div><button class="btn btn-ghost btn-sm" onclick="window._saveValuationBase(\''+tName+'\')">💾 Enregistrer la base</button><div style="font-size:9px;color:var(--muted);max-width:420px;line-height:1.4">Yahoo reste la source par défaut. Le mode manuel sert uniquement aux résultats réellement exceptionnels/retraités.</div></div>';
-  var dcfPreview=_dcfCompute(ticker,price,f,fin),cohHtml='';if(dcfPreview&&dcfPreview.irr!=null){var diff=Math.abs(selRet-dcfPreview.irr),target=15,decisionMismatch=(selRet>=target)!==(dcfPreview.irr>=target),qualityAlert=!!(dcfPreview.prof&&dcfPreview.prof.dataAlert),cc,cl;if(proj.rankable===false){cc='#f59e0b';cl='Projection de croissance faible confiance — comparaison indicative';}else if(qualityAlert){cc='#ef4444';cl='Qualité cash-flow à contrôler';}else if(decisionMismatch){cc='#ef4444';cl='Désaccord de verdict autour du seuil '+target+'%';}else if(diff<=8){cc='#22c55e';cl='Écart faible — modèles cohérents';}else if(diff<=25){cc='#26C5DE';cl='Même verdict — écart de magnitude';}else{cc='#f59e0b';cl='Même verdict mais écart élevé';}cohHtml='<div style="margin:0 0 14px;padding:10px 12px;border:1px solid '+cc+'44;background:'+cc+'0d;border-radius:9px;display:flex;gap:20px;align-items:center;flex-wrap:wrap;font-size:10px"><b style="color:'+cc+'">Cohérence des modèles</b><span>Matrice '+N+'A : <b style="color:var(--text)">'+selRet.toFixed(1)+'%/an</b></span><span>DCF 5A + terminal : <b style="color:var(--text)">'+dcfPreview.irr.toFixed(1)+'%/an</b></span><span style="color:'+cc+'">'+cl+' ('+diff.toFixed(1)+' pts)</span></div>';}
+  var dcfPreview=_dcfCompute(ticker,price,f,fin),cohHtml='';
+  if(dcfPreview&&dcfPreview.irr!=null){
+    var diff=Math.abs(selRet-dcfPreview.irr),
+        denom=Math.max(10,(Math.abs(selRet)+Math.abs(dcfPreview.irr))/2),
+        relDiff=diff/denom*100,
+        target=15,
+        decisionMismatch=(selRet>=target)!==(dcfPreview.irr>=target),
+        qualityAlert=!!(dcfPreview.prof&&dcfPreview.prof.dataAlert),
+        cc,cl;
+    var resultConf='moyenne';
+    if(proj.rankable===false){cc='#f59e0b';cl='Projection indicative';resultConf='faible';}
+    else if(decisionMismatch){cc='#ef4444';cl='Désaccord de verdict autour du seuil '+target+'%';resultConf='faible';}
+    else if(qualityAlert){cc='#f59e0b';cl='Cash-flow à contrôler';resultConf='moyenne';}
+    else if(relDiff<=30){cc='#22c55e';cl='Modèles cohérents';resultConf=proj.confidence==='high'?'haute':'moyenne';}
+    else if(relDiff<=60){cc='#26C5DE';cl='Écart notable mais même lecture';resultConf='moyenne';}
+    else{cc='#f59e0b';cl='Écart important entre bénéfice et cash-flow';resultConf='faible';}
+    cohHtml='<div style="margin:0 0 14px;padding:10px 12px;border:1px solid '+cc+'44;background:'+cc+'0d;border-radius:9px;display:flex;gap:20px;align-items:center;flex-wrap:wrap;font-size:10px"><b style="color:'+cc+'">Cohérence des modèles</b><span>Matrice '+N+'A : <b style="color:var(--text)">'+selRet.toFixed(1)+'%/an</b></span><span>DCF 5A : <b style="color:var(--text)">'+dcfPreview.irr.toFixed(1)+'%/an</b></span><span style="color:'+cc+'">'+cl+' · écart relatif '+relDiff.toFixed(0)+'%</span><span>Confiance : <b style="color:'+cc+'">'+resultConf+'</b></span></div>';
+  }else{
+    cohHtml='<div style="margin:0 0 14px;padding:9px 12px;border:1px solid rgba(100,116,139,.22);background:rgba(100,116,139,.04);border-radius:9px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;font-size:10px;color:var(--muted)"><b style="color:var(--text)">1 méthode exploitable</b><span>Matrice '+N+'A : <b style="color:var(--text)">'+selRet.toFixed(1)+'%/an</b></span><span>DCF non exploitable automatiquement · Rend. Valio repose sur la matrice seule.</span><span>Confiance : <b style="color:#f59e0b">limitée</b></span></div>';
+  }
   var scenarioName=scale===75?'Bear':scale===125?'Bull':scale===100?'Base':'Personnalisé '+scale+'%';
   var html='<div style="display:flex;align-items:center;gap:6px;margin-bottom:14px">'+tog('5 ans',5)+'<div style="margin-left:16px;display:flex;gap:26px;flex-wrap:wrap"><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Mon scénario — prix max ('+rC+'%/an)</div><div style="font-size:20px;font-weight:800;color:#634BE4" class="mono">'+cSym+fN(fair)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Mon scénario — rendement '+N+' ans</div><div style="font-size:20px;font-weight:800;color:'+cellColor(selRet)+'" class="mono">'+selRet.toFixed(2)+' %/an</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Écart au prix max</div><div style="font-size:20px;font-weight:800;color:'+(gap>=0?'#22c55e':'#f59e0b')+'" class="mono">'+(gap>=0?'+':'')+gap.toFixed(2)+' %</div></div></div></div>'+peRefs+
     '<div style="padding:9px 12px;margin-bottom:12px;border:1px solid rgba(38,197,222,.18);background:rgba(38,197,222,.045);border-radius:8px;font-size:10px;color:var(--muted);line-height:1.55"><b style="color:var(--text)">Projection commune ('+scenarioName+') :</b> '+proj.baseSrc+' · EPS '+cSym+fN(eps0)+' · '+centralPathTxt+' · multiple auto '+mCur.toFixed(1)+'x.'+sourceBadge+manualBadge+moatBadge+(proj.g5!=null?' <span style="color:var(--muted2)">CAGR Yahoo 5 ans : '+proj.g5.toFixed(1)+'%</span>':'')+(proj.growthSignals&&proj.growthSignals.length?' <span style="color:var(--muted2)">· signaux : '+proj.growthSignals.join(' / ')+'</span>':'')+(proj.cyclical?' <span style="color:#f59e0b">Titre cyclique : EPS normalisé mi-cycle.</span>':'')+'</div>'+baseControls+confidenceNotice+
