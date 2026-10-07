@@ -414,7 +414,7 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 @media(max-width:768px){.perf-treemap{height:520px}.risk-compact .metric-box{min-height:86px}}
 </style>
 
-</head>
+<style>.modal.moat-modal{width:min(980px,95vw);max-width:95vw}</style></head>
 <body>
 <style>
 /* Fix global : supprimer les espaces noirs à droite sur toutes les pages */
@@ -2178,6 +2178,26 @@ function sortSC(col){
 var _valuationSignals={};
 var _valuationFinCache={};
 function _valuationSignalColor(v){return v>=25?'#22c55e':v>=20?'#eab308':v>=15?'#f97316':'#ef4444';}
+function _valuationConfidence(matrix,dcf,proj,qualityAlert){
+  var hasM=matrix!=null&&isFinite(matrix),hasD=dcf!=null&&isFinite(dcf),count=(hasM?1:0)+(hasD?1:0);
+  var absGap=hasM&&hasD?Math.abs(matrix-dcf):null,base=hasM&&hasD?(Math.abs(matrix)+Math.abs(dcf))/2:null;
+  var relGap=base==null?null:base===0?0:absGap/base*100;
+  var opposite=hasM&&hasD&&((matrix<0&&dcf>0)||(matrix>0&&dcf<0));
+  var decisionMismatch=hasM&&hasD&&((matrix>=15)!==(dcf>=15)),rankable=proj&&proj.rankable!==false;
+  var conf='low';
+  if(count&&rankable){
+    if(qualityAlert||opposite||decisionMismatch||(relGap!=null&&relGap>60))conf='low';
+    else if(count===2&&relGap<=30&&proj.confidence==='high')conf='high';
+    else conf='medium';
+  }
+  if(!proj||proj.confidence==='low')conf='low';
+  if(proj&&proj.confidence==='medium'&&conf==='high')conf='medium';
+  return {confidence:conf,code:conf==='high'?'CE':conf==='medium'?'CM':'CF',modelsCount:count,gap:absGap,relativeGap:relGap,opposite:opposite,decisionMismatch:decisionMismatch,rankable:!!rankable};
+}
+function _valuationConfidenceBadge(conf){
+  var code=conf==='high'?'CE':conf==='medium'?'CM':'CF',label=conf==='high'?'Confiance élevée':conf==='medium'?'Confiance moyenne':'Confiance faible',color=conf==='high'?'var(--green)':conf==='medium'?'var(--cyan)':'var(--red)';
+  return '<span title="'+label+'" style="font-size:9px;font-weight:800;color:'+color+';padding:1px 4px;border:1px solid '+color+';border-radius:4px">'+code+'</span>';
+}
 function _computeCentralValuationSignal(ticker,price,f,fin){
   if(!(price>0)||!f)return null;
   var epsFallback=(f.trailingPE>0)?price/f.trailingPE:null,
@@ -2201,23 +2221,15 @@ function _computeCentralValuationSignal(ticker,price,f,fin){
       count=(hasM?1:0)+(hasD?1:0),
       avg=count===2?(matrix+dcf)/2:(hasM?matrix:(hasD?dcf:null)),
       absGap=hasM&&hasD?Math.abs(matrix-dcf):null,
-      gapBase=hasM&&hasD?Math.max(10,(Math.abs(matrix)+Math.abs(dcf))/2):null,
-      relGap=hasM&&hasD?(absGap/gapBase*100):null,
+      gapBase=hasM&&hasD?(Math.abs(matrix)+Math.abs(dcf))/2:null,
+      relGap=hasM&&hasD?(gapBase===0?0:absGap/gapBase*100):null,
       target=15,
       decisionMismatch=hasM&&hasD?((matrix>=target)!==(dcf>=target)):false,
       projectionWarn=proj.rankable===false,
       rankable=proj.rankable!==false,
       rankValue=(rankable&&avg!=null&&isFinite(avg))?avg:null;
 
-  var conf='low';
-  if(rankable){
-    if(count<2) conf='medium';
-    else if(decisionMismatch||qualityAlert||(relGap!=null&&relGap>60)) conf='low';
-    else if(proj.confidence==='high'&&relGap!=null&&relGap<=30) conf='high';
-    else conf='medium';
-  }
-  if(proj.confidence==='low')conf='low';
-  if(proj.confidence==='medium'&&conf==='high')conf='medium';
+  var conf=_valuationConfidence(matrix,dcf,proj,qualityAlert).confidence;
 
   var warn=projectionWarn||decisionMismatch||qualityAlert||(relGap!=null&&relGap>60)||count<2;
   return {
@@ -2237,7 +2249,7 @@ async function _ensureValuationSignal(ticker,force){
   if(!Object.prototype.hasOwnProperty.call(_analysisCache,ticker)){try{await loadAnalysis(ticker);}catch(_a){}}
   var fin=_valuationFinCache[ticker];
   if(!fin){try{var r=await fetch(API+'?symbol='+encodeURIComponent(ticker)+'&type=financials',{signal:AbortSignal.timeout(12000)});var d=await r.json();if(d&&!d.error){fin=d;_valuationFinCache[ticker]=d;}}catch(e){}}
-  var sig=_computeCentralValuationSignal(ticker,p.price,f,fin||null);if(sig){sig.provisional=!fin;_valuationSignals[ticker]=sig;}return sig;
+  var sig=_computeCentralValuationSignal(ticker,p.price,f,fin||null);if(sig){sig.provisional=!fin;if(!fin)sig.confidence='low';_valuationSignals[ticker]=sig;}return sig;
 }
 function _valuationCellHtml(ticker){
   var s=_valuationSignals[ticker];
@@ -2253,7 +2265,7 @@ function _valuationCellHtml(ticker){
 
   var title=(s.projectionLabel||'')+' · Matrice '+mTxt+'% · DCF '+dTxt+'%'+relTxt+' · confiance '+confTxt;
   return '<div class="mono" style="font-weight:800;color:'+mainColor+'" title="'+title+'">'+prefix+s.avg.toFixed(1)+'%</div>'+
-         '<div style="font-size:8px;color:var(--muted2)">M '+mTxt+' · D '+dTxt+methodTxt+' · C '+confTxt+'</div>';
+         '<div style="font-size:8px;color:var(--muted2)">M '+mTxt+' · D '+dTxt+methodTxt+' · '+_valuationConfidenceBadge(s.confidence)+'</div>';
 }
 function getSortVal(ticker, col){
   if(col==='poids'){var ep=S.enrichedPos.find(function(x){return x.ticker===ticker;});return ep?(ep.valueEur||0):0;}
@@ -2644,110 +2656,120 @@ async function loadScreenerRatios(force){
 var _prevPage = 'ratios';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// MOAT 2030 — 5 barrières, IA intégrée dans l'analyse du moat
-// ═══════════════════════════════════════════════════════════════════════════
+// V31 — Moat post-intelligence : saisie manuelle stable, 40/30/15/15.
+var MOAT2030_VERSION='40-30-15-15-v1';
 var MOAT2030_CRIT=[
-  {k:'hardBarriers',label:'Hard Barriers',hint:'Actifs physiques, fabs, logistique, licences, brevets défendables, ressources rares, capital/temps difficiles à reproduire.'},
-  {k:'dataNetwork',label:'Data & Network',hint:'Données propriétaires rares, feedback loops, effets de réseau utilisateurs/fournisseurs/développeurs, communauté difficile à recréer.'},
-  {k:'embeddednessStandards',label:'Embeddedness & Standards',hint:'Switching costs structurels, system of record, standard de marché, intégration profonde, étape critique de la chaîne de valeur.'},
-  {k:'brandTrustDesire',label:'Brand, Trust & Desire',hint:'Marque, confiance, prestige, désirabilité, patrimoine culturel et pricing power émotionnel.'},
-  {k:'scaleCostCapital',label:'Scale, Cost & Capital',hint:'Économies d’échelle, coûts, négociation, capex, FCF/cash et capacité à soutenir une guerre d’investissement.'}
+  {k:'postAI',label:'Résistance post-intelligence',max:40,hint:'Avantage relatif lorsque code, analyse et agents deviennent abondants.',subs:[
+    {k:'scarcity',label:'Rareté qui subsiste',max:12,hint:'Qu’est-ce qu’une excellente IA et beaucoup de financement ne permettent pas de reproduire facilement ?'},
+    {k:'substitution',label:'Résistance aux substituts',max:10,hint:'Peut-on satisfaire le même besoin sans reproduire les actifs ?'},
+    {k:'disintermediation',label:'Résistance à la désintermédiation',max:10,hint:'Un agent qui choisit pour le client peut-il déplacer l’accès au marché et le pouvoir de négociation ?'},
+    {k:'persistence',label:'Persistance de la prime / du verrouillage',max:8,hint:'Marque, confiance, réseau et coûts de migration restent-ils protecteurs ?'}]},
+  {k:'dominant',label:'Moat dominant',max:30,hint:'Force actuelle de la principale barrière à la captation des profits.',subs:[
+    {k:'replication',label:'Reproduction / accès',max:12,hint:'Difficulté d’acquérir ou de reconstruire la protection.'},
+    {k:'competition',label:'Protection concurrentielle',max:10,hint:'Résistance aux concurrents et aux solutions de remplacement.'},
+    {k:'capture',label:'Captation de la valeur',max:8,hint:'Pouvoir de négociation et conservation des profits.'}]},
+  {k:'stack',label:'Stack de moats',max:15,hint:'Deuxième et troisième protections ; ne pas recompter le moat principal.',subs:[
+    {k:'second',label:'Deuxième moat',max:8,hint:'Force autonome si le premier moat est attaqué.'},
+    {k:'third',label:'Troisième moat',max:4,hint:'Protection supplémentaire distincte.'},
+    {k:'independence',label:'Indépendance des protections',max:3,hint:'Les moats ne doivent pas tous tomber face à la même menace.'}]},
+  {k:'economic',label:'Preuve économique',max:15,hint:'Données normalisées sur plusieurs années, comparées au métier et au coût du capital.',subs:[
+    {k:'capital',label:'Rentabilité du capital',max:5,hint:'ROIC retraité / coût du capital, rentabilité des nouveaux investissements.'},
+    {k:'pricing',label:'Prix et marges',max:4,hint:'Pricing power durable sans perte excessive de volume.'},
+    {k:'retention',label:'Comportement des clients',max:3,hint:'Rétention, réachat, renouvellements et parts de marché.'},
+    {k:'cash',label:'Cash et résistance',max:3,hint:'Cash après investissements nécessaires et résistance dans les périodes difficiles.'}]}
 ];
-function _esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function _scoreColor(s){ return s>=80?'var(--green)':s>=60?'var(--yellow)':s>=40?'#f59e0b':'var(--red)'; }
-function _moatStrictCalibrate(raw){
-  raw=Math.max(0,Math.min(100,raw||0));
-  if(raw<80)return raw;
-  // Échelle volontairement exigeante : dépasser 95 nécessite un score brut proche de 97–100.
-  return 80+20*Math.pow((raw-80)/20,1.35);
-}
+var MOAT2030_FAMILIES=['Marque / statut / confiance','Effet de réseau','Coûts de changement','Actifs physiques / savoir-faire industriel','Échelle / coûts / distribution','Droits / licences / standards'];
+function _esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+function _scoreColor(s){return s>=80?'var(--green)':s>=60?'var(--yellow)':s>=40?'#f59e0b':'var(--red)';}
+function _moatPoint(v,max){if(v==null||String(v).trim()===''||!isFinite(Number(v)))return null;return Math.max(0,Math.min(max,Math.round(Number(v))));}
 function _moat2030Score(vals){
-  vals=vals||{};
-  var scores=MOAT2030_CRIT.map(function(c){return {k:c.k,label:c.label,v:Math.max(0,Math.min(100,Number(vals[c.k])||0))};})
-    .filter(function(x){return x.v>=40;}).sort(function(a,b){return b.v-a.v;}).slice(0,3);
-  var raw=0;
-  if(scores.length===1) raw=scores[0].v;
-  else if(scores.length===2) raw=scores[0].v*.625+scores[1].v*.375;
-  else if(scores.length>=3) raw=scores[0].v*.50+scores[1].v*.30+scores[2].v*.20;
-  var calibrated=_moatStrictCalibrate(raw);
-  return {score:Math.round(calibrated),rawScore:Math.round(raw),selected:scores};
+  var out={score:null,rawScore:null,pillars:{},complete:false,legacy:false,eliteEligible:false,capped:false};
+  if(!vals)return out;
+  if(vals.version!==MOAT2030_VERSION){out.legacy=true;return out;}
+  var total=0,complete=true;
+  MOAT2030_CRIT.forEach(function(c){
+    var v=null;
+    if(vals.mode==='details'){
+      var details=vals.details&&vals.details[c.k],sum=0,ok=true;
+      c.subs.forEach(function(sub){var n=_moatPoint(details&&details[sub.k],sub.max);if(n==null)ok=false;else sum+=n;});
+      if(ok)v=sum;
+    }else v=_moatPoint(vals[c.k],c.max);
+    out.pillars[c.k]=v;if(v==null)complete=false;else total+=v;
+  });
+  if(!complete)return out;
+  out.complete=true;out.rawScore=total;
+  out.eliteEligible=out.pillars.postAI>=36&&out.pillars.dominant>=27&&out.pillars.stack>=12&&out.pillars.economic>=13;
+  out.capped=total>=90&&!out.eliteEligible;out.score=out.capped?89:total;
+  return out;
 }
-function _moat2030Label(s){return s>=95?'Exceptionnel / quasi parfait':s>=90?'Élite / très rare':s>=80?'Très fort':s>=70?'Fort':s>=60?'Correct':s>=50?'Faible à moyen':s>=40?'Barrière limitée':'Pas de moat durable';}
+function _moat2030Label(s){return s==null?'Non renseigné':s>=95?'Exceptionnelissime':s>=90?'Exceptionnel':s>=85?'Très fort':s>=80?'Fort':s>=70?'Bon':s>=60?'Modéré / attaquable':s>=50?'Faible':'Protection durable insuffisante';}
+function _moatAdjustment(score){return score>=96?40:score>=92?35:score>=88?30:score>=85?25:score>=80?20:score>=75?12:score>=70?0:score>=60?-5:score>=50?-10:-20;}
+function _moatPEBonusPct(analysis){var r=_moat2030Score(analysis&&analysis.moat2030);return {score:r.score,bonus:r.score==null?0:_moatAdjustment(r.score),postAI:r.pillars.postAI,legacy:r.legacy,complete:r.complete,capped:r.capped};}
+function _moatSigned(n){return (n>0?'+':'')+n+'%';}
+function _moatBar(v){return '<div style="height:6px;border-radius:999px;background:var(--border2);overflow:hidden"><div style="width:'+Math.max(0,Math.min(100,v))+'%;height:100%;background:'+_scoreColor(v)+'"></div></div>';}
 
 var _analysisCache={};
 async function loadAnalysis(ticker){
-  var u=getUser(); if(!u) return null;
-  if(Object.prototype.hasOwnProperty.call(_analysisCache,ticker)) return _analysisCache[ticker];
-  try{
-    var rows=await dbGet('company_analysis','user_id=eq.'+u.id+'&ticker=eq.'+encodeURIComponent(ticker));
-    var row=(rows&&rows[0])||null; _analysisCache[ticker]=row; return row;
-  } catch(e){ _analysisCache[ticker]=null; return null; }
+  var u=getUser();if(!u)return null;
+  if(Object.prototype.hasOwnProperty.call(_analysisCache,ticker))return _analysisCache[ticker];
+  try{var rows=await dbGet('company_analysis','user_id=eq.'+u.id+'&ticker=eq.'+encodeURIComponent(ticker));var row=(rows&&rows[0])||null;_analysisCache[ticker]=row;return row;}catch(e){_analysisCache[ticker]=null;return null;}
 }
 async function saveAnalysisRow(ticker,data){
-  var u=getUser(); if(!u) throw new Error('Non connecté');
-  await rest('/rest/v1/company_analysis?on_conflict=user_id,ticker',{
-    method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=representation'},
-    body:JSON.stringify({user_id:u.id,ticker:ticker,data:data,updated_at:new Date().toISOString()})
-  });
+  var u=getUser();if(!u)throw new Error('Non connecté');
+  await rest('/rest/v1/company_analysis?on_conflict=user_id,ticker',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify({user_id:u.id,ticker:ticker,data:data,updated_at:new Date().toISOString()})});
   _analysisCache[ticker]={ticker:ticker,data:data,updated_at:new Date().toISOString()};
 }
-function _analysisDataFor(ticker){
-  var r=_analysisCache[ticker];
-  if(r&&r.data)return r.data;
-  if(window._cdAnaTicker===ticker&&window._cdAnaData)return window._cdAnaData;
-  if(window._cdLastAnalysis&&window._cdAnaTicker===ticker)return window._cdLastAnalysis;
-  return null;
-}
-function _moatPEBonusPct(analysis){
-  if(!analysis||!analysis.moat2030)return {score:null,bonus:0};
-  var s=_moat2030Score(analysis.moat2030).score;
-  // Bonus volontairement plafonné à +30% : le moat majore le multiple issu de la croissance,
-  // sans pouvoir à lui seul justifier un multiple extrême.
-  var b=s<=50?0:Math.min(30,(s-50)*(30/45));
-  return {score:s,bonus:Math.round(b*10)/10};
-}
-function _moatBar(v,selected){
-  var col=_scoreColor(v),w=Math.max(0,Math.min(100,v));
-  return '<div style="height:6px;border-radius:999px;background:var(--border2);overflow:hidden"><div style="width:'+w+'%;height:100%;background:'+col+'"></div></div>'+
-    (selected?'<div style="font-size:8px;color:var(--cyan);margin-top:3px;font-weight:750">✓ retenue dans le score final</div>':'');
+function _analysisDataFor(ticker){var r=_analysisCache[ticker];if(r&&r.data)return r.data;if(window._cdAnaTicker===ticker&&window._cdAnaData)return window._cdAnaData;if(window._cdLastAnalysis&&window._cdAnaTicker===ticker)return window._cdLastAnalysis;return null;}
+function _moatRulesHtml(){
+  return '<details style="font-size:11px;color:var(--muted);margin:12px 0"><summary style="cursor:pointer;color:var(--cyan)">Barème et méthode</summary><div style="line-height:1.6;margin-top:8px">0% des points : absent / contredit · 25% : limité · 50% : réel mais attaquable · 75% : fort et documenté · 90% : exceptionnel · 100% : cas limite. Une donnée absente reste vide, elle ne vaut pas zéro.<br>90+ exige ≥36/40 post-IA, ≥27/30 dominant, ≥12/15 stack et ≥13/15 économique ; sinon le total est plafonné à 89. Pas de compression artificielle des notes.<br>96–100 : +40% · 92–95 : +35% · 88–91 : +30% · 85–87 : +25% · 80–84 : +20% · 75–79 : +12% · 70–74 : 0% · 60–69 : −5% · 50–59 : −10% · &lt;50 : −20%.<br>PER croissance = 9 + 0,8 × croissance EPS A5 (12–40×), puis ajustement Moat. Plafond automatique 45× ; 50× si Moat ≥90, post-IA ≥36/40 et croissance EPS A5 ≥30%. Le malus reste effectif sous 12×. La croissance n’est jamais modifiée par le Moat.<br>Base scientifique : barrières à l’entrée (Porter), ressources difficilement imitables (Barney), coûts de changement et réseaux (Farrell/Klemperer), statut des marques (Han/Nunes/Drèze), actifs complémentaires et IA (Azoulay/Krieger/Nagaraj). Pondérations, scénario post-intelligence et primes sont des conventions Valio à tester.</div></details>';
 }
 async function renderAnalysisCard(ticker,name){
-  var el=document.getElementById('cd-analysis-section'); if(!el) return;
-  window._cdAnaTicker=ticker; window._cdAnaName=name;
-  el.innerHTML='<div class="card" style="padding:20px"><div class="spinner"></div></div>';
-  var row=await loadAnalysis(ticker),data=(row&&row.data)||null;
-  window._cdAnaData=data;
-  if(!data||!data.moat2030){
-    var legacy=data&&(data.moat||data.ai);
-    el.innerHTML='<div class="card" style="padding:20px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">'+
-      '<div><div style="font-size:15px;font-weight:800">🏰 Moat 2030</div><div style="font-size:12px;color:var(--muted);margin-top:3px">'+(legacy?'Ancien modèle MOAT/IA détecté : il doit être re-noté avec le nouveau cadre 2030.':'Pas encore de notation Moat 2030 pour '+ticker+'.')+'</div></div>'+
-      '<button class="btn btn-primary btn-sm" onclick="editAnalysis()">+ Noter le moat</button></div>';
-    return;
+  var el=document.getElementById('cd-analysis-section');if(!el)return;
+  window._cdAnaTicker=ticker;window._cdAnaName=name;
+  var row=await loadAnalysis(ticker),data=(row&&row.data)||{},calc=_moat2030Score(data.moat2030);window._cdAnaData=data;
+  if(calc.score==null){
+    var legacy=calc.legacy||data.moat||data.ai;
+    el.innerHTML='<div class="card" style="padding:20px"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center"><div><b>🏰 Moat 2030 · 40/30/15/15</b><div style="font-size:12px;color:var(--muted);margin-top:6px">'+(legacy?'Ancienne notation conservée : re-noter avec le cadre 40/30/15/15. Aucun ajustement de multiple tant que la nouvelle notation est absente.':'Notation absente ou incomplète : aucun ajustement de multiple.')+'</div></div><button class="btn btn-primary btn-sm" onclick="editAnalysis()">Noter le moat</button></div>'+_moatRulesHtml()+'</div>';return;
   }
-  var calc=_moat2030Score(data.moat2030),selected={};calc.selected.forEach(function(x){selected[x.k]=true;});
-  var notes=data.moat2030_notes||{};
-  var rep=data.reports_url&&/^https?:\/\//.test(data.reports_url)?'<a href="'+_esc(data.reports_url)+'" target="_blank" rel="noopener" class="btn btn-ghost btn-sm" style="text-decoration:none">📄 Source / IR</a>':'';
-  var cards=MOAT2030_CRIT.map(function(c){var v=Number(data.moat2030[c.k])||0,note=notes[c.k]||'';return '<div class="panel-card" style="border-color:'+(selected[c.k]?'rgba(38,197,222,.34)':'var(--border)')+'"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px"><div style="font-size:12px;font-weight:750">'+c.label+'</div><div class="mono" style="font-size:16px;font-weight:850;color:'+_scoreColor(v)+'">'+v+'/100</div></div>'+_moatBar(v,selected[c.k])+(note?'<div style="font-size:10px;color:var(--muted);line-height:1.45;margin-top:8px">'+_esc(note)+'</div>':'')+'</div>';}).join('');
-  el.innerHTML='<div class="card" style="padding:20px"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px"><div><div style="font-size:15px;font-weight:800">🏰 Moat 2030</div><div style="font-size:11px;color:var(--muted);margin-top:3px">Résilience de l’avantage concurrentiel dans un monde où code, logiciels et agents IA deviennent plus abondants.</div></div><div style="display:flex;align-items:center;gap:8px">'+rep+'<button class="btn btn-ghost btn-sm" onclick="editAnalysis()">✏️ Éditer</button></div></div><div style="display:flex;align-items:baseline;gap:9px;margin-bottom:14px"><span style="font-size:36px;font-weight:900;color:'+_scoreColor(calc.score)+'">'+calc.score+'</span><span style="color:var(--muted)">/100</span><span style="font-size:12px;color:var(--muted)">'+_moat2030Label(calc.score)+'</span><span style="font-size:10px;color:var(--cyan);margin-left:6px">Top '+calc.selected.length+' barrière'+(calc.selected.length>1?'s':'')+' significative'+(calc.selected.length>1?'s':'')+'</span><span style="font-size:9px;color:var(--muted2);margin-left:6px">brut '+calc.rawScore+' → échelle stricte '+calc.score+'</span><span style="font-size:10px;color:var(--cyan);margin-left:6px">Bonus P/E terminal +'+_moatPEBonusPct(data).bonus.toFixed(1)+'%</span></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px">'+cards+'</div>'+(data.moat2030_note?'<div style="font-size:11px;color:var(--muted);margin-top:12px;padding-top:10px;border-top:1px solid var(--border2);white-space:pre-wrap">'+_esc(data.moat2030_note)+'</div>':'')+(row&&row.updated_at?'<div style="font-size:9px;color:var(--muted2);margin-top:10px">Mis à jour le '+new Date(row.updated_at).toLocaleDateString('fr-FR')+'</div>':'')+'</div>';
+  var notes=data.moat2030_notes||{},rep=data.reports_url&&/^https?:\/\//.test(data.reports_url)?'<a class="btn btn-ghost btn-sm" href="'+_esc(data.reports_url)+'" target="_blank" rel="noopener">Source / IR</a>':'';
+  var cards=MOAT2030_CRIT.map(function(c){var v=calc.pillars[c.k];return '<div class="panel-card"><div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:8px"><b style="font-size:12px">'+c.label+'</b><span class="mono" style="color:'+_scoreColor(v/c.max*100)+'">'+v+'/'+c.max+'</span></div>'+_moatBar(v/c.max*100)+'<div style="font-size:10px;color:var(--muted);line-height:1.5;margin-top:8px">'+_esc(notes[c.k]||c.hint)+'</div></div>';}).join('');
+  el.innerHTML='<div class="card" style="padding:20px"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><b>🏰 Moat 2030 · 40/30/15/15</b><div>'+rep+' <button class="btn btn-ghost btn-sm" onclick="editAnalysis()">Éditer</button></div></div><div style="display:flex;align-items:baseline;gap:10px;margin:15px 0"><b style="font-size:36px;color:'+_scoreColor(calc.score)+'">'+calc.score+'</b><span>/100 · '+_moat2030Label(calc.score)+'</span><b style="color:var(--cyan);font-size:12px">PER terminal '+_moatSigned(_moatAdjustment(calc.score))+'</b></div>'+(calc.capped?'<div style="font-size:11px;color:var(--yellow);margin-bottom:10px">Total brut '+calc.rawScore+' ; conditions 90+ non réunies → score 89.</div>':'')+(data.moat2030.family?'<div style="font-size:11px;color:var(--muted);margin-bottom:10px">Moat dominant : '+_esc(data.moat2030.family)+'</div>':'')+'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px">'+cards+'</div>'+_moatRulesHtml()+(data.moat2030_note?'<div style="font-size:11px;white-space:pre-wrap;color:var(--muted)">'+_esc(data.moat2030_note)+'</div>':'')+'<div style="font-size:9px;color:var(--muted2);margin-top:10px">Notation manuelle · à revoir annuellement ou lors d’un changement structurel'+(row&&row.updated_at?' · '+new Date(row.updated_at).toLocaleDateString('fr-FR'):'')+'</div></div>';
 }
-function _moat2030Input(c,v,note){
-  return '<div style="padding:10px 0;border-bottom:1px solid var(--border2)"><div style="display:grid;grid-template-columns:minmax(180px,1fr) 90px;gap:10px;align-items:start"><div><div style="font-size:13px;font-weight:700">'+c.label+'</div><div style="font-size:10px;color:var(--muted);line-height:1.4;margin-top:2px">'+c.hint+'</div></div><input id="moat2030-'+c.k+'" class="form-input mono" type="number" min="0" max="100" step="1" value="'+(v!=null?v:'')+'" placeholder="0–100" oninput="_recalcAna()" style="padding:6px 7px;text-align:right"></div><textarea id="moat2030-note-'+c.k+'" class="form-input" rows="2" placeholder="Justification / preuves / métriques (optionnel)" style="width:100%;resize:vertical;margin-top:7px;font-size:10px">'+_esc(note||'')+'</textarea></div>';
+function _moatInputHtml(c,m,notes){
+  var details=m.details&&m.details[c.k]||{},v=m[c.k];
+  return '<div class="panel-card" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b>'+c.label+'</b><span id="moat-pillar-total-'+c.k+'" class="mono"></span></div><div style="font-size:10px;color:var(--muted);margin:5px 0">'+c.hint+'</div><div class="moat-pillar-input"><input id="moat2030-'+c.k+'" class="form-input mono" type="number" min="0" max="'+c.max+'" step="1" placeholder="0–'+c.max+'" value="'+(v==null?'':v)+'" oninput="_recalcAna()"></div><div class="moat-detail-input">'+c.subs.map(function(s){return '<label style="display:grid;grid-template-columns:1fr 70px;gap:8px;align-items:center;font-size:11px;margin:6px 0" title="'+_esc(s.hint)+'">'+s.label+' /'+s.max+'<input class="form-input mono" id="moat-detail-'+c.k+'-'+s.k+'" type="number" min="0" max="'+s.max+'" step="1" value="'+(details[s.k]==null?'':details[s.k])+'" oninput="_recalcAna()"></label>';}).join('')+'</div><details style="font-size:10px;color:var(--muted);margin-top:8px"><summary style="cursor:pointer">Sous-critères / justification</summary>'+c.subs.map(function(s){return '<div style="margin-top:5px"><b>'+s.label+' ('+s.max+')</b> · '+s.hint+'</div>';}).join('')+'<textarea id="moat2030-note-'+c.k+'" class="form-input" rows="2" style="width:100%;margin-top:8px" placeholder="Preuves, risques et sources">'+_esc(notes[c.k]||'')+'</textarea></details></div>';
 }
 window.editAnalysis=function(){
-  var ticker=window._cdAnaTicker,name=window._cdAnaName||ticker,d=window._cdAnaData||{},m=d.moat2030||{},notes=d.moat2030_notes||{};
-  var h='<div class="modal-hd"><h2>Moat 2030 — '+name+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:12px">Note chaque source de 0 à 100. Seules les barrières ≥40 sont significatives ; le score final retient au maximum les 3 meilleures (50% / 30% / 20%, renormalisé s’il n’y en a que 1 ou 2). Le Levier IA n’existe plus comme score séparé.<br><b style="color:var(--text)">Échelle stricte :</b> 95–100 = quasi perfection / extrêmement rare · 90–94 = élite · 80–89 = très fort. Le score final est légèrement comprimé au-dessus de 80 pour éviter les notes trop faciles.<br><b style="color:var(--text)">Impact valorisation :</b> aucun bonus sous 50/100, puis bonus progressif sur le P/E terminal jusqu’à <b>+30% max</b> vers 95/100 et au-delà.</div><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><div style="font-size:11px;font-weight:750;text-transform:uppercase;color:var(--muted)">Score final</div><div style="display:flex;align-items:baseline;gap:10px"><div id="moat2030-total" class="mono" style="font-size:22px;font-weight:900">—</div><div id="moat2030-bonus" class="mono" style="font-size:12px;color:var(--cyan)">Bonus P/E —</div></div></div>'+MOAT2030_CRIT.map(function(c){return _moat2030Input(c,m[c.k],notes[c.k]);}).join('')+'<textarea id="moat2030-overall-note" class="form-input" rows="2" placeholder="Synthèse globale (optionnel)" style="width:100%;resize:vertical;margin-top:12px">'+_esc(d.moat2030_note||'')+'</textarea><div class="form-group" style="margin:14px 0 8px"><label class="form-label">📄 Lien source / Investor Relations</label><input id="ana-reports" class="form-input" placeholder="https://..." value="'+_esc(d.reports_url||'')+'"></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveAnalysisForm()">Enregistrer</button></div>';
-  showModal(h);_recalcAna();
+  var d=window._cdAnaData||{},m=d.moat2030&&d.moat2030.version===MOAT2030_VERSION?d.moat2030:{},notes=m.version?d.moat2030_notes||{}:{},mode=m.mode||'pillars';
+  showModal('<div class="modal-hd"><h2>Moat 2030 — '+_esc(window._cdAnaName||window._cdAnaTicker)+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px"><select id="moat-input-mode" class="form-input" onchange="_recalcAna()"><option value="pillars"'+(mode==='pillars'?' selected':'')+'>Scores par pilier</option><option value="details"'+(mode==='details'?' selected':'')+'>Sous-critères détaillés</option></select><b id="moat2030-total" class="mono">—</b><b id="moat2030-bonus" style="color:var(--cyan)">—</b></div><div id="moat2030-status" style="font-size:11px;color:var(--muted);margin-bottom:10px"></div><label style="font-size:11px">Famille du moat dominant<select id="moat-family" class="form-input" style="width:100%;margin:5px 0 12px"><option value="">À préciser</option>'+MOAT2030_FAMILIES.map(function(f){return '<option'+(m.family===f?' selected':'')+'>'+_esc(f)+'</option>';}).join('')+'</select></label><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px">'+MOAT2030_CRIT.map(function(c){return _moatInputHtml(c,m,notes);}).join('')+'</div>'+_moatRulesHtml()+'<textarea id="moat2030-overall-note" class="form-input" rows="2" style="width:100%" placeholder="Synthèse, principale menace et conditions de révision">'+_esc(m.version?d.moat2030_note||'':'')+'</textarea><input id="ana-reports" class="form-input" style="width:100%;margin-top:10px" placeholder="Lien source / Investor Relations" value="'+_esc(d.reports_url||'')+'"><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveAnalysisForm()">Enregistrer</button></div>');document.getElementById('modal-content').classList.add('moat-modal');_recalcAna();
 };
-window._recalcAna=function(){var m={};MOAT2030_CRIT.forEach(function(c){var e=document.getElementById('moat2030-'+c.k);m[c.k]=e?Math.max(0,Math.min(100,Number(e.value)||0)):0;});var r=_moat2030Score(m),el=document.getElementById('moat2030-total'),be=document.getElementById('moat2030-bonus');if(el){el.textContent=r.score+' /100';el.style.color=_scoreColor(r.score);}if(be){be.textContent='Bonus P/E +'+_moatPEBonusPct({moat2030:m}).bonus.toFixed(1)+'%';}};
+function _moatFormValue(){
+  var m={version:MOAT2030_VERSION,mode:document.getElementById('moat-input-mode').value,family:document.getElementById('moat-family').value,details:{}};
+  MOAT2030_CRIT.forEach(function(c){m[c.k]=_moatPoint(document.getElementById('moat2030-'+c.k).value,c.max);m.details[c.k]={};c.subs.forEach(function(s){m.details[c.k][s.k]=_moatPoint(document.getElementById('moat-detail-'+c.k+'-'+s.k).value,s.max);});});return m;
+}
+window._recalcAna=function(){
+  var m=_moatFormValue(),r=_moat2030Score(m),el=document.getElementById('moat2030-total');
+  document.querySelectorAll('.moat-pillar-input').forEach(function(e){e.style.display=m.mode==='pillars'?'':'none';});document.querySelectorAll('.moat-detail-input').forEach(function(e){e.style.display=m.mode==='details'?'':'none';});
+  MOAT2030_CRIT.forEach(function(c){document.getElementById('moat-pillar-total-'+c.k).textContent=(r.pillars[c.k]==null?'—':r.pillars[c.k])+'/'+c.max;});
+  el.textContent=r.score==null?'— /100':r.score+' /100';el.style.color=r.score==null?'var(--muted)':_scoreColor(r.score);
+  document.getElementById('moat2030-bonus').textContent='PER '+(r.score==null?'0% (non renseigné)':_moatSigned(_moatAdjustment(r.score)));
+  document.getElementById('moat2030-status').textContent=!r.complete?'Renseigner tous les scores du mode choisi. Une case vide reste inconnue.':r.capped?'Total brut '+r.rawScore+' : conditions 90+ non réunies, score plafonné à 89.':_moat2030Label(r.score)+' · croissance inchangée.';
+};
 window.saveAnalysisForm=async function(){
-  var ticker=window._cdAnaTicker,name=window._cdAnaName||ticker,d=window._cdAnaData||{},m={},notes={};
-  MOAT2030_CRIT.forEach(function(c){m[c.k]=Math.max(0,Math.min(100,Number(document.getElementById('moat2030-'+c.k).value)||0));notes[c.k]=(document.getElementById('moat2030-note-'+c.k).value||'').trim();});
-  var data=Object.assign({},d,{moat2030:m,moat2030_notes:notes,moat2030_note:(document.getElementById('moat2030-overall-note').value||'').trim(),reports_url:(document.getElementById('ana-reports').value||'').trim()});
+  var ticker=window._cdAnaTicker,name=window._cdAnaName||ticker,d=window._cdAnaData||{},m=_moatFormValue(),r=_moat2030Score(m),notes={};
+  if(!r.complete){showToast('Renseigne tous les scores du mode choisi avant d’enregistrer.');return;}
+  MOAT2030_CRIT.forEach(function(c){m[c.k]=r.pillars[c.k];notes[c.k]=document.getElementById('moat2030-note-'+c.k).value.trim();});
+  var data=Object.assign({},d,{moat2030:m,moat2030_notes:notes,moat2030_note:document.getElementById('moat2030-overall-note').value.trim(),reports_url:document.getElementById('ana-reports').value.trim()});
+  if(d.moat2030&&d.moat2030.version!==MOAT2030_VERSION)data.moat2030_legacy={scores:d.moat2030,notes:d.moat2030_notes||{},note:d.moat2030_note||''};
   try{
     await saveAnalysisRow(ticker,data);window._cdAnaData=data;window._cdLastAnalysis=data;delete _valuationSignals[ticker];
-    closeModal();showToast('✅ Moat 2030 enregistré · bonus de multiple mis à jour');renderAnalysisCard(ticker,name);
-    if(window._cdLastNativePrice) try{renderYieldMatrix(ticker,window._cdLastNativePrice,(S.fundamentals&&S.fundamentals[ticker])||null,window._cdLastFin||{});}catch(_r){}
-  }catch(e){var msg=(e&&e.message)||String(e);if(/company_analysis|relation|does not exist|404|PGRST/i.test(msg))msg='Table « company_analysis » introuvable.';showToast('❌ '+msg);}
+    // Toute sélection calculée sur l’ancien multiple doit être recalculée après édition.
+    if(_ymSel[ticker]){delete _ymSel[ticker].m;delete _ymSel[ticker].mC;delete _ymSel[ticker].mManual;}
+    closeModal();showToast('Moat enregistré · ajustement du multiple mis à jour');await renderAnalysisCard(ticker,name);
+    if(window._cdLastNativePrice)try{renderYieldMatrix(ticker,window._cdLastNativePrice,(S.fundamentals&&S.fundamentals[ticker])||null,window._cdLastFin||{});}catch(_r){}
+    if(S.fundamentals&&S.fundamentals[ticker]&&S.prices&&S.prices[ticker])try{await _ensureValuationSignal(ticker);if(typeof renderWatchlistTable==='function')renderWatchlistTable();}catch(_s){}
+    var badge=document.getElementById('valio-score-badge');if(badge&&S.fundamentals&&S.fundamentals[ticker])badge.innerHTML=renderQualityBadge(S.fundamentals[ticker],window._cdLastNativePrice,ticker,data);
+  }catch(e){showToast('Échec de l’enregistrement : '+((e&&e.message)||e));}
 };
 
 function openCompanyDetail(ticker, name) {
@@ -2869,7 +2891,7 @@ function calcQualityScoreV2(opts){
 
   // ═══ BLOC 2 — MOAT 2030 (35 pts) ═══ ancien MOAT 25 + ancien Levier IA 10 fusionnés
   applicableWeight+=35;
-  if(an&&an.moat2030){
+  if(an&&_moat2030Score(an.moat2030).score!=null){
     var ms2030=_moat2030Score(an.moat2030).score;
     var moatPts=ms2030/100*35;
     availableWeight+=35; rawPoints+=moatPts; blocks.moat.points=moatPts;
@@ -5587,15 +5609,14 @@ function _valuationSectorKey(f){
   return (f&&f.sector)||'Other';
 }
 
-function estimateExitMultiple(f, gTerminal, medianPE, analysis) {
-  // V24 — moteur principal = croissance EPS A5 ; le Moat applique ensuite un bonus en %.
-  // Base : 9 + 0,80 × croissance A5. Ex. 20% => 25x avant moat.
-  var g=isFinite(gTerminal)?gTerminal:8;
-  var base=Math.max(12,Math.min(40,9+.80*g));
-  var mb=_moatPEBonusPct(analysis||null),m=base*(1+mb.bonus/100);
-  // Cap final volontairement plus haut que le cap "croissance seule", mais reste borné.
-  return Math.max(12,Math.min(45,Math.round(m*2)/2));
+function _exitMultipleInfo(gTerminal,analysis){
+  var g=gTerminal!=null&&isFinite(Number(gTerminal))?Number(gTerminal):8;
+  var base=Math.max(12,Math.min(40,9+.80*g)),mb=_moatPEBonusPct(analysis);
+  var eligible=mb.score!=null&&mb.score>=90&&mb.postAI>=36&&g>=30,cap=eligible?50:45;
+  var adjusted=base*(1+mb.bonus/100);
+  return {base:base,adjusted:adjusted,cap:cap,eligible:eligible,value:Math.min(cap,Math.round(adjusted*2)/2),moat:mb,growth:g};
 }
+function estimateExitMultiple(f,gTerminal,medianPE,analysis){return _exitMultipleInfo(gTerminal,analysis).value;}
 
 function _valuationProjection(ticker,f,fin,epsFallback){
   var ae=(f&&f.analystEstimates)||{}, yNow=new Date().getFullYear(),analysis=_analysisDataFor(ticker)||{},ov=analysis.valuation_override||{};
@@ -5941,7 +5962,7 @@ function _dcfCompute(ticker,price,f,fin,opts){
       analysis=_analysisDataFor(ticker),
       terminalG=growths[growths.length-1],
       autoExit=estimateExitMultiple(f,terminalG,null,analysis),
-      exitMultiple=(useState&&ym.m!=null&&ym.m>0)?ym.m:autoExit;
+      exitMultiple=(useState&&ym.m!=null&&ym.m>0)?Math.min(50,ym.m):autoExit;
 
   if(!(exitMultiple>0))return null;
 
@@ -6056,8 +6077,8 @@ function _dcfHtml(ticker,price,f,fin,cSym){
     :'';
 
   var moatSub=moatInfo.score!=null
-    ?'Moat '+moatInfo.score+'/100 · bonus +'+moatInfo.bonus.toFixed(1)+'%'
-    :'Moat non renseigné · bonus 0%';
+    ?'Moat '+moatInfo.score+'/100 · ajustement '+_moatSigned(moatInfo.bonus)
+    :'Moat non renseigné · ajustement 0%';
 
   var details='';
   if(model==='reinvestment'){
@@ -6122,9 +6143,9 @@ function renderYieldMatrix(ticker, price, f, fin){
   if(!proj||!(price>0)){el.innerHTML='<div style="color:var(--muted);font-size:12px">Projection centrale indisponible — Yahoo ne fournit ni CAGR EPS 5 ans ni trajectoire future suffisante. Valio préfère ne rien classer plutôt que d\'inventer une croissance à 0%.</div>';return;}
   var titleEl=document.getElementById('cd-matrix-title');if(titleEl)titleEl.textContent='🎯 Matrice de rendement & DCF — 5 ans';
   var eps0=(st.eps>0)?st.eps:proj.epsBase,centralGrowths=_projectionGrowths(proj,N,100),terminalG=centralGrowths[centralGrowths.length-1],moatInfo=_moatPEBonusPct(analysis);
-  var medPE=_medianPE5y(fin,window._cdChartPts||[]),autoMult=estimateExitMultiple(f,terminalG,medPE,analysis),mCur=(st.mManual&&st.mC!=null)?st.mC:autoMult;
-  var scale=(st.scale!=null)?st.scale:100,selM=(st.m!=null)?st.m:mCur;if(!(scale>=40&&scale<=180))scale=100;
-  var scaleRows=[];for(var sc=70;sc<=130;sc+=5)scaleRows.push(sc);var mCols=[];for(var mm=Math.max(5,mCur-6);mm<=mCur+6;mm++)mCols.push(mm);if(mCols.indexOf(selM)<0)selM=mCur;
+  var medPE=_medianPE5y(fin,window._cdChartPts||[]),autoMult=estimateExitMultiple(f,terminalG,medPE,analysis),mCur=(st.mManual&&st.mC!=null)?Math.min(50,st.mC):autoMult;
+  var scale=(st.scale!=null)?st.scale:100,selM=(st.m!=null)?Math.min(50,st.m):mCur;if(!(scale>=40&&scale<=180))scale=100;
+  var scaleRows=[];for(var sc=70;sc<=130;sc+=5)scaleRows.push(sc);var mCols=[];for(var offset=-6;offset<=6;offset++){var mm=mCur+offset;if(mm>=5&&mm<=50)mCols.push(mm);}if(mCols.indexOf(selM)<0)selM=mCur;
   st.eps=eps0;st.scale=scale;st.m=selM;st.n=N;_ymSel[ticker]=st;
   function pathFor(sc){return _projectionGrowths(proj,N,sc);}function futureEps(sc){return _projectEps(eps0,pathFor(sc));}function annRet(sc,m){return (Math.pow((futureEps(sc)*m)/price,1/N)-1)*100;}function priceMax(sc,m){return futureEps(sc)*m/Math.pow(1+rC/100,N);}function cellColor(v){return v>=rC?'#22c55e':v>=rC-3?'#f59e0b':'#ef4444';}
   var selRet=annRet(scale,selM),fair=priceMax(scale,selM),gap=(fair/price-1)*100,selectedGrowths=_projectionGrowths(proj,N,scale),centralPathTxt=selectedGrowths.map(function(g){return (g>=0?'+':'')+g.toFixed(0)+'%';}).join(' → ');
@@ -6139,28 +6160,12 @@ function renderYieldMatrix(ticker, price, f, fin){
   var sourceBadge='<span style="display:inline-block;margin-left:8px;padding:2px 7px;border-radius:999px;border:1px solid '+qCol+'55;background:'+qCol+'12;color:'+qCol+';font-size:9px;font-weight:750">'+qTxt+'</span>';
   var confidenceNotice=proj.rankable===false?'<div style="margin:-2px 0 12px;padding:7px 10px;border:1px solid rgba(100,116,139,.24);background:rgba(100,116,139,.05);border-radius:8px;font-size:9px;color:var(--muted2);line-height:1.45">Projection indicative : Yahoo ne fournit pas assez de points indépendants pour une confiance élevée.</div>':'';
   var manualBadge=proj.manualActive?'<span style="display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;border:1px solid rgba(99,75,228,.45);background:rgba(99,75,228,.12);color:#a78bfa;font-size:9px;font-weight:750">EPS normalisé manuel</span>':'';
-  var moatBadge=moatInfo.score!=null?'<span style="display:inline-block;margin-left:6px;color:var(--cyan);font-size:9px;font-weight:750">Moat '+moatInfo.score+'/100 → +'+moatInfo.bonus.toFixed(1)+'% sur le P/E</span>':'<span style="display:inline-block;margin-left:6px;color:var(--muted2);font-size:9px">Moat non renseigné → bonus 0%</span>';
+  var moatBadge=moatInfo.score!=null?'<span style="display:inline-block;margin-left:6px;color:var(--cyan);font-size:9px;font-weight:750">Moat '+moatInfo.score+'/100 → '+_moatSigned(moatInfo.bonus)+' sur le P/E</span>':'<span style="display:inline-block;margin-left:6px;color:var(--muted2);font-size:9px">Moat non renseigné → ajustement 0%</span>';
   var baseControls='<div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin:-2px 0 12px;padding:9px 11px;border:1px solid var(--border2);border-radius:8px;background:rgba(255,255,255,.018)"><div><label style="font-size:8px;color:var(--muted);text-transform:uppercase">Base EPS persistante</label><br><select id="ym-base-source" class="form-input" style="min-width:170px;padding:5px"><option value="yahoo"'+(epsMode==='yahoo'?' selected':'')+'>Yahoo (défaut)</option><option value="manual"'+(epsMode==='manual'?' selected':'')+'>Normalisé manuel</option></select></div><div><label style="font-size:8px;color:var(--muted);text-transform:uppercase">EPS normalisé manuel ('+cSym+')</label><br><input id="ym-eps-normalized" class="form-input mono" style="width:125px;padding:5px" value="'+manualEps+'" placeholder="ex : 12.50"></div><button class="btn btn-ghost btn-sm" onclick="window._saveValuationBase(\''+tName+'\')">💾 Enregistrer la base</button><div style="font-size:9px;color:var(--muted);max-width:420px;line-height:1.4">Yahoo reste la source par défaut. Le mode manuel sert uniquement aux résultats réellement exceptionnels/retraités.</div></div>';
-  var dcfPreview=_dcfCompute(ticker,price,f,fin),cohHtml='';
-  if(dcfPreview&&dcfPreview.irr!=null){
-    var diff=Math.abs(selRet-dcfPreview.irr),
-        denom=Math.max(10,(Math.abs(selRet)+Math.abs(dcfPreview.irr))/2),
-        relDiff=diff/denom*100,
-        target=15,
-        decisionMismatch=(selRet>=target)!==(dcfPreview.irr>=target),
-        qualityAlert=!!(dcfPreview.prof&&dcfPreview.prof.dataAlert),
-        cc,cl;
-    var resultConf='moyenne';
-    if(proj.rankable===false){cc='#f59e0b';cl='Projection indicative';resultConf='faible';}
-    else if(decisionMismatch){cc='#ef4444';cl='Désaccord de verdict autour du seuil '+target+'%';resultConf='faible';}
-    else if(qualityAlert){cc='#f59e0b';cl='Cash-flow à contrôler';resultConf='moyenne';}
-    else if(relDiff<=30){cc='#22c55e';cl='Modèles cohérents';resultConf=proj.confidence==='high'?'haute':'moyenne';}
-    else if(relDiff<=60){cc='#26C5DE';cl='Écart notable mais même lecture';resultConf='moyenne';}
-    else{cc='#f59e0b';cl='Écart important entre bénéfice et cash-flow';resultConf='faible';}
-    cohHtml='<div style="margin:0 0 14px;padding:10px 12px;border:1px solid '+cc+'44;background:'+cc+'0d;border-radius:9px;display:flex;gap:20px;align-items:center;flex-wrap:wrap;font-size:10px"><b style="color:'+cc+'">Cohérence des modèles</b><span>Matrice '+N+'A : <b style="color:var(--text)">'+selRet.toFixed(1)+'%/an</b></span><span>DCF 5A : <b style="color:var(--text)">'+dcfPreview.irr.toFixed(1)+'%/an</b></span><span style="color:'+cc+'">'+cl+' · écart relatif '+relDiff.toFixed(0)+'%</span><span>Confiance : <b style="color:'+cc+'">'+resultConf+'</b></span></div>';
-  }else{
-    cohHtml='<div style="margin:0 0 14px;padding:9px 12px;border:1px solid rgba(100,116,139,.22);background:rgba(100,116,139,.04);border-radius:9px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;font-size:10px;color:var(--muted)"><b style="color:var(--text)">1 méthode exploitable</b><span>Matrice '+N+'A : <b style="color:var(--text)">'+selRet.toFixed(1)+'%/an</b></span><span>DCF non exploitable automatiquement · Rend. Valio repose sur la matrice seule.</span><span>Confiance : <b style="color:#f59e0b">limitée</b></span></div>';
-  }
+  var dcfPreview=_dcfCompute(ticker,price,f,fin),dcfReturn=dcfPreview&&dcfPreview.irr!=null?dcfPreview.irr:null;
+  var scenarioConf=_valuationConfidence(selRet,dcfReturn,proj,!!(dcfPreview&&dcfPreview.prof&&dcfPreview.prof.dataAlert));
+  var cohHtml='<div style="margin:0 0 14px;padding:10px 12px;border:1px solid var(--border);border-radius:9px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;font-size:10px"><b>Cohérence des modèles</b><span>Matrice 5A : '+selRet.toFixed(1)+'%/an</span><span>DCF 5A : '+(dcfReturn==null?'indisponible':dcfReturn.toFixed(1)+'%/an')+'</span>'+_valuationConfidenceBadge(scenarioConf.confidence)+(scenarioConf.modelsCount<2?'<span>1 méthode · Matrice seule</span>':'<span>Écart relatif '+scenarioConf.relativeGap.toFixed(0)+'%</span>')+'</div>';
+
   var scenarioName=scale===75?'Bear':scale===125?'Bull':scale===100?'Base':'Personnalisé '+scale+'%';
   var html='<div style="display:flex;align-items:center;gap:6px;margin-bottom:14px">'+tog('5 ans',5)+'<div style="margin-left:16px;display:flex;gap:26px;flex-wrap:wrap"><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Mon scénario — prix max ('+rC+'%/an)</div><div style="font-size:20px;font-weight:800;color:#634BE4" class="mono">'+cSym+fN(fair)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Mon scénario — rendement '+N+' ans</div><div style="font-size:20px;font-weight:800;color:'+cellColor(selRet)+'" class="mono">'+selRet.toFixed(2)+' %/an</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Écart au prix max</div><div style="font-size:20px;font-weight:800;color:'+(gap>=0?'#22c55e':'#f59e0b')+'" class="mono">'+(gap>=0?'+':'')+gap.toFixed(2)+' %</div></div></div></div>'+peRefs+
     '<div style="padding:9px 12px;margin-bottom:12px;border:1px solid rgba(38,197,222,.18);background:rgba(38,197,222,.045);border-radius:8px;font-size:10px;color:var(--muted);line-height:1.55"><b style="color:var(--text)">Projection commune ('+scenarioName+') :</b> '+proj.baseSrc+' · EPS '+cSym+fN(eps0)+' · '+centralPathTxt+' · multiple auto '+mCur.toFixed(1)+'x.'+sourceBadge+manualBadge+moatBadge+(proj.g5!=null?' <span style="color:var(--muted2)">CAGR Yahoo 5 ans : '+proj.g5.toFixed(1)+'%</span>':'')+(proj.growthSignals&&proj.growthSignals.length?' <span style="color:var(--muted2)">· signaux : '+proj.growthSignals.join(' / ')+'</span>':'')+(proj.cyclical?' <span style="color:#f59e0b">Titre cyclique : EPS normalisé mi-cycle.</span>':'')+'</div>'+baseControls+confidenceNotice+
@@ -6187,17 +6192,16 @@ window._saveValuationBase=async function(ticker){
 };
 window._ymSetN=function(ticker,n){var st=_ymSel[ticker]||{};st.n=n;_ymSel[ticker]=st;window._ymRerender(ticker);};
 window._ymScenario=function(ticker,scale){var st=_ymSel[ticker]||{};st.scale=scale;_ymSel[ticker]=st;window._ymRerender(ticker);};
-window._ymApply=function(ticker){function v(id){var e=document.getElementById(id),x=parseFloat((e&&e.value||'').replace(',','.'));return isFinite(x)?x:null;}var st=_ymSel[ticker]||{},eps=v('ym-eps'),sc=v('ym-scale'),m=v('ym-m'),r=v('ym-r');if(eps>0)st.eps=eps;if(sc!=null)st.scale=Math.max(40,Math.min(180,Math.round(sc)));if(m!=null){st.mC=Math.max(5,Math.min(100,Math.round(m)));st.mManual=true;st.m=st.mC;}if(r!=null)st.r=Math.max(1,Math.min(50,r));_ymSel[ticker]=st;window._ymRerender(ticker);};
+window._ymApply=function(ticker){function v(id){var e=document.getElementById(id),x=parseFloat((e&&e.value||'').replace(',','.'));return isFinite(x)?x:null;}var st=_ymSel[ticker]||{},eps=v('ym-eps'),sc=v('ym-scale'),m=v('ym-m'),r=v('ym-r');if(eps>0)st.eps=eps;if(sc!=null)st.scale=Math.max(40,Math.min(180,Math.round(sc)));if(m!=null){st.mC=Math.max(5,Math.min(50,Math.round(m)));st.mManual=true;st.m=st.mC;}if(r!=null)st.r=Math.max(1,Math.min(50,r));_ymSel[ticker]=st;window._ymRerender(ticker);};
 window._ymReset=function(ticker){delete _ymSel[ticker];window._ymRerender(ticker);};
 window._ymRerender=function(ticker){var f=(S.fundamentals&&S.fundamentals[ticker])||null,price=window._cdLastNativePrice||(S.prices[ticker]&&S.prices[ticker].price);renderYieldMatrix(ticker,price,f,window._cdLastFin||{eps:[],freeCF:[],operatingCF:[],netIncome:[]});};
 window._ymPick=function(ticker,sc,m){var st=_ymSel[ticker]||{};st.scale=sc;st.m=m;_ymSel[ticker]=st;window._ymRerender(ticker);};
 
 // Transparence du calcul du multiple de sortie
-window._ymDetail=function(ticker, gTerminal){
-  var f=(S.fundamentals&&S.fundamentals[ticker])||null;if(!f){showToast('Données insuffisantes');return;}
-  var analysis=_analysisDataFor(ticker),mb=_moatPEBonusPct(analysis),g=+gTerminal,base=Math.max(12,Math.min(40,9+.80*g)),result=estimateExitMultiple(f,g,null,analysis);
-  var moatTxt=mb.score==null?'Moat non renseigné : bonus 0%.':'Moat '+mb.score+'/100 : bonus +'+mb.bonus.toFixed(1)+'%.';
-  showModal('<div class="modal-hd"><h2>🔍 Multiple de sortie central</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px"><div class="card"><div style="font-size:10px;color:var(--muted)">Croissance EPS année 5</div><div style="font-size:18px;font-weight:800">'+g.toFixed(1)+'%</div></div><div class="card"><div style="font-size:10px;color:var(--muted)">P/E croissance seul</div><div style="font-size:18px;font-weight:800">'+base.toFixed(1)+'x</div></div><div class="card"><div style="font-size:10px;color:var(--muted)">P/E final avec Moat</div><div style="font-size:18px;font-weight:800;color:var(--cyan)">'+result.toFixed(1)+'x</div></div></div><div style="font-size:12px;color:var(--muted);line-height:1.7">Règle V25 : <b style="color:var(--text)">P/E croissance = 9 + 0,80 × croissance EPS A5</b> (plancher 12x, plafond 40x), puis <b style="color:var(--text)">P/E final = P/E croissance × (1 + bonus Moat)</b>. '+moatTxt+' Le bonus Moat est progressif et plafonné à +30%, puis le P/E final est plafonné à 45x. Le multiple reste modifiable manuellement.</div>');
+window._ymDetail=function(ticker,gTerminal){
+  var info=_exitMultipleInfo(gTerminal,_analysisDataFor(ticker)),mb=info.moat;
+  var h='<div class="modal-hd"><h2>Multiple de sortie central</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="line-height:1.8;font-size:12px">Croissance EPS année 5 : <b>'+info.growth.toFixed(1)+'%</b><br>PER croissance : <b>'+info.base.toFixed(1)+'×</b> = 9 + 0,8 × croissance A5, borné à 12–40×.<br>Moat : <b>'+(mb.score==null?'non renseigné':mb.score+'/100')+'</b> · ajustement <b>'+_moatSigned(mb.bonus)+'</b>.<br>PER avant plafond : <b>'+info.adjusted.toFixed(1)+'×</b><br>Plafond automatique : <b>'+info.cap+'×</b> · '+(info.eligible?'conditions 50× réunies':'50× exige Moat ≥90, post-IA ≥36/40 et croissance EPS A5 ≥30%')+'.<br>PER retenu : <b style="color:var(--cyan)">'+info.value.toFixed(1)+'×</b> (arrondi au demi-point).<br>Le malus s’applique après le plancher de croissance : le résultat peut être inférieur à 12×. Les scénarios manuels restent plafonnés à 50×. La croissance EPS n’est pas modifiée.</div>'+_moatRulesHtml();
+  showModal(h);
 };
 
 function cdValChart(id, years, vals, currentRatio, label) {
