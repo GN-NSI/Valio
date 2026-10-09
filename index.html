@@ -414,7 +414,7 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 @media(max-width:768px){.perf-treemap{height:520px}.risk-compact .metric-box{min-height:86px}}
 </style>
 
-<style>.modal.moat-modal{width:min(980px,95vw);max-width:95vw}</style></head>
+<style>.modal.moat-modal{width:min(980px,95vw);max-width:95vw}</style><style>.account-sort-button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;white-space:nowrap}.account-sort-button:focus-visible{outline:2px solid var(--cyan);outline-offset:4px}.account-header{flex-wrap:wrap}.account-card [hidden]{display:none!important}</style></head>
 <body>
 <style>
 /* Fix global : supprimer les espaces noirs à droite sur toutes les pages */
@@ -1554,13 +1554,13 @@ function posTblRows(pos){
   return pos.map(p=>{
     const d=manualPrices[p.ticker]||S.prices[p.ticker];
     const priceLoaded=d?.price!=null&&p.valueEur!=null;
-    const noPrice=d&&!d.price;
+    const noPrice=d&&d.price==null;
     const usd=d?(d.currency||'USD')==='USD':true;
     const chg=d?.changePct??0;
 
     const _cur=(d&&d.currency)||'USD'; const _dispP=d?((_cur==='USD'||_cur==='EUR')?d.price:toEur(d.price,_cur)):null; const _sym=_cur==='USD'?'$':'€';
     const priceHTML=priceLoaded
-      ?`<span class="mono">${d.manual?'✎ ':''}`+_sym+`${fN(_dispP)}</span>`
+      ?`<span class="mono">${d.manual?'✎ ':''}`+_sym+`${fN(_dispP)}</span>`+(_isLeveragedTicker(p.ticker)?`<button class="manual-btn" onclick="event.stopPropagation();setManualPrice('${p.ticker}')">✎</button><div style="font-size:9px;color:var(--muted)">${_esc(d.label||'Cours manuel')}</div>`:'')
       :noPrice?`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix</button>`
       :`<div class="shimmer" style="width:55px;height:14px"></div>`;
 
@@ -1590,6 +1590,7 @@ function posTblRows(pos){
 }
 
 function openCompanyFromPos(ticker, name){
+  if(_isLeveragedTicker(ticker))return setManualPrice(ticker);
   openCompanyDetail(ticker, name);
 }
 function renderPosBody(sorted){const el=document.getElementById('pos-body');if(el)el.innerHTML=posTblRows(sorted);}
@@ -1599,18 +1600,19 @@ async function fetchOneTicker(p){
   const $=id=>document.getElementById(id);
   try{
     let d=manualPrices[p.ticker]||S.prices[p.ticker];
+    if(_isLeveragedTicker(p.ticker)&&!d){d=_lastProductQuote(p.ticker);if(d)S.prices[p.ticker]=d;}
     if(!d||(!d.manual&&Date.now()-(d._t||0)>60000)){
       const ctrl=new AbortController();const tid=setTimeout(()=>ctrl.abort(),9000);
       try{const r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker),{signal:ctrl.signal});d=await r.json();}
       finally{clearTimeout(tid);}
       d._t=Date.now();S.prices[p.ticker]=d;
     }
-    if(!d?.price){if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix ✎</button>`;return;}
+    if(d?.price==null){if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix ✎</button>`;return;}
     const _fc=d.currency||'USD'; const pe=toEur(d.price,_fc); const _fdp=(_fc==='USD'||_fc==='EUR')?d.price:pe; const _fs=_fc==='USD'?'$':'€';
     const ve=pe*p.quantity,pnl=ve-p.totalCostEur,pct=p.totalCostEur>0?(pnl/p.totalCostEur)*100:0,chg=d.changePct??0;
     p.priceEur=pe;p.valueEur=ve;p.pnlEur=pnl;p.pnlPct=pct;p.dayChgPct=chg;
     // Cellule Prix (cours uniquement, sans variation)
-    if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<span class="mono">${_fs}${fN(_fdp)}</span>`;
+    if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<span class="mono">${_fs}${fN(_fdp)}</span>`+(_isLeveragedTicker(p.ticker)?`<button class="manual-btn" onclick="event.stopPropagation();setManualPrice('${p.ticker}')">✎</button><div style="font-size:9px;color:var(--muted)">${_esc(d.label||'Cours manuel')}</div>`:'');
     // Cellule Var. Jour (colonne séparée, triable)
     const djEl=$('dj-'+p.ticker);
     if(djEl)djEl.innerHTML=Math.abs(chg)>=0.01
@@ -1659,7 +1661,7 @@ function updateKPIs(pos){
     _pfPerfState.allPnlEur=pnlTotal;
   }
 
-  const twrAll=(typeof _pfPerfState!=='undefined'&&_pfPerfState&&_pfPerfState.allTwr!=null)?_pfPerfState.allTwr:null;
+  const twrAll=S.transactions.some(t=>_isLeveragedTicker(t.ticker))?null:(typeof _pfPerfState!=='undefined'&&_pfPerfState&&_pfPerfState.allTwr!=null)?_pfPerfState.allTwr:null;
   const twrTxt=twrAll==null?'calcul…':_pfPerfFmt(twrAll);
   const twrColor=twrAll==null?'var(--muted)':_pfPerfColor(twrAll);
 
@@ -2264,9 +2266,71 @@ function _valuationCellHtml(ticker){
   return '<div class="mono" style="font-weight:800;color:'+mainColor+'" title="'+title+'">'+prefix+s.avg.toFixed(1)+'%</div>'+
          '<div style="font-size:8px;color:var(--muted2)">M '+mTxt+' · D '+dTxt+'</div>';
 }
+// Produits cotés à levier : quantité et cours DU PRODUIT, jamais du sous-jacent.
+var LEVERAGE_MARKER='\n[VALIO_LEVERAGE_V1]';
+function _instrumentFromTx(tx){
+  var notes=tx&&tx.notes||'',i=notes.lastIndexOf(LEVERAGE_MARKER);
+  if(i<0)return null;
+  try{var m=JSON.parse(notes.slice(i+LEVERAGE_MARKER.length));return m.kind==='turbo'&&m.version===1?m:null;}catch(e){return null;}
+}
+function _instrumentNotes(tx){var n=tx&&tx.notes||'',i=n.lastIndexOf(LEVERAGE_MARKER);return i<0?n:n.slice(0,i);}
+function _isLeveragedTicker(ticker){return /^TURBO:/.test(ticker||'');}
+function _instrumentFor(ticker){var tx=S.transactions.find(function(t){return t.ticker===ticker&&_instrumentFromTx(t);});return _instrumentFromTx(tx);}
+function _instrumentCaption(ticker){var m=_instrumentFor(ticker);return m?' · '+_esc(m.underlying)+' · '+(m.direction==='short'?'Baissier':'Haussier')+(m.leverage!=null?' · levier saisi ×'+m.leverage:''):'';}
+function _moatTableColor(score){return score>=85?'var(--green)':score>=75?'var(--yellow)':score>=65?'#f59e0b':'var(--red)';}
+function _leverageForm(tx){
+ var m=_instrumentFromTx(tx)||{},is=!!m;
+ return '<div id="leverage-fields" style="display:'+(is?'block':'none')+';padding:12px;background:var(--bg2);border-radius:8px;margin-bottom:12px"><div style="font-size:11px;color:var(--muted);margin-bottom:10px">Ticker : ISIN ou identifiant du produit chez ton courtier. Quantité et prix : ceux du turbo/certificat. Le levier est indicatif, il ne multiplie pas les montants.</div><div class="form-row"><div class="form-group"><label class="form-label">Sous-jacent *</label><input class="form-input" id="m-lev-underlying" placeholder="NVDA" value="'+_esc(m.underlying||'')+'"></div><div class="form-group"><label class="form-label">Sens</label><select class="form-input" id="m-lev-direction"><option value="long">Haussier / Call</option><option value="short"'+(m.direction==='short'?' selected':'')+'>Baissier / Put</option></select></div></div><div class="form-row"><div class="form-group"><label class="form-label">Levier à la transaction (optionnel)</label><input class="form-input" id="m-lev-factor" type="number" min="1" step="any" placeholder="3" value="'+(m.leverage==null?'':m.leverage)+'"></div><div class="form-group"><label class="form-label">Barrière, devise du sous-jacent (optionnel)</label><input class="form-input" id="m-lev-barrier" type="number" min="0" step="any" value="'+(m.barrier==null?'':m.barrier)+'"></div></div><div style="font-size:11px;color:var(--muted)">Cours du produit à actualiser depuis le portefeuille via « ✎ ». Une clôture à zéro est possible si le produit est désactivé. Pas de détection automatique de la barrière.</div></div>';
+}
+function onInstrumentChange(){var active=document.getElementById('m-asset').value==='turbo',el=document.getElementById('leverage-fields');if(el)el.style.display=active?'block':'none';}
+function _txValidationError(d){
+ if(d._error)return d._error;
+ if(!d.ticker||!d.name||!d.transaction_date||!d.account_id)return 'Champs obligatoires manquants';
+ if(!Number.isFinite(d.quantity)||d.quantity<=0)return 'Quantité invalide';
+ if(!Number.isFinite(d.price)||d.price<0||(d.price===0&&!(d.transaction_type==='sell'&&_isLeveragedTicker(d.ticker))))return 'Prix invalide : zéro est réservé à la clôture d’un produit à levier';
+ if(!Number.isFinite(d.fees)||d.fees<0)return 'Frais invalides';
+ if(d.transaction_type==='sell'&&_isLeveragedTicker(d.ticker)){
+  var qty=S.transactions.filter(function(t){return t.account_id===d.account_id&&t.ticker===d.ticker&&t.id!==window._editingTxId&&t.transaction_date<=d.transaction_date;}).reduce(function(q,t){return q+(t.transaction_type==='buy'?1:-1)*t.quantity;},0);
+  if(d.quantity>qty+1e-7)return 'La vente dépasse la quantité détenue sur ce compte à cette date';
+ }
+ return null;
+}
+function _finalizeInstrumentForm(d){
+ if(document.getElementById('m-asset').value!=='turbo'){
+  if(_isLeveragedTicker(d.ticker))d._error='Un identifiant TURBO doit conserver le type Turbo / certificat';
+  return d;
+ }
+ var id=d.ticker.replace(/^TURBO:/,'').trim(),underlying=document.getElementById('m-lev-underlying').value.trim().toUpperCase();
+ var lev=document.getElementById('m-lev-factor').value.trim(),bar=document.getElementById('m-lev-barrier').value.trim();
+ var m={version:1,kind:'turbo',underlying:underlying,direction:document.getElementById('m-lev-direction').value,leverage:lev===''?null:Number(lev),barrier:bar===''?null:Number(bar)};
+ if(!/^[A-Z0-9._-]+$/.test(id)||!underlying||id===underlying)d._error='Renseigne un identifiant de produit distinct du sous-jacent et son ticker sous-jacent';
+ else if((m.leverage!=null&&(!Number.isFinite(m.leverage)||m.leverage<1))||(m.barrier!=null&&(!Number.isFinite(m.barrier)||m.barrier<=0)))d._error='Levier ou barrière invalide';
+ d.ticker='TURBO:'+id;d.asset_type='stock';
+ d.notes=(d.notes||'')+LEVERAGE_MARKER+JSON.stringify(m);
+ return d;
+}
+function _lastProductQuote(ticker){
+ var txs=S.transactions.filter(function(t){return t.ticker===ticker;}).slice().sort(function(a,b){return b.transaction_date.localeCompare(a.transaction_date);});
+ var t=txs[0];return t?{price:t.price,currency:t.currency,manual:true,changePct:0,_t:Date.now(),label:'Dernier prix de transaction · '+t.transaction_date}:null;
+}
+async function _setProductPrice(ticker){
+ var tx=S.transactions.find(function(t){return t.ticker===ticker;}),currency=tx&&tx.currency||'EUR';
+ var cur=manualPrices[ticker]||S.prices[ticker];
+ var val=prompt('Cours du turbo/certificat en '+currency+' (0 si valeur nulle) :',cur&&cur.price!=null?String(cur.price):'');
+ if(val==null||!val.trim())return;
+ var price=Number(val.replace(/\s/g,'').replace(',','.'));if(!Number.isFinite(price)||price<0)return showToast('❌ Cours invalide');
+ try{await dbUpsert('manual_prices',{ticker:ticker,price:price,currency:currency,updated_at:new Date().toISOString(),updated_by:getUser().id},'ticker');}
+ catch(e){return showToast('❌ Cours non enregistré : '+e.message);}
+ var quote={price:price,currency:currency,manual:true,changePct:0,_t:Date.now(),label:'Cours saisi · '+new Date().toLocaleDateString('fr-FR')};
+ manualPrices[ticker]=quote;S.prices[ticker]=quote;
+ var p=S.enrichedPos.find(function(p){return p.ticker===ticker;});if(p)await fetchOneTicker(p);
+ saveCache();if(S.page==='portfolio'){updateKPIs(S.enrichedPos);renderPosBody(sortPos(S.enrichedPos));renderDonut();}
+ showToast('Cours du produit enregistré');
+}
+
 function _moatCellHtml(ticker){
   var result=_moatPEBonusPct(_analysisDataFor(ticker));
-  return result.score==null?'<span title="Moat 2030 non renseigné" style="color:var(--muted)">—</span>':'<span class="mono" title="Moat 2030 · note enregistrée sur 100">'+result.score+'/100</span>';
+  return result.score==null?'<span title="Moat 2030 non renseigné" style="color:var(--muted)">—</span>':'<span class="mono" style="color:'+_moatTableColor(result.score)+'" title="Moat 2030 · note enregistrée sur 100">'+result.score+'/100</span>';
 }
 function _updateMoatCell(prefix,ticker){
   var el=document.getElementById(prefix+'-'+ticker.replace(/[^a-zA-Z0-9]/g,'_')+'-moat');
@@ -2574,7 +2638,7 @@ async function renderScreener(){
   pg.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:22px">'+
     '<div>'+
       '<h2 style="font-size:18px;font-weight:700">Screener</h2>'+
-      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V32 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
+      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V34 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
     '</div>'+
     '<button onclick="_toggleScrWatch()" style="padding:6px 14px;border:1px solid var(--border2);border-radius:20px;background:'+_wBg+';color:'+_wColor+';font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">'+
       '⭐ Watchlist — '+(_scrShowWatch?'<b>ON</b>':'OFF')+
@@ -2587,7 +2651,7 @@ async function renderScreener(){
     catch(e){ /* continuer même si la watchlist échoue */ }
   }
 
-  var pfPos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p);});
+  var pfPos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);});
   var wlOnly=watchlistItems.filter(function(w){return !pfPos.find(function(p){return p.ticker===w.ticker;});});
   var wlMapped=_scrShowWatch?wlOnly.map(function(w){return {ticker:w.ticker,name:w.name,_isWatch:true};}):[];
   var allItems=sortItems(pfPos.concat(wlMapped),scSort);
@@ -2633,7 +2697,7 @@ async function renderScreener(){
 }
 
 async function loadScreenerRatios(force){
-  var pfPos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p);});
+  var pfPos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);});
   var wlOnly=watchlistItems.filter(function(w){return !pfPos.find(function(p){return p.ticker===w.ticker;});});
   var allItems=pfPos.concat(wlOnly.map(function(w){return {ticker:w.ticker,name:w.name};}));
   var BATCH=6,DELAY=100;
@@ -3204,6 +3268,7 @@ window.showQualityDetail=function(k){
 };
 
 async function renderCompanyDetail(ticker, name) {
+  if(_isLeveragedTicker(ticker)){document.getElementById('page').innerHTML='<div class="card" style="padding:24px"><h2>Turbo / certificat</h2><p>'+_esc(name||ticker)+_instrumentCaption(ticker)+'</p><p>Le prix et les résultats suivent le produit, sans appliquer son levier au rendement de l’action.</p><button class="btn btn-primary" onclick="setManualPrice(\''+ticker+'\')">Actualiser le cours du produit</button><button class="btn btn-ghost" onclick="navigate(\'accounts\')">Transactions</button></div>';return;}
   var pg = document.getElementById('page');
   pg.innerHTML = '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">' +
     '<button class="btn btn-ghost btn-sm" onclick="navigate(\''+_prevPage+'\')">← Retour</button>' +
@@ -6317,6 +6382,7 @@ function _currencyFromSuffix(ticker){
 }
 
 async function fetchPriceHistory(ticker, range){
+  if(_isLeveragedTicker(ticker))return [];
   var key=ticker+'_'+range;
   if(_priceHistCache[key]&&_priceHistCache[key].length) return _priceHistCache[key];
   try{
@@ -7481,6 +7547,7 @@ function _pfCalcDayReturn(pos){
 }
 
 function _pfUpdateMainPerformanceKpi(){
+  if(S.transactions.some(t=>_isLeveragedTicker(t.ticker))){var e=document.getElementById('kpi-performance-twr');if(e)e.textContent='indisponible';return;}
   var el=document.getElementById('kpi-performance-twr');
   if(el){
     el.textContent=_pfPerfState.allTwr==null?'calcul…':_pfPerfFmt(_pfPerfState.allTwr);
@@ -7579,6 +7646,7 @@ function _pfDrawPerformanceChart(){
 }
 
 function showPerformanceDetail(){
+  if(S.transactions.some(t=>_isLeveragedTicker(t.ticker)))return showModal('<div class="modal-hd"><h2>Performance</h2><button class="modal-close" onclick="closeModal()">✕</button></div><p>Plus-values latentes et réalisées incluses dans le portefeuille. TWR et courbes indisponibles sans historique des turbos/certificats.</p>');
   var html='<div class="modal-hd" style="margin-bottom:16px">'+
     '<div><h2 style="font-size:19px">Performance du portefeuille</h2><div style="font-size:11px;color:var(--muted);margin-top:3px">TWR, rendement simple et gain/perte en euros</div></div>'+
     '<div style="display:flex;align-items:center;gap:10px"><span id="pf-detail-loading" class="perf-loading-inline" style="display:none"><span class="spinner"></span> Calcul…</span><button class="modal-close" onclick="closeModal()">✕</button></div></div>'+
@@ -7667,6 +7735,7 @@ async function refreshPortfolioPerformance(){
 // TWR = ∏(1+r_i) − 1. Neutralise l'effet des montants déposés : seule la
 // qualité des choix compte. Courbe rebasée à 0% au début de la fenêtre.
 async function buildPortfolioLine(transactions, range, windowStartOverride){
+  if((transactions||[]).some(function(t){return _isLeveragedTicker(t.ticker);}))return [];
   var txns=(transactions||[]).filter(function(t){return t.ticker;})
     .slice().sort(function(a,b){return new Date(a.transaction_date)-new Date(b.transaction_date);});
   if(!txns.length) return [];
@@ -8190,7 +8259,7 @@ function renderScreenerTable(sort){
   // Re-sort and re-render screener rows only
   var tbody=document.querySelector('#sc-content table tbody');
   if(!tbody) return;
-  var pfPos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p);});
+  var pfPos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);});
   var wlOnly=watchlistItems.filter(function(w){return !pfPos.find(function(p){return p.ticker===w.ticker;});});
   var allItems=sortItems(pfPos.concat(_scrShowWatch?wlOnly.map(function(w){return {ticker:w.ticker,name:w.name,_isWatch:true};}):[]),sort);
   var _totalPf=S.enrichedPos.reduce(function(s,p){return s+(p.valueEur||0);},0);
@@ -8530,6 +8599,7 @@ function setPerfTreemapMode(mode){
   _renderPerfTreemap();
 }
 function renderPerformancePage(){
+  if(S.transactions.some(function(t){return _isLeveragedTicker(t.ticker);})){document.getElementById('page').innerHTML='<div class="card" style="padding:24px"><h2>Performance historique</h2><p>Le portefeuille contient des transactions de turbos/certificats sans historique de cours. Le TWR et les courbes globales ne sont pas calculés pour éviter une performance incomplète. Les valeurs, plus-values latentes et réalisées restent disponibles dans le portefeuille.</p><button class="btn btn-primary" onclick="navigate(\'portfolio\')">Portefeuille</button></div>';return;}
   var pg=document.getElementById('page'); if(!pg)return;
   pg.innerHTML='<div class="valio-head"><div><div class="valio-kicker">Performance intelligence</div><h2>Performance du portefeuille</h2><div class="valio-desc">Vue globale, attribution par action et carte visuelle des gains/pertes. La contribution en points explique ta performance du portefeuille ; elle ne mesure pas la surperformance face à un indice.</div></div><button class="btn btn-ghost btn-sm" onclick="refreshPortfolioPerformance()">↻ Recalculer</button></div>'+ 
     '<div class="perf-subtabs">'+
@@ -8722,6 +8792,7 @@ function showRiskContributionDetail(ticker){
   showModal('<div class="modal-hd"><h2>'+x.name+' · contribution au risque</h2><button class="modal-close" onclick="closeModal()">✕</button></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px"><div class="perf-summary-card"><div class="perf-summary-label">Poids</div><div class="perf-summary-value" style="font-size:22px">'+x.weight.toFixed(1)+'%</div></div><div class="perf-summary-card"><div class="perf-summary-label">Contribution risque</div><div class="perf-summary-value" style="font-size:22px">'+x.riskPct.toFixed(1)+'%</div></div><div class="perf-summary-card"><div class="perf-summary-label">Volatilité 1A</div><div class="perf-summary-value" style="font-size:22px">'+_riskFmt(x.vol,1)+'%</div></div></div><div style="font-size:12px;color:var(--muted);line-height:1.65">Corrélation moyenne pondérée avec le reste du portefeuille : <b style="color:var(--text)">'+(x.avgCorr==null?'—':x.avgCorr.toFixed(2))+'</b> · moyenne simple avec toutes les autres positions : <b style="color:var(--text)">'+(x.avgCorrAll==null?'—':x.avgCorrAll.toFixed(2))+'</b>.<br><br>Si la contribution au risque est nettement supérieure au poids, la ligne apporte proportionnellement plus de variance que de capital. Cela peut venir d’une forte volatilité, de corrélations positives avec les autres grosses lignes, ou des deux.</div>');
 }
 async function renderRiskXray(){
+  if(computePositions().some(function(p){return _isLeveragedTicker(p.ticker);})){document.getElementById('page').innerHTML='<div class="card" style="padding:24px"><h2>Risque du portefeuille</h2><p>Les turbos/certificats sont inclus dans la valeur et les pondérations du portefeuille. Sans leur historique de cours, la volatilité, le bêta et les corrélations du portefeuille complet ne sont pas calculés.</p></div>';return;}
   var pg=document.getElementById('page'),pos=(S.enrichedPos.length?S.enrichedPos:computePositions()).filter(function(p){return p.quantity>1e-7&&(p.valueEur||0)>0;});
   pg.innerHTML='<div class="valio-head"><div><div class="valio-kicker">Risk intelligence</div><h2>Portfolio X-Ray</h2><div class="valio-desc">Composition actuelle · 1 an. Clique sur chaque carte ou cellule pour comprendre le calcul et les ordres de grandeur.</div></div><button class="btn btn-ghost btn-sm" onclick="_riskAnalyticsCache={t:0,data:null};renderRiskXray()">↻ Recalculer</button></div><div style="text-align:center;padding:60px"><div class="spinner"></div></div>';
   try{
@@ -8854,6 +8925,40 @@ window.deleteJournal=async function(id){
 };
 
 // ═══ ACCOUNTS PAGE ═══
+var ACCOUNT_TX_SORT_COLUMNS=['title','date','type','quantity','price','fees','total'];
+function _accountPrefsKey(){var u=getUser();return 'valio_account_view_v34_'+(u&&u.id||'local');}
+function _accountPrefs(){try{var p=JSON.parse(localStorage.getItem(_accountPrefsKey())||'{}');return p&&typeof p==='object'&&!Array.isArray(p)?p:{};}catch(e){return {};}}
+function _accountView(id){var p=_accountPrefs()[id]||{},sort=p.sort||{};return {collapsed:p.collapsed===true,sort:{col:ACCOUNT_TX_SORT_COLUMNS.includes(sort.col)?sort.col:'date',dir:sort.dir==='asc'?'asc':'desc'}};}
+function _saveAccountView(id,state){var p=_accountPrefs();p[id]=state;try{localStorage.setItem(_accountPrefsKey(),JSON.stringify(p));}catch(e){}}
+function toggleAccountEnvelope(id){var v=_accountView(id);v.collapsed=!v.collapsed;_saveAccountView(id,v);renderAccounts();var b=document.getElementById('account-toggle-'+id);if(b)b.focus();}
+function sortAccountTransactions(id,col){
+ if(!ACCOUNT_TX_SORT_COLUMNS.includes(col))return;
+ var v=_accountView(id);v.sort=v.sort.col===col?{col:col,dir:v.sort.dir==='desc'?'asc':'desc'}:{col:col,dir:col==='title'||col==='type'?'asc':'desc'};
+ _saveAccountView(id,v);renderAccounts();var b=document.getElementById('account-sort-'+id+'-'+col);if(b)b.focus();
+}
+function _accountTxSortValue(t,col){
+ if(col==='title')return String(t.name||t.ticker||'');
+ if(col==='type')return t.transaction_type==='buy'?'Achat':'Vente';
+ if(col==='date'){var date=Date.parse(t.transaction_date);return Number.isFinite(date)?date:null;}
+ var value=col==='total'?Number(t.quantity)*Number(t.price)+Number(t.fees||0):Number(t[col]??(col==='fees'?0:NaN));
+ if(!Number.isFinite(value))return null;
+ return ['price','fees','total'].includes(col)?toEur(value,t.currency||'EUR'):value;
+}
+function _accountSortedTransactions(id){
+ var sort=_accountView(id).sort;
+ return S.transactions.filter(function(t){return t.account_id===id;}).map(function(t,i){return {tx:t,index:i};}).sort(function(a,b){
+  var av=_accountTxSortValue(a.tx,sort.col),bv=_accountTxSortValue(b.tx,sort.col);
+  if(av==null&&bv!=null)return 1;if(bv==null&&av!=null)return -1;
+  var diff=av==null&&bv==null?0:typeof av==='string'?av.localeCompare(bv,'fr',{numeric:true,sensitivity:'base'}):av-bv;
+  return (sort.dir==='desc'?-diff:diff)||a.index-b.index;
+ }).map(function(row){return row.tx;});
+}
+function _accountSortHeader(id,label,col){
+ var sort=_accountView(id).sort,active=sort.col===col,arrow=active?(sort.dir==='asc'?'▲':'▼'):'↕';
+ var money=['price','fees','total'].includes(col),tip=money?'Tri par montant équivalent en EUR':'Trier par '+label;
+ return '<th'+(col==='title'?' style="text-align:left"':'')+' aria-sort="'+(active?(sort.dir==='asc'?'ascending':'descending'):'none')+'"><button type="button" id="account-sort-'+_esc(id)+'-'+col+'" class="account-sort-button" title="'+tip+'" onclick="sortAccountTransactions(\''+_esc(id)+'\',\''+col+'\')">'+label+' <span style="font-size:9px;opacity:.6">'+arrow+'</span></button></th>';
+}
+
 function renderAccounts(){
   const pg=document.getElementById('page');
   if(!S.accounts.length){pg.innerHTML=`<div class="empty-state"><div class="icon">💳</div><h3>Aucun compte</h3><p>Crée tes comptes pour commencer</p><button class="btn btn-primary" style="width:auto" onclick="openAddAccount()">+ Créer un compte</button></div>`;return;}
@@ -8864,21 +8969,23 @@ function renderAccounts(){
 }
 
 function renderAcctCard(a){
-  const txs=S.transactions.filter(t=>t.account_id===a.id).sort((x,y)=>new Date(y.transaction_date)-new Date(x.transaction_date));
+  const txs=_accountSortedTransactions(a.id);const view=_accountView(a.id);
   const ic={PEA:'🏦',CTO:'💼',PER:'🔒',AV:'📋',AUTRE:'💳'};const c=acctColor(a.name);
   return`<div class="account-card">
     <div class="account-header">
       <div class="account-icon">${ic[a.type]||'💳'}</div>
       <div style="flex:1;min-width:100px"><div style="font-size:16px;font-weight:700">${a.name}</div><div style="font-size:12px;color:var(--muted);margin-top:2px">${txs.length} transaction${txs.length!==1?'s':''} · ${a.currency}</div></div>
+      <button type="button" class="btn btn-ghost btn-sm" id="account-toggle-${_esc(a.id)}" aria-expanded="${!view.collapsed}" aria-controls="account-body-${_esc(a.id)}" onclick="toggleAccountEnvelope('${a.id}')" title="${view.collapsed?'Déplier':'Plier'} cette enveloppe">${view.collapsed?'▸ Déplier':'▾ Plier'}</button>
       <span class="type-badge" style="background:${c.bg};color:${c.color}">${a.type}</span>
       <button class="btn btn-ghost btn-sm" onclick="openAddTransaction('${a.id}')">+ Transaction</button>
       <button class="btn btn-danger btn-sm" onclick="deleteAccount('${a.id}','${a.name}')">Supprimer</button>
     </div>
+    <div id="account-body-${_esc(a.id)}"${view.collapsed?' hidden':''}>
     ${txs.length===0?`<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">Aucune transaction · <span style="color:var(--blue);cursor:pointer" onclick="openAddTransaction('${a.id}')">Ajouter la première</span></div>`:
     `<div class="tbl-wrap"><table>
-      <thead><tr><th style="text-align:left">Titre</th><th>Date</th><th>Type</th><th>Qté</th><th>Prix unit.</th><th>Frais</th><th>Total</th><th>Actions</th></tr></thead>
+      <thead><tr>${_accountSortHeader(a.id,'Titre','title')}${_accountSortHeader(a.id,'Date','date')}${_accountSortHeader(a.id,'Type','type')}${_accountSortHeader(a.id,'Qté','quantity')}${_accountSortHeader(a.id,'Prix unit.','price')}${_accountSortHeader(a.id,'Frais','fees')}${_accountSortHeader(a.id,'Total','total')}<th>Actions</th></tr></thead>
       <tbody>${txs.map(tx=>`<tr>
-        <td style="text-align:left"><div class="ticker-name">${tx.name}</div><div class="ticker-sym">${tx.ticker}</div></td>
+        <td style="text-align:left"><div class="ticker-name">${tx.name}</div><div class="ticker-sym">${_esc(tx.ticker)}${_instrumentCaption(tx.ticker)}</div></td>
         <td class="mono c-muted" style="font-size:12px">${fD(tx.transaction_date)}</td>
         <td><span class="badge ${tx.transaction_type==='buy'?'badge-green':'badge-red'}">${tx.transaction_type==='buy'?'▲ Achat':'▼ Vente'}</span></td>
         <td class="mono">${fQ(tx.quantity)}</td><td class="mono">${fN(tx.price)} ${cS(tx.currency)}</td>
@@ -8887,6 +8994,7 @@ function renderAcctCard(a){
         <td style="white-space:nowrap"><button class="btn btn-edit btn-sm" style="margin-right:4px" onclick="openEditTx('${tx.id}')">✏️</button><button class="btn btn-danger btn-sm" onclick="deleteTx('${tx.id}')">✕</button></td>
       </tr>`).join('')}</tbody>
     </table></div>`}
+    </div>
   </div>`;
 }
 
@@ -8901,26 +9009,27 @@ function openAddAccount(){showModal(`<div class="modal-hd"><h2>Créer un compte<
     <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveAccount()">Créer</button></div>`);}
 async function saveAccount(){const name=document.getElementById('m-name').value.trim(),type=document.getElementById('m-type').value,currency=document.getElementById('m-curr').value;if(!name)return showToast('❌ Donne un nom');try{const d=await dbPost('accounts',{user_id:getUser().id,name,type,currency});S.accounts.push(d);closeModal();showToast('✅ Compte créé');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
 async function deleteAccount(id,name){if(!confirm(`Supprimer "${name}" et toutes ses transactions ?`))return;try{await dbDel('accounts','id=eq.'+id);S.accounts=S.accounts.filter(a=>a.id!==id);S.transactions=S.transactions.filter(t=>t.account_id!==id);showToast('✅ Supprimé');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
-function txForm(pre=null,tx=null){const ie=!!tx;return`<div class="modal-hd"><h2>${ie?'Modifier':'Ajouter une transaction'}</h2><button class="modal-close" onclick="closeModal()">✕</button></div>
+function txForm(pre=null,tx=null){const ie=!!tx;window._editingTxId=tx&&tx.id||null;const instrument=_instrumentFromTx(tx);return`<div class="modal-hd"><h2>${ie?'Modifier':'Ajouter une transaction'}</h2><button class="modal-close" onclick="closeModal()">✕</button></div>
     <div class="form-group"><label class="form-label">Compte *</label><select id="m-acct" class="form-input" onchange="onAcctChange()">${S.accounts.map(a=>`<option value="${a.id}" ${a.id===(tx?.account_id||pre)?'selected':''}>${a.name} (${a.type})</option>`).join('')}</select></div>
-    <div class="form-row"><div class="form-group"><label class="form-label">Ticker *</label><input type="text" id="m-ticker" class="form-input" placeholder="ex: NVDA" value="${tx?.ticker||''}" oninput="this.value=this.value.toUpperCase()"></div><div class="form-group"><label class="form-label">Nom *</label><input type="text" id="m-aname" class="form-input" placeholder="ex: Nvidia" value="${tx?.name||''}"></div></div>
-    <div class="form-row"><div class="form-group"><label class="form-label">Type d'actif</label><select id="m-asset" class="form-input"><option value="stock" ${tx?.asset_type==='stock'||!tx?'selected':''}>Action</option><option value="etf" ${tx?.asset_type==='etf'?'selected':''}>ETF</option><option value="crypto" ${tx?.asset_type==='crypto'?'selected':''}>Crypto</option></select></div><div class="form-group"><label class="form-label">Transaction</label><select id="m-txtype" class="form-input"><option value="buy" ${tx?.transaction_type!=='sell'?'selected':''}>Achat ▲</option><option value="sell" ${tx?.transaction_type==='sell'?'selected':''}>Vente ▼</option></select></div></div>
+    <div class="form-row"><div class="form-group"><label class="form-label">Ticker *</label><input type="text" id="m-ticker" class="form-input" placeholder="ex: NVDA" value="${_esc((tx?.ticker||'').replace(/^TURBO:/,''))}" oninput="this.value=this.value.toUpperCase()"></div><div class="form-group"><label class="form-label">Nom *</label><input type="text" id="m-aname" class="form-input" placeholder="ex: Nvidia" value="${tx?.name||''}"></div></div>
+    <div class="form-row"><div class="form-group"><label class="form-label">Type d'actif</label><select id="m-asset" class="form-input" onchange="onInstrumentChange()"><option value="stock" ${!instrument&&(tx?.asset_type==='stock'||!tx)?'selected':''}>Action</option><option value="etf" ${tx?.asset_type==='etf'?'selected':''}>ETF</option><option value="crypto" ${tx?.asset_type==='crypto'?'selected':''}>Crypto</option><option value="turbo" ${instrument?'selected':''}>Turbo / certificat à levier</option></select></div><div class="form-group"><label class="form-label">Transaction</label><select id="m-txtype" class="form-input"><option value="buy" ${tx?.transaction_type!=='sell'?'selected':''}>Achat ▲</option><option value="sell" ${tx?.transaction_type==='sell'?'selected':''}>Vente ▼</option></select></div></div>
+    ${_leverageForm(tx)}
     <div class="form-row"><div class="form-group"><label class="form-label">Quantité *</label><input type="number" id="m-qty" class="form-input" value="${tx?.quantity||''}" min="0.000001" step="any" oninput="updTotal()"></div><div class="form-group"><label class="form-label">Prix unitaire *</label><input type="number" id="m-price" class="form-input" value="${tx?.price||''}" min="0.000001" step="any" oninput="updTotal()"></div></div>
     <div class="form-row"><div class="form-group"><label class="form-label">Devise *</label><select id="m-currency" class="form-input" onchange="updTotal()"><option value="EUR" ${tx?.currency==='EUR'||!tx?'selected':''}>EUR €</option><option value="USD" ${tx?.currency==='USD'?'selected':''}>USD $</option><option value="GBP" ${tx?.currency==='GBP'?'selected':''}>GBP £</option><option value="JPY" ${tx?.currency==='JPY'?'selected':''}>JPY ¥</option><option value="HKD" ${tx?.currency==='HKD'?'selected':''}>HKD</option></select></div><div class="form-group"><label class="form-label">Frais</label><input type="number" id="m-fees" class="form-input" value="${tx?.fees||0}" min="0" step="any" oninput="updTotal()"></div></div>
     <div class="form-group"><label class="form-label">Date *</label><input type="date" id="m-date" class="form-input" value="${tx?.transaction_date||new Date().toISOString().split('T')[0]}"></div>
-    <div class="form-group"><label class="form-label">Notes (optionnel)</label><input type="text" id="m-notes" class="form-input" placeholder="ex: DCA mensuel…" value="${tx?.notes||''}"></div>
+    <div class="form-group"><label class="form-label">Notes (optionnel)</label><input type="text" id="m-notes" class="form-input" placeholder="ex: DCA mensuel…" value="${_esc(_instrumentNotes(tx))}"></div>
     <div class="tx-total-box" id="tx-total">Remplis la quantité et le prix pour voir le total.</div>
     <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="${ie?`saveEditTx('${tx.id}')`:'saveTx()'}">${ie?'Modifier':'Enregistrer'}</button></div>`;}
 function openAddTransaction(pre=null){if(!S.accounts.length)return showToast("❌ Crée d'abord un compte");showModal(txForm(pre,null));setTimeout(()=>onAcctChange(),50);}
 function openEditTx(id){const tx=S.transactions.find(t=>t.id===id);if(!tx)return showToast('❌ Introuvable');showModal(txForm(null,tx));}
 function onAcctChange(){const id=document.getElementById('m-acct')?.value;const a=S.accounts.find(x=>x.id===id);if(!a)return;const el=document.getElementById('m-currency');if(!el)return;const n=a.name.toLowerCase();if(n.includes('ibkr')||n.includes('interactive')||a.currency==='USD')el.value='USD';else el.value='EUR';}
 function updTotal(){const q=parseFloat(document.getElementById('m-qty')?.value)||0,p=parseFloat(document.getElementById('m-price')?.value)||0,f=parseFloat(document.getElementById('m-fees')?.value)||0,c=document.getElementById('m-currency')?.value||'EUR';const el=document.getElementById('tx-total');if(el&&q>0&&p>0)el.innerHTML=`<strong>Total : ${fN(q*p+f)} ${cS(c)}</strong> · ${fQ(q)} × ${fN(p)} + ${fN(f)} frais`;}
-function readForm(){return{account_id:document.getElementById('m-acct').value,ticker:document.getElementById('m-ticker').value.trim().toUpperCase(),name:document.getElementById('m-aname').value.trim(),asset_type:document.getElementById('m-asset').value,transaction_type:document.getElementById('m-txtype').value,quantity:parseFloat(document.getElementById('m-qty').value),price:parseFloat(document.getElementById('m-price').value),fees:parseFloat(document.getElementById('m-fees').value)||0,currency:document.getElementById('m-currency').value,transaction_date:document.getElementById('m-date').value,notes:document.getElementById('m-notes').value.trim()||null};}
-async function saveTx(){const d=readForm();if(!d.ticker||!d.name||!d.quantity||!d.price||!d.transaction_date)return showToast('❌ Champs obligatoires manquants');try{const ins=await dbPost('transactions',d);const full=await dbGet('transactions','id=eq.'+ins.id+'&select=*,accounts(name,type)');S.transactions.unshift(full?.[0]||ins);closeModal();showToast('✅ Transaction enregistrée');renderAccounts();
+function readForm(){return _finalizeInstrumentForm({account_id:document.getElementById('m-acct').value,ticker:document.getElementById('m-ticker').value.trim().toUpperCase(),name:document.getElementById('m-aname').value.trim(),asset_type:document.getElementById('m-asset').value,transaction_type:document.getElementById('m-txtype').value,quantity:parseFloat(document.getElementById('m-qty').value),price:parseFloat(document.getElementById('m-price').value),fees:parseFloat(document.getElementById('m-fees').value)||0,currency:document.getElementById('m-currency').value,transaction_date:document.getElementById('m-date').value,notes:document.getElementById('m-notes').value.trim()||null});}
+async function saveTx(){const d=readForm();const invalid=_txValidationError(d);if(invalid)return showToast('❌ '+invalid);try{const ins=await dbPost('transactions',d);const full=await dbGet('transactions','id=eq.'+ins.id+'&select=*,accounts(name,type)');S.transactions.unshift(full?.[0]||ins);closeModal();showToast('✅ Transaction enregistrée');renderAccounts();
   // Journal de décisions : proposer une note pré-remplie (bouton "Passer" pour ignorer)
   setTimeout(function(){ try{ openJournalModal({ticker:d.ticker,type:(d.transaction_type||'buy'),date:d.transaction_date,price:d.price,currency:d.currency}); }catch(e){} },350);
 }catch(e){showToast('❌ '+e.message);}}
-async function saveEditTx(id){const d=readForm();if(!d.ticker||!d.name||!d.quantity||!d.price||!d.transaction_date)return showToast('❌ Champs obligatoires manquants');try{await dbPatch('transactions','id=eq.'+id,d);const i=S.transactions.findIndex(t=>t.id===id);if(i>=0){const a=S.accounts.find(x=>x.id===d.account_id);S.transactions[i]={...S.transactions[i],...d,accounts:{name:a?.name,type:a?.type}};}closeModal();showToast('✅ Modifié');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
+async function saveEditTx(id){const d=readForm();const invalid=_txValidationError(d);if(invalid)return showToast('❌ '+invalid);try{await dbPatch('transactions','id=eq.'+id,d);const i=S.transactions.findIndex(t=>t.id===id);if(i>=0){const a=S.accounts.find(x=>x.id===d.account_id);S.transactions[i]={...S.transactions[i],...d,accounts:{name:a?.name,type:a?.type}};}closeModal();showToast('✅ Modifié');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
 async function deleteTx(id){if(!confirm('Supprimer cette transaction ?'))return;try{await dbDel('transactions','id=eq.'+id);S.transactions=S.transactions.filter(t=>t.id!==id);showToast('✅ Supprimée');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
 
 // ═══ HELPERS ═══
@@ -8937,6 +9046,7 @@ async function loadManualPrices(){
 
 // Prix manuel — sauvegarde dans Supabase (visible par tous les amis)
 async function setManualPrice(ticker){
+  if(_isLeveragedTicker(ticker))return _setProductPrice(ticker);
   const cur=manualPrices[ticker];
   const prev=cur?fN(cur.price):'';
   const val=prompt(`Prix manuel pour ${ticker} en EUR :\n(ex: 1850,50 pour Samsung)\nLaisse vide pour annuler`,prev);
