@@ -80,6 +80,32 @@ module.exports = async (req, res) => {
   res.setHeader('X-Valio-Quote-Version', '13');
   const { symbol, type } = req.query;
   if (type === 'health') return res.json({ ok: true, quoteVersion: 13, engine: 'Valio V27' });
+  // FX histories are indicative daily close rates, never presented as broker execution FX.
+  if (type === 'fxhistory') {
+    const currency = String(req.query.currency || '').toUpperCase();
+    const start = String(req.query.start || ''), end = String(req.query.end || '');
+    const allowed = ['USD','SEK','KRW','TWD','JPY','GBP','HKD','CHF','CAD','AUD','SGD','CNY','NOK','DKK'];
+    const validDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s) && Number.isFinite(Date.parse(s)) && new Date(Date.parse(s)).toISOString().slice(0,10) === s;
+    if (!allowed.includes(currency) || !validDate(start) || !validDate(end) || end < start || Date.parse(end) - Date.parse(start) > 40 * 366 * 86400000)
+      return res.status(400).json({error:'Devise ou période de change invalide'});
+    const p1 = Math.floor(Date.parse(start)/1000) - 8*86400;
+    const p2 = Math.min(Math.floor(Date.now()/1000)+86400, Math.floor(Date.parse(end)/1000)+2*86400);
+    try {
+      const key = 'fx_v35_' + currency + '_' + start + '_' + end;
+      const cached = await getCache(key);
+      if (cached && cached._v === 1 && Array.isArray(cached.rates) && cached.rates.length) return res.json(cached);
+      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/EUR${currency}%3DX?period1=${p1}&period2=${p2}&interval=1d`, {headers:{'User-Agent':UA},signal:AbortSignal.timeout(14000)});
+      if (!r.ok) throw new Error('Historique de change indisponible');
+      const chart = (await r.json())?.chart?.result?.[0];
+      const closes = chart?.indicators?.quote?.[0]?.close || [];
+      const rates = (chart?.timestamp || []).map((t,i)=>closes[i]>0&&Number.isFinite(closes[i])?{date:new Date(t*1000).toISOString().slice(0,10),rate:1/closes[i]}:null).filter(Boolean);
+      if (!rates.length) return res.status(404).json({error:'Aucun taux historique'});
+      const result = {_v:1,currency,source:'Yahoo Finance · clôture quotidienne indicative',rates};
+      await setCache(key,result);
+      return res.json(result);
+    } catch(e) { return res.status(502).json({error:'Historique de change indisponible : '+e.message}); }
+  }
+
   if (!symbol) return res.status(400).json({ error: 'symbol requis' });
   const sym = encodeURIComponent(symbol); // Disponible pour tous les endpoints
 
