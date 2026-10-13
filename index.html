@@ -414,7 +414,10 @@ td{padding:12px 14px;text-align:right;vertical-align:middle}td:first-child{text-
 @media(max-width:768px){.perf-treemap{height:520px}.risk-compact .metric-box{min-height:86px}}
 </style>
 
-<style>.modal.moat-modal{width:min(980px,95vw);max-width:95vw}</style><style>.account-sort-button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;white-space:nowrap}.account-sort-button:focus-visible{outline:2px solid var(--cyan);outline-offset:4px}.account-header{flex-wrap:wrap}.account-card [hidden]{display:none!important}</style></head>
+<style>.modal.moat-modal{width:min(980px,95vw);max-width:95vw}</style><style>.account-sort-button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;white-space:nowrap}.account-sort-button:focus-visible{outline:2px solid var(--cyan);outline-offset:4px}.account-header{flex-wrap:wrap}.account-card [hidden]{display:none!important}</style><style>.modal.realized-modal{width:min(1220px,calc(100vw - 80px));max-width:none!important;max-height:90dvh;padding:28px 30px;overflow:auto;font-size:15px}
+.realized-modal .modal-hd h2{font-size:24px}.rv-subtitle{color:var(--muted);font-size:14px;margin:5px 0 0}.rv-controls{display:flex;align-items:end;gap:14px;flex-wrap:wrap;margin:20px 0}.rv-controls label{display:grid;gap:6px;color:var(--muted);font-size:13px}.rv-controls .form-input{font-size:14px;padding:9px 12px;min-width:145px}.rv-tabs{display:flex;gap:6px}.rv-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:18px 0}.rv-kpis>div{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:18px}.rv-kpis span{display:block;color:var(--muted);font-size:13px;margin-bottom:8px}.rv-kpis b{font-size:27px}.rv-info{color:var(--muted);font-size:13px;line-height:1.6;margin:14px 0}.rv-notice{padding:13px 16px;border:1px solid var(--cyan);background:rgba(6,182,212,.06);border-radius:10px;color:var(--text);font-size:13px;line-height:1.6;margin-bottom:18px}.rv-company{border:1px solid var(--border);border-radius:12px;margin:10px 0;background:var(--card2);overflow:hidden}.rv-company summary{display:flex;align-items:center;justify-content:space-between;gap:18px;cursor:pointer;padding:18px 20px;list-style:none}.rv-company summary::before{content:'▸';color:var(--cyan);font-size:20px}.rv-company[open] summary::before{content:'▾'}.rv-company summary>div:first-of-type{flex:1}.rv-company summary b{font-size:17px}.rv-company summary span{display:block;color:var(--muted);font-size:12px;margin-top:5px}.rv-company-pnl{text-align:right}.rv-company-pnl small{font-size:11px;color:var(--muted);font-weight:400}.rv-table-wrap{overflow-x:auto;background:var(--card);padding:0 14px 10px}.rv-table{width:100%;border-collapse:collapse;min-width:850px;font-size:14px}.rv-table th{padding:14px 10px;text-align:right;color:var(--muted);font-size:12px;font-weight:600;border-bottom:1px solid var(--border);line-height:1.5}.rv-table td{padding:15px 10px;text-align:right;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums;white-space:nowrap}.rv-table td:first-child,.rv-table th:first-child{text-align:left}.rv-table small{display:block;font-size:11px;color:var(--muted);margin-top:5px}.rv-status{display:block;font-size:11px;color:var(--muted);margin-bottom:6px}.rv-empty{padding:40px;text-align:center;color:var(--muted)}.rv-issues{font-size:13px;padding:12px;color:var(--muted)}.rv-company summary:focus-visible{outline:2px solid var(--cyan);outline-offset:-3px}
+@media(max-width:760px){.modal.realized-modal{width:96vw!important;max-width:96vw!important;padding:20px 14px;max-height:92dvh}.rv-kpis{grid-template-columns:1fr;gap:8px}.rv-kpis>div{padding:12px 15px;display:flex;justify-content:space-between;align-items:center}.rv-kpis b{font-size:22px}.rv-kpis span{margin:0}.rv-company summary{padding:15px 12px;gap:10px}.rv-company summary b{font-size:15px}.rv-company summary span{font-size:11px}.rv-controls{gap:10px}.rv-controls label{flex:1}.rv-controls select{width:100%}.realized-modal .modal-hd h2{font-size:21px}}
+</style></head>
 <body>
 <style>
 /* Fix global : supprimer les espaces noirs à droite sur toutes les pages */
@@ -1292,6 +1295,7 @@ async function bootstrap(){
     S.transactions=S.transactions||[];
   }
   try{const r=await fetch(API+'?symbol=EURUSD%3DX',{signal:AbortSignal.timeout(5000)});const d=await r.json();if(d.price){S.eurUsd=d.price;document.getElementById('eurusd-rate').textContent='1 EUR = '+d.price.toFixed(4)+' USD';}}catch{}
+  _rvLoadFx(false);
   // Taux de change supplémentaires
   await Promise.allSettled([
     fetch(API+'?symbol=EURSEK%3DX',{signal:AbortSignal.timeout(5000)}).then(r=>r.json()).then(d=>{if(d.price)S.eurSek=d.price;}),
@@ -1422,7 +1426,7 @@ function computePositions(){
       p.quantity-=tx.quantity;
     }
   });
-  S.realizedPnl=_totalRealized; // Exposé globalement pour les KPIs
+  _rvApplyTotals(); // V35: ledger par compte, ordre intrajournalier et change historique
   return Object.values(map).filter(p=>p.quantity>0.000001).map(p=>{
     const pruEur=p.totalCostEur/p.quantity;
     const pc=p.buyCurrencies.length===1&&p.buyCurrencies[0]!=='EUR'?p.buyCurrencies[0]:'EUR';
@@ -1670,8 +1674,8 @@ function updateKPIs(pos){
     {l:'Valeur totale',id:'kpi-total-card',v:fE(tv),s:`sur ${fE(tcTotal)} investis <span style="color:var(--cyan);font-size:11px">· dépôts & solde →</span>`,onclick:`navigate('deposits')`},
     {l:'PV latentes',v:`<span class="${pnlLatent>=0?'c-green':'c-red'}">${sg(pnlLatent)}${fE(pnlLatent)}</span>`,
      s:`<span class="badge ${pnlLatent>=0?'badge-green':'badge-red'}">${sg(pct)}${pct.toFixed(2)}%</span>`},
-    {l:'PV réalisées',v:`<span class="${pnlRealized>=0?'c-green':'c-red'}">${sg(pnlRealized)}${fE(Math.abs(pnlRealized))}</span>`,
-     s:`Gains/pertes actés sur ventes <span style="color:var(--cyan);font-size:11px">· voir détail →</span>`,
+    {l:'PV réalisées'+(S.realizedPartial?' · provisoire':''),v:S.realizedHasValue===false?'—':`<span class="${pnlRealized>=0?'c-green':'c-red'}">${sg(pnlRealized)}${fE(Math.abs(pnlRealized))}</span>`,
+     s:`${S.realizedMissing?S.realizedMissing+' vente(s) sans change · ':''}Gains/pertes actés sur ventes <span style="color:var(--cyan);font-size:11px">· voir détail →</span>`,
      onclick:`showRealizedDetail()`},
     {l:'Performance',id:'kpi-performance-card',v:`<span class="${pctTotal>=0?'c-green':'c-red'}" style="font-size:28px">${sg(pctTotal)}${pctTotal.toFixed(2)}%</span>`,
      s:`<div class="kpi-perf-line"><span>Simple</span><span>·</span><span>TWR</span><b id="kpi-performance-twr" style="color:${twrColor}">${twrTxt}</b><span>·</span><b class="${pnlTotal>=0?'c-green':'c-red'}">${sg(pnlTotal)}${fE(pnlTotal)}</b><span style="color:var(--cyan)">· détail →</span></div>`,
@@ -1680,97 +1684,170 @@ function updateKPIs(pos){
 }
 
 // ═══ DÉTAIL PV RÉALISÉES ═══════════════════════════════════════════════════
-function showRealizedDetail(){
-  // Rejoue les transactions dans l'ordre chronologique pour calculer le PRU CMP
-  // au moment exact de chaque vente — même logique que computePositions().
-  var txs=[...S.transactions].sort(function(a,b){return new Date(a.transaction_date)-new Date(b.transaction_date);});
-  var map={};   // état courant par ticker : quantity, totalCostEur
-  var sales=[];  // liste des ventes avec détail
-
-  txs.forEach(function(tx){
-    var k=tx.ticker;
-    if(!map[k]) map[k]={quantity:0,totalCostEur:0,name:tx.name||tx.ticker};
-    var cur=tx.currency||'EUR';
-    function toE(v){ return toEur(v,cur); }
-
-    if((tx.transaction_type||'').toLowerCase()==='buy'){
-      map[k].totalCostEur += tx.quantity*toE(tx.price) + toE(tx.fees||0);
-      map[k].quantity += tx.quantity;
-    } else if((tx.transaction_type||'').toLowerCase()==='sell' && map[k].quantity>0){
-      var pru      = map[k].totalCostEur / map[k].quantity;   // PRU CMP en € au moment de la vente
-      var sellEur  = toE(tx.price);                            // prix de vente en €
-      var feesEur  = toE(tx.fees||0);
-      var pv       = (sellEur - pru)*tx.quantity - feesEur;   // PV nette de frais
-      var pct      = pru>0 ? (sellEur/pru-1)*100 : null;
-
-      sales.push({
-        ticker : tx.ticker,
-        name   : tx.name || tx.ticker,
-        date   : tx.transaction_date,
-        qty    : tx.quantity,
-        pru    : pru,           // € toujours
-        sell   : sellEur,       // € toujours
-        fees   : feesEur,
-        pv     : pv,
-        pct    : pct,
-        cur    : cur,
-        sellRaw: tx.price       // devise d'origine pour affichage
-      });
-
-      // Met à jour l'état
-      map[k].totalCostEur -= tx.quantity*pru;
-      map[k].quantity     -= tx.quantity;
-    }
-  });
-
-  // Trie du plus récent au plus ancien
-  sales.sort(function(a,b){return new Date(b.date)-new Date(a.date);});
-
-  var total = sales.reduce(function(s,x){return s+x.pv;},0);
-  var sg    = function(v){return v>=0?'+':'';};
-
-  var rows = sales.length ? sales.map(function(s){
-    var pvCol = s.pv>=0 ? 'var(--green)' : 'var(--red)';
-    var dateStr = new Date(s.date).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'});
-    var sellStr = s.cur!=='EUR' ? s.sellRaw.toFixed(2)+' '+s.cur+' ('+fE(s.sell)+')' : fE(s.sell);
-    return `<tr style="border-bottom:1px solid var(--border)">
-      <td style="padding:10px 8px">
-        <div style="font-weight:600;font-size:13px">${s.name}</div>
-        <div style="color:var(--muted);font-size:11px">${s.ticker} · ${dateStr}</div>
-      </td>
-      <td style="padding:10px 8px;text-align:right;white-space:nowrap">${Number(s.qty).toLocaleString('fr-FR',{maximumFractionDigits:4})}</td>
-      <td style="padding:10px 8px;text-align:right;white-space:nowrap;color:var(--muted)">${fE(s.pru)}</td>
-      <td style="padding:10px 8px;text-align:right;white-space:nowrap">${sellStr}</td>
-      <td style="padding:10px 8px;text-align:right;white-space:nowrap;color:${pvCol};font-weight:600">${sg(s.pv)}${fE(Math.abs(s.pv))}</td>
-      <td style="padding:10px 8px;text-align:right;white-space:nowrap;color:${pvCol}">${s.pct!=null?sg(s.pct)+s.pct.toFixed(1)+'%':'—'}</td>
-    </tr>`;
-  }).join('') : '<tr><td colspan="6" style="padding:32px;text-align:center;color:var(--muted)">Aucune vente enregistrée</td></tr>';
-
-  var html = `<div class="modal-hd">
-    <h2>💰 Détail des PV réalisées</h2>
-    <button class="modal-close" onclick="closeModal()">✕</button>
-  </div>
-  <div style="margin-bottom:16px;padding:14px 16px;background:var(--card2);border-radius:12px;display:flex;align-items:center;justify-content:space-between">
-    <span style="color:var(--muted);font-size:13px">Total net réalisé</span>
-    <span style="font-size:20px;font-weight:700;color:${total>=0?'var(--green)':'var(--red)'}">${sg(total)}${fE(Math.abs(total))}</span>
-  </div>
-  <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-    <table style="width:100%;border-collapse:collapse;min-width:520px">
-      <thead><tr style="border-bottom:2px solid var(--border)">
-        <th style="padding:8px;text-align:left;font-size:11px;color:var(--muted);font-weight:600">TITRE</th>
-        <th style="padding:8px;text-align:right;font-size:11px;color:var(--muted);font-weight:600">QTÉ</th>
-        <th style="padding:8px;text-align:right;font-size:11px;color:var(--muted);font-weight:600">PRU (€)</th>
-        <th style="padding:8px;text-align:right;font-size:11px;color:var(--muted);font-weight:600">PRIX VENTE</th>
-        <th style="padding:8px;text-align:right;font-size:11px;color:var(--muted);font-weight:600">PV / MV</th>
-        <th style="padding:8px;text-align:right;font-size:11px;color:var(--muted);font-weight:600">%</th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-  </div>
-  <p style="margin-top:12px;font-size:11px;color:var(--muted2)">PRU calculé par méthode CMP au moment de chaque vente. PV nette des frais.</p>`;
-
-  showModal(html);
+// V35 — ledger realised P&L. All lots are isolated by account and instrument.
+var RV_MARKER='[VALIO_TRADE_V2]';
+var _rvView={mode:'accounting',year:String(new Date().getFullYear()),account:'all'};
+var _rvFxBusy=false,_rvFxPromise=null,_rvDetailsRows=[],_rvPanel='summary';
+function _rvMeta(tx){var n=String(tx&&tx.notes||'');if(!n.startsWith(RV_MARKER))return {};try{return JSON.parse(n.split('\n')[0].slice(RV_MARKER.length))||{};}catch(e){return {};}}
+function _rvStripNotes(n){n=String(n||'');return n.startsWith(RV_MARKER)?n.slice(n.indexOf('\n')<0?n.length:n.indexOf('\n')+1):n;}
+function _rvWriteMeta(tx,m){var n=_rvStripNotes(tx&&tx.notes);return Object.keys(m).length?RV_MARKER+JSON.stringify(m)+'\n'+n:(n||null);}
+function _rvPrefsKey(){var u=typeof getUser==='function'?getUser():null;return 'valio_realized_v35_'+(u&&u.id||'local');}
+function _rvPrefs(){try{return JSON.parse(localStorage.getItem(_rvPrefsKey())||'{}')||{};}catch(e){return {};}}
+function _rvMethod(){return _rvPrefs().method==='fifo'?'fifo':'cmp';}
+function _rvSetMethod(m){var p=_rvPrefs();p.method=m==='fifo'?'fifo':'cmp';try{localStorage.setItem(_rvPrefsKey(),JSON.stringify(p));}catch(e){} _rvApplyTotals();_rvRender();}
+function _rvFxCache(){try{return JSON.parse(localStorage.getItem(_rvPrefsKey()+'_fx')||'{}')||{};}catch(e){return {};}}
+function _rvDay(tx){return String(tx.transaction_date||'').slice(0,10);}
+function _rvAccount(tx,accounts){return (accounts||[]).find(function(a){return a.id===tx.account_id;})||{id:tx.account_id,name:tx.accounts&&tx.accounts.name||'Compte inconnu',type:tx.accounts&&tx.accounts.type||''};}
+function _rvRate(tx,cache){
+ var cur=(tx.currency||'EUR').toUpperCase(),m=_rvMeta(tx),day=_rvDay(tx);
+ if(cur==='EUR')return {rate:1,source:'EUR',exact:true};
+ if(m.fxCurrency===cur&&m.fxDate===day&&Number(m.eurRate)>0&&isFinite(Number(m.eurRate)))return {rate:Number(m.eurRate),source:'Taux saisi / relevé',exact:true};
+ var h=(cache||_rvFxCache())[cur+'|'+day];
+ if(h&&h.rate>0&&isFinite(h.rate))return {rate:h.rate,source:'Historique indicatif '+h.date,exact:false,historical:true};
+ return {rate:null,source:'Change historique manquant',exact:false};
 }
+function _rvFiscalClass(tx,accounts){
+ var a=_rvAccount(tx,accounts),type=String(a.type||'').toUpperCase(),asset=String(tx.asset_type||'stock').toLowerCase();
+ if(type.startsWith('PEA'))return 'pea';
+ if(type!=='CTO')return 'other';
+ if(asset==='crypto'||/^TURBO:/.test(tx.ticker||''))return 'special';
+ return asset==='stock'||asset==='etf'?'eligible':'special';
+}
+// Intraday dates in old data have no execution time. Record an explicit order to resolve them.
+function _rvOrdered(transactions){
+ var byDay={};(transactions||[]).forEach(function(t,i){var key=[t.account_id,t.ticker,_rvDay(t)].join('|');(byDay[key]||(byDay[key]=[])).push({tx:t,index:i});});
+ var holdings={},out=[];
+ Object.keys(byDay).sort(function(a,b){var da=_rvDay(byDay[a][0].tx),db=_rvDay(byDay[b][0].tx);return da.localeCompare(db)||a.localeCompare(b);}).forEach(function(key){
+  var xs=byDay[key],k=xs[0].tx.account_id+'|'+xs[0].tx.ticker,opening=holdings[k]||0;
+  var buys=xs.some(function(x){return x.tx.transaction_type==='buy';}),sells=xs.some(function(x){return x.tx.transaction_type==='sell';});
+  var explicit=xs.every(function(x){var m=_rvMeta(x.tx);return m.order!=null&&isFinite(Number(m.order));});
+  var orders=xs.map(function(x){return Number(_rvMeta(x.tx).order);}),unique=new Set(orders).size===orders.length;
+  var timed=xs.every(function(x){return /T\d\d:\d\d/.test(String(x.tx.transaction_date||''));})&&new Set(xs.map(function(x){return x.tx.transaction_date;})).size===xs.length;
+  var ambiguous=buys&&sells&&!((explicit&&unique)||timed);
+  var sold=xs.filter(function(x){return x.tx.transaction_type==='sell';}).reduce(function(s,x){return s+Number(x.tx.quantity||0);},0),sellsFirst=opening+1e-7>=sold;
+  xs.sort(function(a,b){
+   if(explicit&&unique)return Number(_rvMeta(a.tx).order)-Number(_rvMeta(b.tx).order);
+   if(timed)return Date.parse(a.tx.transaction_date)-Date.parse(b.tx.transaction_date);
+   if(ambiguous&&a.tx.transaction_type!==b.tx.transaction_type)return (a.tx.transaction_type===(sellsFirst?'sell':'buy'))?-1:1;
+   var ca=Date.parse(a.tx.created_at),cb=Date.parse(b.tx.created_at);if(isFinite(ca)&&isFinite(cb)&&ca!==cb)return ca-cb;
+   return String(a.tx.id||'').localeCompare(String(b.tx.id||''))||a.index-b.index;
+  });
+  xs.forEach(function(x){out.push({tx:x.tx,ambiguous:ambiguous});var q=Number(x.tx.quantity);if(q>0&&isFinite(q))holdings[k]=(holdings[k]||0)+(x.tx.transaction_type==='buy'?q:x.tx.transaction_type==='sell'?-q:0);});
+ });return out;
+}
+function _rvLedger(transactions,accounts,opts){
+ opts=opts||{};var method=opts.method==='fifo'?'fifo':'cmp',rates=opts.rates||null,pools={},sales=[],issues=[];
+ _rvOrdered(transactions).forEach(function(entry){
+  var t=entry.tx,q=Number(t.quantity),p=Number(t.price),f=Number(t.fees||0),cur=(t.currency||'EUR').toUpperCase(),k=t.account_id+'|'+t.ticker;
+  if(!t.ticker||!/^\d{4}-\d{2}-\d{2}/.test(t.transaction_date||'')||!(q>0)||!isFinite(q)||p<0||!isFinite(p)||f<0||!isFinite(f)||!['buy','sell'].includes(t.transaction_type)){issues.push({tx:t,message:'Transaction invalide ou type non pris en charge'});if(pools[k])pools[k].broken=true;return;}
+  var rate=_rvRate(t,rates),converted=rate.rate>0,approx=converted&&!rate.exact;
+  var pool=pools[k]||(pools[k]={quantity:0,cost:0,eurCost:0,currency:cur,lots:[],approx:false,orderUncertain:false,broken:false});
+  if(entry.ambiguous)pool.orderUncertain=true;
+  if(t.transaction_type==='buy'){
+   var cost=q*p+f,eCost=converted?cost*rate.rate:null;
+   if(pool.quantity<1e-7){pool.cost=0;pool.eurCost=0;pool.currency=cur;pool.approx=false;pool.orderUncertain=entry.ambiguous;pool.lots=[];}
+   pool.cost=pool.currency===cur&&pool.cost!=null?pool.cost+cost:null;
+   pool.eurCost=pool.eurCost!=null&&eCost!=null?pool.eurCost+eCost:null;
+   pool.quantity+=q;pool.approx=pool.approx||approx;
+   pool.lots.push({qty:q,cost:cost,eurCost:eCost,cur:cur,approx:approx,date:t.transaction_date,txId:t.id,orderUncertain:pool.orderUncertain});return;
+  }
+  var a=_rvAccount(t,accounts),row={id:t.id,ticker:t.ticker,name:t.name||t.ticker,accountId:t.account_id,accountName:a.name,date:t.transaction_date,year:_rvDay(t).slice(0,4),qty:q,currency:cur,price:p,fees:f,method:method,fiscalClass:_rvFiscalClass(t,accounts),tx:t,matched:[],fxSource:rate.source};
+  if(pool.broken||pool.quantity+1e-7<q){row.error=pool.broken?'Historique invalide avant cette vente':'Quantité vendue supérieure aux achats connus sur ce compte';row.pv=null;row.nativePv=null;sales.push(row);issues.push({tx:t,message:row.error});pool.broken=true;return;}
+  var costRaw=0,costEur=0,orderUncertain=pool.orderUncertain||entry.ambiguous,costApprox=false;
+  if(method==='cmp'){
+   costRaw=pool.currency===cur&&pool.cost!=null?pool.cost*q/pool.quantity:null;costEur=pool.eurCost!=null?pool.eurCost*q/pool.quantity:null;costApprox=pool.approx;
+   row.matched=[{date:'Achats antérieurs · PMP',qty:q,cost:costRaw,eurCost:costEur}];
+  }else{
+   var left=q;
+   while(left>1e-7&&pool.lots.length){var lot=pool.lots[0],take=Math.min(left,lot.qty),fraction=take/lot.qty,cr=lot.cost*fraction,ce=lot.eurCost!=null?lot.eurCost*fraction:null;
+    costRaw=costRaw!=null&&lot.cur===cur?costRaw+cr:null;costEur=costEur!=null&&ce!=null?costEur+ce:null;costApprox=costApprox||lot.approx;orderUncertain=orderUncertain||lot.orderUncertain;
+    row.matched.push({date:lot.date,qty:take,cost:cr,eurCost:ce,txId:lot.txId});lot.cost-=cr;if(lot.eurCost!=null)lot.eurCost-=ce;lot.qty-=take;left-=take;if(lot.qty<1e-7)pool.lots.shift();
+   }
+  }
+  var proceeds=q*p-f;row.cost=costRaw;row.eurCost=costEur;row.nativePv=costRaw!=null?proceeds-costRaw:null;
+  row.pv=converted&&costEur!=null?proceeds*rate.rate-costEur:null;row.proceeds=proceeds;row.eurProceeds=converted?proceeds*rate.rate:null;
+  row.pct=costRaw>0&&row.nativePv!=null?row.nativePv/costRaw*100:null;row.orderUncertain=orderUncertain;row.approx=approx||costApprox;row.error=null;
+  row.status=row.pv==null?'Change manquant':orderUncertain?'Ordre à vérifier':row.approx?'Change indicatif':'Calcul documenté';
+  sales.push(row);
+  if(method==='cmp'){if(pool.cost!=null)pool.cost-=pool.cost*q/pool.quantity;if(pool.eurCost!=null)pool.eurCost-=pool.eurCost*q/pool.quantity;}
+  else{pool.cost=pool.cost!=null?pool.lots.reduce(function(s,l){return s+l.cost;},0):null;pool.eurCost=pool.lots.every(function(l){return l.eurCost!=null;})?pool.lots.reduce(function(s,l){return s+l.eurCost;},0):null;}
+  pool.quantity-=q;if(pool.quantity<1e-7){pool.quantity=0;pool.cost=0;pool.eurCost=0;pool.orderUncertain=false;pool.approx=false;}
+ });
+ return {sales:sales.sort(function(a,b){return String(b.date).localeCompare(String(a.date));}),issues:issues,pools:pools,method:method};
+}
+function _rvAccountingLedger(){return _rvLedger(S.transactions,S.accounts,{method:'cmp'});}
+function _rvApplyTotals(){
+ var ledger=_rvAccountingLedger(),total=0,missing=0,provisional=false;ledger.sales.forEach(function(s){if(s.pv==null){missing++;return;}total+=s.pv;if(s.approx||s.orderUncertain)provisional=true;});
+ S.realizedPnl=total;S.realizedHasValue=ledger.sales.length===0||ledger.sales.some(function(s){return s.pv!=null;});S.realizedPartial=missing>0||provisional||ledger.issues.length>0;S.realizedMissing=missing;
+ var pos=S.enrichedPos||[];if(pos.length&&typeof updateKPIs==='function')updateKPIs(pos);
+ return ledger;
+}
+async function _rvLoadFx(force){
+ if(_rvFxPromise)return _rvFxPromise;
+ var cache=_rvFxCache(),needs={};(S.transactions||[]).forEach(function(t){var cur=(t.currency||'EUR').toUpperCase(),day=_rvDay(t);if(cur!=='EUR'&&/^\d{4}-\d{2}-\d{2}$/.test(day)&&(_rvRate(t,cache).rate==null||force)){if(!needs[cur])needs[cur]=[];needs[cur].push(day);}});
+ if(!Object.keys(needs).length)return;
+ _rvFxBusy=true;
+ _rvFxPromise=(async function(){
+  var currencies=Object.keys(needs);
+  for(var i=0;i<currencies.length;i+=3){await Promise.all(currencies.slice(i,i+3).map(async function(cur){
+   var days=Array.from(new Set(needs[cur])).sort(),start=days[0],end=days[days.length-1];
+   try{var r=await fetch(API+'?type=fxhistory&currency='+encodeURIComponent(cur)+'&start='+start+'&end='+end,{signal:AbortSignal.timeout(18000)});if(!r.ok)return;var d=await r.json(),points=(d.rates||[]).filter(function(x){return x.rate>0&&isFinite(x.rate);}).sort(function(a,b){return a.date.localeCompare(b.date);});
+    days.forEach(function(day){var h=null;for(var j=0;j<points.length;j++){if(points[j].date>day)break;h=points[j];}if(h&&(Date.parse(day)-Date.parse(h.date))/86400000<=7)cache[cur+'|'+day]={rate:h.rate,date:h.date,source:d.source||'Yahoo Finance'};});
+   }catch(e){}
+  }));}
+  try{localStorage.setItem(_rvPrefsKey()+'_fx',JSON.stringify(cache));}catch(e){}
+ })();
+ try{await _rvFxPromise;}finally{_rvFxPromise=null;_rvFxBusy=false;_rvApplyTotals();var m=document.getElementById('modal-content');if(m&&m.classList.contains('realized-modal'))_rvRender();}
+}
+function _rvSigned(v,cur){if(v==null)return '—';var a=Math.abs(v),s=v<0?'−':'+';return s+(cur&&cur!=='EUR'?fN(a)+' '+_esc(cur):fE(a));}
+function _rvColor(v){return v==null?'var(--muted)':v>=0?'var(--green)':'var(--red)';}
+function _rvVisibleSales(ledger){return ledger.sales.filter(function(s){return (_rvView.account==='all'||s.accountId===_rvView.account)&&(_rvView.mode!=='fiscal'||s.year===_rvView.year&&s.fiscalClass==='eligible');});}
+function _rvSummary(sales){return {net:sales.reduce(function(v,s){return v+(s.pv==null?0:s.pv);},0),gains:sales.reduce(function(v,s){return v+(s.pv>0?s.pv:0);},0),losses:sales.reduce(function(v,s){return v+(s.pv<0?s.pv:0);},0),missing:sales.filter(function(s){return s.pv==null;}).length,uncertain:sales.filter(function(s){return s.orderUncertain||s.approx||s.error;}).length};}
+function showRealizedDetail(){_rvPanel='summary';_rvView.mode='accounting';_rvView.account='all';showModal('');document.getElementById('modal-content').classList.add('realized-modal');_rvRender();_rvLoadFx(false);}
+function _rvReturn(){_rvPanel='summary';showModal('');document.getElementById('modal-content').classList.add('realized-modal');_rvRender();}
+function _rvSetView(field,value){_rvView[field]=value;_rvRender();}
+function _rvRender(){
+ var modal=document.getElementById('modal-content');if(!modal||!modal.classList.contains('realized-modal')||_rvPanel!=='summary')return;
+ var fiscal=_rvView.mode==='fiscal',ledger=_rvLedger(S.transactions,S.accounts,{method:fiscal?'cmp':_rvMethod()}),sales=_rvVisibleSales(ledger),summary=_rvSummary(sales),groups={};_rvDetailsRows=sales;
+ sales.forEach(function(s){(groups[s.ticker]||(groups[s.ticker]=[])).push(s);});
+ var years=Array.from(new Set(ledger.sales.map(function(s){return s.year;}).concat([String(new Date().getFullYear())]))).sort().reverse();
+ if(!years.includes(_rvView.year))_rvView.year=years[0];
+ var controls='<div class="rv-controls"><div class="rv-tabs" role="group" aria-label="Vue des plus-values"><button class="btn '+(!fiscal?'btn-primary':'btn-ghost')+'" onclick="_rvSetView(\'mode\',\'accounting\')">Comptable</button><button class="btn '+(fiscal?'btn-primary':'btn-ghost')+'" onclick="_rvSetView(\'mode\',\'fiscal\')">Fiscal</button></div><label>Compte<select class="form-input" onchange="_rvSetView(\'account\',this.value)"><option value="all">Tous les comptes</option>'+S.accounts.map(function(a){return '<option value="'+_esc(a.id)+'"'+(_rvView.account===a.id?' selected':'')+'>'+_esc(a.name)+' · '+_esc(a.type)+'</option>';}).join('')+'</select></label>';
+ controls+=fiscal?'<label>Année des ventes<select class="form-input" onchange="_rvSetView(\'year\',this.value)">'+years.map(function(y){return '<option'+(_rvView.year===y?' selected':'')+'>'+y+'</option>';}).join('')+'</select></label>':'<label>Coût des titres vendus<select class="form-input" onchange="_rvSetMethod(this.value)"><option value="cmp"'+(_rvMethod()==='cmp'?' selected':'')+'>Prix moyen pondéré (PMP)</option><option value="fifo"'+(_rvMethod()==='fifo'?' selected':'')+'>FIFO · comparaison courtier</option></select></label>';
+ controls+='<button class="btn btn-ghost" onclick="_rvLoadFx(true)"'+(_rvFxBusy?' disabled':'')+'>'+(_rvFxBusy?'Chargement du change…':'Actualiser le change')+'</button><button class="btn btn-ghost" onclick="_rvExport()">Exporter CSV</button></div>';
+ var allUnknown=sales.length>0&&summary.missing===sales.length;var cards='<div class="rv-kpis">'+[['Résultat net'+(summary.missing||summary.uncertain?' · provisoire':''),summary.net],['Plus-values',summary.gains],['Moins-values',summary.losses]].map(function(x){return '<div><span>'+x[0]+'</span><b style="color:'+_rvColor(x[1])+'">'+(allUnknown?'—':_rvSigned(x[1]))+'</b></div>';}).join('')+'</div>';
+ var info=fiscal?'Ventes d’actions et d’ETF sur CTO · PMP en euros, achats des années précédentes conservés dans le calcul. Les ventes internes au PEA sont exclues. Résultat annuel avant reports de pertes antérieures ; aucun impôt estimé. Retraits PEA, crypto, assurance-vie, PER et produits complexes ne sont pas calculés ici.':'Toutes les années et enveloppes, y compris PEA. Le total du portefeuille reste en PMP ; FIFO sert au rapprochement courtier. Coûts séparés par compte, frais d’achat et de vente inclus. Le résultat en devise permet la comparaison avec le courtier ; le résultat en euros intègre le change historique.';
+ var notices=[];if(summary.missing)notices.push(summary.missing+' vente(s) sans résultat en euros complet : total partiel.');if(summary.uncertain)notices.push(summary.uncertain+' vente(s) avec change indicatif ou ordre à vérifier : estimation à rapprocher des relevés.');if(ledger.issues.length)notices.push(ledger.issues.length+' anomalie(s) dans l’historique.');
+ var rows=Object.keys(groups).sort(function(a,b){return groups[b][0].date.localeCompare(groups[a][0].date);}).map(function(ticker){var xs=groups[ticker],su=_rvSummary(xs),native={};xs.forEach(function(s){if(!native[s.currency])native[s.currency]={total:0,missing:false};if(s.nativePv!=null)native[s.currency].total+=s.nativePv;else native[s.currency].missing=true;});
+  return '<details class="rv-company"><summary><div><b>'+_esc(xs[0].name)+'</b><span>'+_esc(ticker)+' · '+xs.length+' vente'+(xs.length>1?'s':'')+' · '+_esc(xs[xs.length-1].date.slice(0,10))+' → '+_esc(xs[0].date.slice(0,10))+'</span></div><div class="rv-company-pnl"><b style="color:'+_rvColor(su.net)+'">'+(su.missing===xs.length?'—':_rvSigned(su.net))+(su.missing||su.uncertain?' <small>provisoire</small>':'')+'</b><span>'+Object.keys(native).map(function(c){return native[c].missing?'Devise non comparable':_rvSigned(native[c].total,c);}).join(' · ')+'</span></div></summary><div class="rv-table-wrap"><table class="rv-table"><thead><tr><th>Date / compte</th><th>Quantité</th><th>Coût vendu<br>frais inclus</th><th>Produit net<br>de vente</th><th>PV / MV<br>en devise</th><th>PV / MV<br>en euros</th><th>Contrôle</th></tr></thead><tbody>'+xs.map(function(s){var idx=sales.indexOf(s),date=s.date.slice(0,10);return '<tr><td><b>'+_esc(date)+'</b><small>'+_esc(s.accountName)+'</small></td><td>'+fQ(s.qty)+'</td><td>'+(s.cost!=null?fN(s.cost)+' '+_esc(s.currency):'—')+'<small>'+(s.eurCost!=null?fE(s.eurCost):'Change manquant')+'</small></td><td>'+fN(s.proceeds==null?s.qty*s.price-s.fees:s.proceeds)+' '+_esc(s.currency)+'<small>Frais vente : '+fN(s.fees)+' '+_esc(s.currency)+'</small></td><td style="color:'+_rvColor(s.nativePv)+'">'+_rvSigned(s.nativePv,s.currency)+'</td><td style="color:'+_rvColor(s.pv)+'">'+_rvSigned(s.pv)+'<small>'+(s.pct!=null?_rvSigned(s.pct,'').replace(' €','')+' % en devise':'')+'</small></td><td><span class="rv-status">'+_esc(s.error||s.status)+'</span><button class="btn btn-ghost btn-sm" onclick="_rvAudit('+idx+')">Détail / vérifier</button></td></tr>';}).join('')+'</tbody></table></div></details>';
+ }).join('');
+ var issueRows=ledger.issues.length?'<details class="rv-issues"><summary>Anomalies à corriger ('+ledger.issues.length+')</summary>'+ledger.issues.map(function(x){return '<p>'+_esc(x.tx.ticker||'Sans titre')+' · '+_esc(x.tx.transaction_date||'Sans date')+' : '+_esc(x.message)+'</p>';}).join('')+'</details>':'';
+ modal.innerHTML='<div class="modal-hd"><div><h2>Plus-values réalisées</h2><p class="rv-subtitle">'+(fiscal?'Synthèse fiscale · '+_rvView.year:'Synthèse comptable · toutes les années')+'</p></div><button class="modal-close" onclick="closeModal()">✕</button></div>'+controls+cards+'<p class="rv-info">'+info+'</p>'+(notices.length?'<div class="rv-notice">'+notices.map(_esc).join('<br>')+'</div>':'')+'<div class="rv-groups">'+(rows||'<div class="rv-empty">Aucune vente dans cette sélection.</div>')+'</div>'+issueRows+'<p class="rv-info">Change automatique : cours journalier Yahoo indicatif, conservé par date. Tu peux renseigner le taux de ton relevé et l’ordre d’exécution dans « Détail / vérifier ». Les montants inconnus restent inconnus.</p>';
+}
+function _rvAudit(index){
+ var s=_rvDetailsRows[index];if(!s)return;_rvPanel='audit';var related=S.transactions.filter(function(t){return t.account_id===s.accountId&&t.ticker===s.ticker&&_rvDay(t)<=_rvDay(s.tx);});
+ var equation='<p class="rv-info"><b>Coût retenu :</b> '+(s.cost!=null?fN(s.cost)+' '+_esc(s.currency)+' (PRU '+fN(s.cost/s.qty)+')':'Non comparable en devise')+' · <b>Vente nette :</b> '+(s.proceeds!=null?fN(s.proceeds)+' '+_esc(s.currency):'—')+'. Frais d’achat inclus dans le coût ; frais de vente déjà déduits.</p>';
+ var html='<div class="modal-hd"><h2>Vérifier '+_esc(s.name)+'</h2><button class="btn btn-ghost btn-sm" onclick="_rvReturn()">← Retour</button></div><p class="rv-info">Vente : '+_esc(s.date)+' · '+fQ(s.qty)+' titres · '+_esc(s.accountName)+'. Méthode '+s.method.toUpperCase()+'.</p>'+equation+'<div class="rv-kpis"><div><span>Résultat en devise</span><b style="color:'+_rvColor(s.nativePv)+'">'+_rvSigned(s.nativePv,s.currency)+'</b></div><div><span>Résultat en euros</span><b style="color:'+_rvColor(s.pv)+'">'+_rvSigned(s.pv)+'</b></div></div><p class="rv-info">'+_esc(s.error||s.status)+'. Une différence FIFO / PMP peut subsister avec IBKR. Les achats et ventes du même jour doivent être ordonnés : 1, 2, 3… Un ordre saisi sur un seul élément ne suffit pas.</p><div class="rv-table-wrap"><table class="rv-table"><thead><tr><th>Date</th><th>Opération</th><th>Quantité</th><th>Prix</th><th>Frais</th><th>Change EUR / unité</th><th>Ordre du jour</th><th>Action</th></tr></thead><tbody>'+_rvOrdered(related).map(function(e){var t=e.tx,m=_rvMeta(t),r=_rvRate(t);return '<tr><td>'+_esc(_rvDay(t))+'</td><td>'+_esc(t.transaction_type==='buy'?'Achat':'Vente')+'</td><td>'+fQ(t.quantity)+'</td><td>'+fN(t.price)+' '+_esc(t.currency)+'</td><td>'+fN(t.fees||0)+'</td><td>'+(r.rate!=null?r.rate.toFixed(6):'—')+'<small>'+_esc(r.source)+'</small></td><td>'+(m.order==null?'Non précisé':m.order)+'</td><td><button class="btn btn-ghost btn-sm" data-tx-id="'+_esc(t.id)+'" onclick="_rvEditMeta(this.dataset.txId)">Vérifier</button></td></tr>';}).join('')+'</tbody></table></div><div class="modal-footer"><button class="btn btn-primary" onclick="_rvReturn()">Retour à la synthèse</button></div>';
+ showModal(html);document.getElementById('modal-content').classList.add('realized-modal');window._rvAuditSaleId=s.id;
+}
+function _rvEditMeta(id){
+ var t=S.transactions.find(function(x){return x.id===id;});if(!t)return;_rvPanel='edit';var m=_rvMeta(t),r=_rvRate(t);
+ showModal('<div class="modal-hd"><h2>Ordre et change · '+_esc(t.ticker)+'</h2><button class="modal-close" onclick="_rvReturn()">✕</button></div><p>'+_esc(_rvDay(t))+' · '+(t.transaction_type==='buy'?'Achat':'Vente')+' · '+fQ(t.quantity)+' × '+fN(t.price)+' '+_esc(t.currency)+'</p><div class="form-group"><label class="form-label">Ordre réel dans la journée (1, 2, 3…)</label><input id="rv-order" class="form-input" type="number" min="1" step="1" value="'+(m.order==null?'':m.order)+'"></div><div class="form-group"><label class="form-label">Taux du relevé : 1 '+_esc(t.currency||'EUR')+' = combien d’euros ?</label><input id="rv-rate" class="form-input" type="number" min="0" step="any" placeholder="'+(r.rate||'')+'" value="'+(m.eurRate&&m.fxCurrency===(t.currency||'EUR').toUpperCase()&&m.fxDate===_rvDay(t)?m.eurRate:'')+'"><p class="rv-info">Exemple : 1 USD = 0,90 EUR → saisir 0,90. Laisse vide pour utiliser le change historique indicatif. Les frais sont supposés dans la devise de la transaction.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="_rvReturn()">Annuler</button><button class="btn btn-primary" data-tx-id="'+_esc(id)+'" onclick="_rvSaveMeta(this.dataset.txId)">Enregistrer</button></div>');
+}
+async function _rvSaveMeta(id){
+ var t=S.transactions.find(function(x){return x.id===id;});if(!t)return;var os=document.getElementById('rv-order').value.trim(),rs=document.getElementById('rv-rate').value.trim(),order=Number(os),rate=Number(rs);
+ if(os&&(!Number.isInteger(order)||order<1)||rs&&(!(rate>0)||!isFinite(rate)))return showToast('Ordre ou taux invalide');
+ var m=_rvMeta(t);delete m.order;delete m.eurRate;delete m.fxDate;delete m.fxCurrency;if(os)m.order=order;if(rs){m.eurRate=rate;m.fxDate=_rvDay(t);m.fxCurrency=(t.currency||'EUR').toUpperCase();}
+ var notes=_rvWriteMeta(t,m);try{await dbPatch('transactions','id=eq.'+id,{notes:notes});t.notes=notes;_rvApplyTotals();showToast('Ordre et change enregistrés');_rvReturn();}catch(e){showToast('Enregistrement impossible : '+e.message);}
+}
+function _rvPreserveMeta(d){var t=S.transactions.find(function(x){return x.id===window._editingTxId;});if(!t)return d;var m=_rvMeta(t);if(d.transaction_date!==t.transaction_date)delete m.order;if(_rvDay(d)!==_rvDay(t)||(d.currency||'EUR')!==(t.currency||'EUR')){delete m.eurRate;delete m.fxDate;delete m.fxCurrency;}d.notes=_rvWriteMeta({notes:d.notes},m);return d;}
+function _rvExport(){
+ var fiscal=_rvView.mode==='fiscal',rows=_rvVisibleSales(_rvLedger(S.transactions,S.accounts,{method:fiscal?'cmp':_rvMethod()}));
+ var cells=function(a){return a.map(function(v){var s=v==null?'':String(v);if(/^[=+@\t\r]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';}).join(';');};
+ var text='\ufeff'+[cells(['Date','Compte','Titre','Ticker','Quantité','Méthode','Devise','Coût vendu frais inclus','Vente nette','PV devise','PV EUR','Statut'])].concat(rows.map(function(s){return cells([s.date,s.accountName,s.name,s.ticker,s.qty,s.method,s.currency,s.cost,s.proceeds,s.nativePv,s.pv,s.error||s.status]);})).join('\r\n');
+ var url=URL.createObjectURL(new Blob([text],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='valio_plus_values_'+(fiscal?_rvView.year:'comptable')+'.csv';a.click();setTimeout(function(){URL.revokeObjectURL(url);},1000);
+}
+
 function groupByKey(pos,keyFn,colorFn){
   const m={};pos.forEach(p=>{const k=keyFn(p)||'Autre';m[k]=(m[k]||0)+(p.valueEur||0);});
   const entries=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
@@ -2273,7 +2350,7 @@ function _instrumentFromTx(tx){
   if(i<0)return null;
   try{var m=JSON.parse(notes.slice(i+LEVERAGE_MARKER.length));return m.kind==='turbo'&&m.version===1?m:null;}catch(e){return null;}
 }
-function _instrumentNotes(tx){var n=tx&&tx.notes||'',i=n.lastIndexOf(LEVERAGE_MARKER);return i<0?n:n.slice(0,i);}
+function _instrumentNotes(tx){var n=_rvStripNotes(tx&&tx.notes||''),i=n.lastIndexOf(LEVERAGE_MARKER);return i<0?n:n.slice(0,i);}
 function _isLeveragedTicker(ticker){return /^TURBO:/.test(ticker||'');}
 function _instrumentFor(ticker){var tx=S.transactions.find(function(t){return t.ticker===ticker&&_instrumentFromTx(t);});return _instrumentFromTx(tx);}
 function _instrumentCaption(ticker){var m=_instrumentFor(ticker);return m?' · '+_esc(m.underlying)+' · '+(m.direction==='short'?'Baissier':'Haussier')+(m.leverage!=null?' · levier saisi ×'+m.leverage:''):'';}
@@ -2638,7 +2715,7 @@ async function renderScreener(){
   pg.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:22px">'+
     '<div>'+
       '<h2 style="font-size:18px;font-weight:700">Screener</h2>'+
-      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V34 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
+      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V35 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
     '</div>'+
     '<button onclick="_toggleScrWatch()" style="padding:6px 14px;border:1px solid var(--border2);border-radius:20px;background:'+_wBg+';color:'+_wColor+';font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">'+
       '⭐ Watchlist — '+(_scrShowWatch?'<b>ON</b>':'OFF')+
@@ -9024,13 +9101,13 @@ function openAddTransaction(pre=null){if(!S.accounts.length)return showToast("�
 function openEditTx(id){const tx=S.transactions.find(t=>t.id===id);if(!tx)return showToast('❌ Introuvable');showModal(txForm(null,tx));}
 function onAcctChange(){const id=document.getElementById('m-acct')?.value;const a=S.accounts.find(x=>x.id===id);if(!a)return;const el=document.getElementById('m-currency');if(!el)return;const n=a.name.toLowerCase();if(n.includes('ibkr')||n.includes('interactive')||a.currency==='USD')el.value='USD';else el.value='EUR';}
 function updTotal(){const q=parseFloat(document.getElementById('m-qty')?.value)||0,p=parseFloat(document.getElementById('m-price')?.value)||0,f=parseFloat(document.getElementById('m-fees')?.value)||0,c=document.getElementById('m-currency')?.value||'EUR';const el=document.getElementById('tx-total');if(el&&q>0&&p>0)el.innerHTML=`<strong>Total : ${fN(q*p+f)} ${cS(c)}</strong> · ${fQ(q)} × ${fN(p)} + ${fN(f)} frais`;}
-function readForm(){return _finalizeInstrumentForm({account_id:document.getElementById('m-acct').value,ticker:document.getElementById('m-ticker').value.trim().toUpperCase(),name:document.getElementById('m-aname').value.trim(),asset_type:document.getElementById('m-asset').value,transaction_type:document.getElementById('m-txtype').value,quantity:parseFloat(document.getElementById('m-qty').value),price:parseFloat(document.getElementById('m-price').value),fees:parseFloat(document.getElementById('m-fees').value)||0,currency:document.getElementById('m-currency').value,transaction_date:document.getElementById('m-date').value,notes:document.getElementById('m-notes').value.trim()||null});}
-async function saveTx(){const d=readForm();const invalid=_txValidationError(d);if(invalid)return showToast('❌ '+invalid);try{const ins=await dbPost('transactions',d);const full=await dbGet('transactions','id=eq.'+ins.id+'&select=*,accounts(name,type)');S.transactions.unshift(full?.[0]||ins);closeModal();showToast('✅ Transaction enregistrée');renderAccounts();
+function readForm(){return _rvPreserveMeta(_finalizeInstrumentForm({account_id:document.getElementById('m-acct').value,ticker:document.getElementById('m-ticker').value.trim().toUpperCase(),name:document.getElementById('m-aname').value.trim(),asset_type:document.getElementById('m-asset').value,transaction_type:document.getElementById('m-txtype').value,quantity:parseFloat(document.getElementById('m-qty').value),price:parseFloat(document.getElementById('m-price').value),fees:parseFloat(document.getElementById('m-fees').value)||0,currency:document.getElementById('m-currency').value,transaction_date:document.getElementById('m-date').value,notes:document.getElementById('m-notes').value.trim()||null}));}
+async function saveTx(){const d=readForm();const invalid=_txValidationError(d);if(invalid)return showToast('❌ '+invalid);try{const ins=await dbPost('transactions',d);const full=await dbGet('transactions','id=eq.'+ins.id+'&select=*,accounts(name,type)');S.transactions.unshift(full?.[0]||ins);closeModal();showToast('✅ Transaction enregistrée');_rvApplyTotals();_rvLoadFx(false);renderAccounts();
   // Journal de décisions : proposer une note pré-remplie (bouton "Passer" pour ignorer)
   setTimeout(function(){ try{ openJournalModal({ticker:d.ticker,type:(d.transaction_type||'buy'),date:d.transaction_date,price:d.price,currency:d.currency}); }catch(e){} },350);
 }catch(e){showToast('❌ '+e.message);}}
-async function saveEditTx(id){const d=readForm();const invalid=_txValidationError(d);if(invalid)return showToast('❌ '+invalid);try{await dbPatch('transactions','id=eq.'+id,d);const i=S.transactions.findIndex(t=>t.id===id);if(i>=0){const a=S.accounts.find(x=>x.id===d.account_id);S.transactions[i]={...S.transactions[i],...d,accounts:{name:a?.name,type:a?.type}};}closeModal();showToast('✅ Modifié');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
-async function deleteTx(id){if(!confirm('Supprimer cette transaction ?'))return;try{await dbDel('transactions','id=eq.'+id);S.transactions=S.transactions.filter(t=>t.id!==id);showToast('✅ Supprimée');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
+async function saveEditTx(id){const d=readForm();const invalid=_txValidationError(d);if(invalid)return showToast('❌ '+invalid);try{await dbPatch('transactions','id=eq.'+id,d);const i=S.transactions.findIndex(t=>t.id===id);if(i>=0){const a=S.accounts.find(x=>x.id===d.account_id);S.transactions[i]={...S.transactions[i],...d,accounts:{name:a?.name,type:a?.type}};}closeModal();showToast('✅ Modifié');_rvApplyTotals();_rvLoadFx(false);renderAccounts();}catch(e){showToast('❌ '+e.message);}}
+async function deleteTx(id){if(!confirm('Supprimer cette transaction ?'))return;try{await dbDel('transactions','id=eq.'+id);S.transactions=S.transactions.filter(t=>t.id!==id);showToast('✅ Supprimée');_rvApplyTotals();renderAccounts();}catch(e){showToast('❌ '+e.message);}}
 
 // ═══ HELPERS ═══
 
