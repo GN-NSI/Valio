@@ -1720,6 +1720,28 @@ function _rvFiscalClass(tx,accounts){
  return asset==='stock'||asset==='etf'?'eligible':'special';
 }
 // Intraday dates in old data have no execution time. Record an explicit order to resolve them.
+function _rvTime(tx){
+ var m=_rvMeta(tx),v=m.timeDate===_rvDay(tx)?String(m.time||''):'';
+ if(!v){var match=String(tx&&tx.transaction_date||'').match(/T(\d{2}:\d{2}(?::\d{2})?)/);if(match)v=match[1];}
+ return /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(v)?v:'';
+}
+function _rvTimeSeconds(tx){var v=_rvTime(tx);if(!v)return null;var a=v.split(':').map(Number);return a[0]*3600+a[1]*60+(a[2]||0);}
+function _rvQuantityTolerance(q){return Math.max(1e-7,Math.min(1e-4,Math.abs(q)*1e-6));}
+function _rvPreserveMeta(d){
+ var t=S.transactions.find(function(x){return x.id===window._editingTxId;}),m=t?_rvMeta(t):{};
+ if(t&&_rvDay(d)!==_rvDay(t)){delete m.order;delete m.time;delete m.timeDate;}
+ if(t&&(_rvDay(d)!==_rvDay(t)||(d.currency||'EUR')!==(t.currency||'EUR'))){delete m.eurRate;delete m.fxDate;delete m.fxCurrency;}
+ var el=document.getElementById('m-time');
+ if(el){var time=String(el.value||'').trim();delete m.time;delete m.timeDate;if(time){if(!/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(time)){d._error='Heure invalide';return d;}m.time=time;m.timeDate=_rvDay(d);}}
+ d.notes=_rvWriteMeta({notes:d.notes},m);return d;
+}
+function onLeverageToggle(){
+ var toggle=document.getElementById('m-use-leverage'),asset=document.getElementById('m-asset');if(!toggle||!asset)return;
+ if(toggle.checked){if(asset.value!=='turbo')window._baseAssetBeforeLeverage=asset.value;asset.value='turbo';}
+ else asset.value=window._baseAssetBeforeLeverage||'stock';
+ onInstrumentChange();
+}
+
 function _rvOrdered(transactions){
  var byDay={};(transactions||[]).forEach(function(t,i){var key=[t.account_id,t.ticker,_rvDay(t)].join('|');(byDay[key]||(byDay[key]=[])).push({tx:t,index:i});});
  var holdings={},out=[];
@@ -1728,19 +1750,19 @@ function _rvOrdered(transactions){
   var buys=xs.some(function(x){return x.tx.transaction_type==='buy';}),sells=xs.some(function(x){return x.tx.transaction_type==='sell';});
   var explicit=xs.every(function(x){var m=_rvMeta(x.tx);return m.order!=null&&isFinite(Number(m.order));});
   var orders=xs.map(function(x){return Number(_rvMeta(x.tx).order);}),unique=new Set(orders).size===orders.length;
-  var timed=xs.every(function(x){return /T\d\d:\d\d/.test(String(x.tx.transaction_date||''));})&&new Set(xs.map(function(x){return x.tx.transaction_date;})).size===xs.length;
+  var timed=xs.every(function(x){return _rvTime(x.tx)!=='';})&&!xs.some(function(a){return xs.some(function(b){return a.tx.transaction_type!==b.tx.transaction_type&&_rvTimeSeconds(a.tx)===_rvTimeSeconds(b.tx);});});
   var ambiguous=buys&&sells&&!((explicit&&unique)||timed);
-  var sold=xs.filter(function(x){return x.tx.transaction_type==='sell';}).reduce(function(s,x){return s+Number(x.tx.quantity||0);},0),sellsFirst=opening+1e-7>=sold;
+  var sold=xs.filter(function(x){return x.tx.transaction_type==='sell';}).reduce(function(s,x){return s+Number(x.tx.quantity||0);},0),sellsFirst=opening+_rvQuantityTolerance(sold)>=sold;
   xs.sort(function(a,b){
+   if(timed){var dt=_rvTimeSeconds(a.tx)-_rvTimeSeconds(b.tx);if(dt)return dt;}
    if(explicit&&unique)return Number(_rvMeta(a.tx).order)-Number(_rvMeta(b.tx).order);
-   if(timed)return Date.parse(a.tx.transaction_date)-Date.parse(b.tx.transaction_date);
    if(ambiguous&&a.tx.transaction_type!==b.tx.transaction_type)return (a.tx.transaction_type===(sellsFirst?'sell':'buy'))?-1:1;
    var ca=Date.parse(a.tx.created_at),cb=Date.parse(b.tx.created_at);if(isFinite(ca)&&isFinite(cb)&&ca!==cb)return ca-cb;
    return String(a.tx.id||'').localeCompare(String(b.tx.id||''))||a.index-b.index;
   });
   if(ambiguous&&!sellsFirst){
    var before=[],after=[],balance=opening,buysSorted=xs.filter(function(x){return x.tx.transaction_type==='buy';}).slice().sort(function(a,b){return Number(a.tx.quantity)-Number(b.tx.quantity)||String(a.tx.id||'').localeCompare(String(b.tx.id||''));});
-   buysSorted.forEach(function(x){if(balance+1e-7<sold){before.push(x);balance+=Number(x.tx.quantity||0);}else after.push(x);});
+   buysSorted.forEach(function(x){if(balance+_rvQuantityTolerance(sold)<sold){before.push(x);balance+=Number(x.tx.quantity||0);}else after.push(x);});
    xs=before.concat(xs.filter(function(x){return x.tx.transaction_type==='sell';}),after);
   }
   xs.forEach(function(x){out.push({tx:x.tx,ambiguous:ambiguous});var q=Number(x.tx.quantity);if(q>0&&isFinite(q))holdings[k]=(holdings[k]||0)+(x.tx.transaction_type==='buy'?q:x.tx.transaction_type==='sell'?-q:0);});
@@ -1763,13 +1785,14 @@ function _rvLedger(transactions,accounts,opts){
    pool.lots.push({qty:q,cost:cost,eurCost:eCost,cur:cur,approx:approx,date:t.transaction_date,txId:t.id,orderUncertain:pool.orderUncertain});return;
   }
   var a=_rvAccount(t,accounts),row={id:t.id,ticker:t.ticker,name:t.name||t.ticker,accountId:t.account_id,accountName:a.name,date:t.transaction_date,year:_rvDay(t).slice(0,4),qty:q,currency:cur,price:p,fees:f,method:method,fiscalClass:_rvFiscalClass(t,accounts),tx:t,matched:[],fxSource:rate.source};
-  if(pool.broken||pool.quantity+1e-7<q){row.error=pool.broken?'Historique invalide avant cette vente':'Quantité vendue supérieure aux achats connus sur ce compte';row.pv=null;row.nativePv=null;sales.push(row);issues.push({tx:t,message:row.error});pool.broken=true;return;}
+  if(pool.broken||pool.quantity+_rvQuantityTolerance(q)<q){row.error=pool.broken?'Historique invalide avant cette vente':'Vente de '+q+' titres ; stock connu : '+Number(pool.quantity.toFixed(8))+' ; manque : '+Number((q-pool.quantity).toFixed(8))+' titre(s) sur ce compte à cette date';row.pv=null;row.nativePv=null;sales.push(row);issues.push({tx:t,message:row.error});pool.broken=true;return;}
+  var consumed=Math.min(q,pool.quantity);row.quantityAvailable=pool.quantity;row.roundingAdjusted=q>pool.quantity;
   var costRaw=0,costEur=0,orderUncertain=pool.orderUncertain||entry.ambiguous,costApprox=false;
   if(method==='cmp'){
-   costRaw=pool.currency===cur&&pool.cost!=null?pool.cost*q/pool.quantity:null;costEur=pool.eurCost!=null?pool.eurCost*q/pool.quantity:null;costApprox=pool.approx;
+   costRaw=pool.currency===cur&&pool.cost!=null?pool.cost*consumed/pool.quantity:null;costEur=pool.eurCost!=null?pool.eurCost*consumed/pool.quantity:null;costApprox=pool.approx;
    row.matched=[{date:'Achats antérieurs · PMP',qty:q,cost:costRaw,eurCost:costEur}];
   }else{
-   var left=q;
+   var left=consumed;
    while(left>1e-7&&pool.lots.length){var lot=pool.lots[0],take=Math.min(left,lot.qty),fraction=take/lot.qty,cr=lot.cost*fraction,ce=lot.eurCost!=null?lot.eurCost*fraction:null;
     costRaw=costRaw!=null&&lot.cur===cur?costRaw+cr:null;costEur=costEur!=null&&ce!=null?costEur+ce:null;costApprox=costApprox||lot.approx;orderUncertain=orderUncertain||lot.orderUncertain;
     row.matched.push({date:lot.date,qty:take,cost:cr,eurCost:ce,txId:lot.txId});lot.cost-=cr;if(lot.eurCost!=null)lot.eurCost-=ce;lot.qty-=take;left-=take;if(lot.qty<1e-7)pool.lots.shift();
@@ -1780,9 +1803,9 @@ function _rvLedger(transactions,accounts,opts){
   row.pct=costRaw>0&&row.nativePv!=null?row.nativePv/costRaw*100:null;row.orderUncertain=orderUncertain;row.approx=approx||costApprox;row.error=null;
   row.status=row.pv==null?'Change manquant':orderUncertain?'Ordre à vérifier':row.approx?'Conversion estimée':'Calcul documenté';
   sales.push(row);
-  if(method==='cmp'){if(pool.cost!=null)pool.cost-=pool.cost*q/pool.quantity;if(pool.eurCost!=null)pool.eurCost-=pool.eurCost*q/pool.quantity;}
+  if(method==='cmp'){if(pool.cost!=null)pool.cost-=pool.cost*consumed/pool.quantity;if(pool.eurCost!=null)pool.eurCost-=pool.eurCost*consumed/pool.quantity;}
   else{pool.cost=pool.cost!=null?pool.lots.reduce(function(s,l){return s+l.cost;},0):null;pool.eurCost=pool.lots.every(function(l){return l.eurCost!=null;})?pool.lots.reduce(function(s,l){return s+l.eurCost;},0):null;}
-  pool.quantity-=q;if(pool.quantity<1e-7){pool.quantity=0;pool.cost=0;pool.eurCost=0;pool.orderUncertain=false;pool.approx=false;}
+  pool.quantity-=consumed;if(pool.quantity<1e-7){pool.quantity=0;pool.cost=0;pool.eurCost=0;pool.orderUncertain=false;pool.approx=false;}
  });
  return {sales:sales.sort(function(a,b){return String(b.date).localeCompare(String(a.date));}),issues:issues,pools:pools,method:method};
 }
@@ -1838,12 +1861,12 @@ function _rvRender(){
 function _rvAudit(index){
  var s=_rvDetailsRows[index];if(!s)return;_rvPanel='audit';var related=S.transactions.filter(function(t){return t.account_id===s.accountId&&t.ticker===s.ticker&&_rvDay(t)<=_rvDay(s.tx);});
  var equation='<p class="rv-info"><b>Coût retenu :</b> '+(s.cost!=null?fN(s.cost)+' '+_esc(s.currency)+' (PRU '+fN(s.cost/s.qty)+')':'Non comparable en devise')+' · <b>Vente nette :</b> '+(s.proceeds!=null?fN(s.proceeds)+' '+_esc(s.currency):'—')+'. Frais d’achat inclus dans le coût ; frais de vente déjà déduits.</p>';
- var html='<div class="modal-hd"><h2>Vérifier '+_esc(s.name)+'</h2><button class="btn btn-ghost btn-sm" onclick="_rvReturn()">← Retour</button></div><p class="rv-info">Vente : '+_esc(s.date)+' · '+fQ(s.qty)+' titres · '+_esc(s.accountName)+'. Méthode '+s.method.toUpperCase()+'.</p>'+equation+'<div class="rv-kpis"><div><span>Résultat en devise</span><b style="color:'+_rvColor(s.nativePv)+'">'+_rvSigned(s.nativePv,s.currency)+'</b></div><div><span>Résultat en euros</span><b style="color:'+_rvColor(s.pv)+'">'+_rvSigned(s.pv)+'</b></div></div><p class="rv-info">'+_esc(s.error||s.status)+'. Une différence FIFO / PMP peut subsister avec IBKR. Les achats et ventes du même jour doivent être ordonnés : 1, 2, 3… Un ordre saisi sur un seul élément ne suffit pas.</p><div class="rv-table-wrap"><table class="rv-table"><thead><tr><th>Date</th><th>Opération</th><th>Quantité</th><th>Prix</th><th>Frais</th><th>Conversion automatique</th><th>Ordre du jour</th><th>Action</th></tr></thead><tbody>'+_rvOrdered(related).map(function(e){var t=e.tx,m=_rvMeta(t),r=_rvRate(t);return '<tr><td>'+_esc(_rvDay(t))+'</td><td>'+_esc(t.transaction_type==='buy'?'Achat':'Vente')+'</td><td>'+fQ(t.quantity)+'</td><td>'+fN(t.price)+' '+_esc(t.currency)+'</td><td>'+fN(t.fees||0)+'</td><td>'+(r.rate!=null?r.rate.toFixed(6):'—')+'<small>'+_esc(r.source)+'</small></td><td>'+(m.order==null?'Non précisé':m.order)+'</td><td><button class="btn btn-ghost btn-sm" data-tx-id="'+_esc(t.id)+'" onclick="_rvEditMeta(this.dataset.txId)">Vérifier</button></td></tr>';}).join('')+'</tbody></table></div><div class="modal-footer"><button class="btn btn-primary" onclick="_rvReturn()">Retour à la synthèse</button></div>';
+ var html='<div class="modal-hd"><h2>Vérifier '+_esc(s.name)+'</h2><button class="btn btn-ghost btn-sm" onclick="_rvReturn()">← Retour</button></div><p class="rv-info">Vente : '+_esc(s.date)+' · '+fQ(s.qty)+' titres · '+_esc(s.accountName)+'. Méthode '+s.method.toUpperCase()+'.</p>'+equation+'<div class="rv-kpis"><div><span>Résultat en devise</span><b style="color:'+_rvColor(s.nativePv)+'">'+_rvSigned(s.nativePv,s.currency)+'</b></div><div><span>Résultat en euros</span><b style="color:'+_rvColor(s.pv)+'">'+_rvSigned(s.pv)+'</b></div></div><p class="rv-info">'+_esc(s.error||s.status)+'. Une différence FIFO / PMP peut subsister avec IBKR. Les dates passent toujours en premier. Pour un même titre/compte/jour : heure facultative, ou ordre 1, 2, 3… Les numéros ne servent pas à ordonner des dates différentes. Si le stock est insuffisant, vérifie les dates, quantités et achats manquants.</p><div class="rv-table-wrap"><table class="rv-table"><thead><tr><th>Date</th><th>Opération</th><th>Quantité</th><th>Prix</th><th>Frais</th><th>Conversion automatique</th><th>Heure / ordre du jour</th><th>Action</th></tr></thead><tbody>'+_rvOrdered(related).map(function(e){var t=e.tx,m=_rvMeta(t),r=_rvRate(t);return '<tr><td>'+_esc(_rvDay(t))+'</td><td>'+_esc(t.transaction_type==='buy'?'Achat':'Vente')+'</td><td>'+fQ(t.quantity)+'</td><td>'+fN(t.price)+' '+_esc(t.currency)+'</td><td>'+fN(t.fees||0)+'</td><td>'+(r.rate!=null?r.rate.toFixed(6):'—')+'<small>'+_esc(r.source)+'</small></td><td>'+(m.order==null?'Non précisé':m.order)+'</td><td><button class="btn btn-ghost btn-sm" data-tx-id="'+_esc(t.id)+'" onclick="_rvEditMeta(this.dataset.txId)">Vérifier</button></td></tr>';}).join('')+'</tbody></table></div><div class="modal-footer"><button class="btn btn-primary" onclick="_rvReturn()">Retour à la synthèse</button></div>';
  showModal(html);document.getElementById('modal-content').classList.add('realized-modal');window._rvAuditSaleId=s.id;
 }
 function _rvEditMeta(id){
  var t=S.transactions.find(function(x){return x.id===id;});if(!t)return;_rvPanel='edit';var m=_rvMeta(t),r=_rvRate(t);
- showModal('<div class="modal-hd"><h2>Ordre des transactions · '+_esc(t.ticker)+'</h2><button class="modal-close" onclick="_rvReturn()">✕</button></div><p>'+_esc(_rvDay(t))+' · '+(t.transaction_type==='buy'?'Achat':'Vente')+' · '+fQ(t.quantity)+' × '+fN(t.price)+' '+_esc(t.currency)+'</p><div class="form-group"><label class="form-label">Ordre réel dans la journée (1, 2, 3…)</label><input id="rv-order" class="form-input" type="number" min="1" step="1" value="'+(m.order==null?'':m.order)+'"></div><details class="rv-advanced"><summary>Change personnalisé (facultatif)</summary><div class="form-group"><label class="form-label">Taux du relevé : 1 '+_esc(t.currency||'EUR')+' = combien d’euros ?</label><input id="rv-rate" class="form-input" type="number" min="0" step="any" placeholder="'+(r.rate||'')+'" value="'+(m.eurRate&&m.fxCurrency===(t.currency||'EUR').toUpperCase()&&m.fxDate===_rvDay(t)?m.eurRate:'')+'"><p class="rv-info">Exemple : 1 USD = 0,90 EUR → saisir 0,90. Laisse vide : change journalier automatique ou base estimée de secours. Les frais sont supposés dans la devise de la transaction.</p></div></details><div class="modal-footer"><button class="btn btn-ghost" onclick="_rvReturn()">Annuler</button><button class="btn btn-primary" data-tx-id="'+_esc(id)+'" onclick="_rvSaveMeta(this.dataset.txId)">Enregistrer</button></div>');
+ showModal('<div class="modal-hd"><h2>Ordre des transactions · '+_esc(t.ticker)+'</h2><button class="modal-close" onclick="_rvReturn()">✕</button></div><p>'+_esc(_rvDay(t))+' · '+(t.transaction_type==='buy'?'Achat':'Vente')+' · '+fQ(t.quantity)+' × '+fN(t.price)+' '+_esc(t.currency)+'</p><div class="form-group"><label class="form-label">Ordre pour ce titre / compte / jour uniquement (1, 2, 3…)</label><input id="rv-order" class="form-input" type="number" min="1" step="1" value="'+(m.order==null?'':m.order)+'"></div><details class="rv-advanced"><summary>Change personnalisé (facultatif)</summary><div class="form-group"><label class="form-label">Taux du relevé : 1 '+_esc(t.currency||'EUR')+' = combien d’euros ?</label><input id="rv-rate" class="form-input" type="number" min="0" step="any" placeholder="'+(r.rate||'')+'" value="'+(m.eurRate&&m.fxCurrency===(t.currency||'EUR').toUpperCase()&&m.fxDate===_rvDay(t)?m.eurRate:'')+'"><p class="rv-info">Exemple : 1 USD = 0,90 EUR → saisir 0,90. Laisse vide : change journalier automatique ou base estimée de secours. Les frais sont supposés dans la devise de la transaction.</p></div></details><div class="modal-footer"><button class="btn btn-ghost" onclick="_rvReturn()">Annuler</button><button class="btn btn-primary" data-tx-id="'+_esc(id)+'" onclick="_rvSaveMeta(this.dataset.txId)">Enregistrer</button></div>');
 }
 async function _rvSaveMeta(id){
  var t=S.transactions.find(function(x){return x.id===id;});if(!t)return;var os=document.getElementById('rv-order').value.trim(),rs=document.getElementById('rv-rate').value.trim(),order=Number(os),rate=Number(rs);
@@ -1851,7 +1874,6 @@ async function _rvSaveMeta(id){
  var m=_rvMeta(t);delete m.order;delete m.eurRate;delete m.fxDate;delete m.fxCurrency;if(os)m.order=order;if(rs){m.eurRate=rate;m.fxDate=_rvDay(t);m.fxCurrency=(t.currency||'EUR').toUpperCase();}
  var notes=_rvWriteMeta(t,m);try{await dbPatch('transactions','id=eq.'+id,{notes:notes});t.notes=notes;_rvApplyTotals();showToast('Ordre et change enregistrés');_rvReturn();}catch(e){showToast('Enregistrement impossible : '+e.message);}
 }
-function _rvPreserveMeta(d){var t=S.transactions.find(function(x){return x.id===window._editingTxId;});if(!t)return d;var m=_rvMeta(t);if(d.transaction_date!==t.transaction_date)delete m.order;if(_rvDay(d)!==_rvDay(t)||(d.currency||'EUR')!==(t.currency||'EUR')){delete m.eurRate;delete m.fxDate;delete m.fxCurrency;}d.notes=_rvWriteMeta({notes:d.notes},m);return d;}
 function _rvExport(){
  var fiscal=_rvView.mode==='fiscal',rows=_rvVisibleSales(_rvLedger(S.transactions,S.accounts,{method:fiscal?'cmp':_rvMethod()}));
  var cells=function(a){return a.map(function(v){var s=v==null?'':String(v);if(/^[=+@\t\r]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';}).join(';');};
@@ -2367,10 +2389,10 @@ function _instrumentFor(ticker){var tx=S.transactions.find(function(t){return t.
 function _instrumentCaption(ticker){var m=_instrumentFor(ticker);return m?' · '+_esc(m.underlying)+' · '+(m.direction==='short'?'Baissier':'Haussier')+(m.leverage!=null?' · levier saisi ×'+m.leverage:''):'';}
 function _moatTableColor(score){return score>=85?'var(--green)':score>=75?'var(--yellow)':score>=65?'#f59e0b':'var(--red)';}
 function _leverageForm(tx){
- var m=_instrumentFromTx(tx)||{},is=!!m;
- return '<div id="leverage-fields" style="display:'+(is?'block':'none')+';padding:12px;background:var(--bg2);border-radius:8px;margin-bottom:12px"><div style="font-size:11px;color:var(--muted);margin-bottom:10px">Ticker : ISIN ou identifiant du produit chez ton courtier. Quantité et prix : ceux du turbo/certificat. Le levier est indicatif, il ne multiplie pas les montants.</div><div class="form-row"><div class="form-group"><label class="form-label">Sous-jacent *</label><input class="form-input" id="m-lev-underlying" placeholder="NVDA" value="'+_esc(m.underlying||'')+'"></div><div class="form-group"><label class="form-label">Sens</label><select class="form-input" id="m-lev-direction"><option value="long">Haussier / Call</option><option value="short"'+(m.direction==='short'?' selected':'')+'>Baissier / Put</option></select></div></div><div class="form-row"><div class="form-group"><label class="form-label">Levier à la transaction (optionnel)</label><input class="form-input" id="m-lev-factor" type="number" min="1" step="any" placeholder="3" value="'+(m.leverage==null?'':m.leverage)+'"></div><div class="form-group"><label class="form-label">Barrière, devise du sous-jacent (optionnel)</label><input class="form-input" id="m-lev-barrier" type="number" min="0" step="any" value="'+(m.barrier==null?'':m.barrier)+'"></div></div><div style="font-size:11px;color:var(--muted)">Cours du produit à actualiser depuis le portefeuille via « ✎ ». Une clôture à zéro est possible si le produit est désactivé. Pas de détection automatique de la barrière.</div></div>';
+ var instrument=_instrumentFromTx(tx),m=instrument||{},is=!!instrument;
+ return '<div id="leverage-fields"'+(is?'':' hidden')+' style="display:'+(is?'block':'none')+';padding:12px;background:var(--bg2);border-radius:8px;margin-bottom:12px"><div style="font-size:11px;color:var(--muted);margin-bottom:10px">Ticker : ISIN ou identifiant du produit chez ton courtier. Quantité et prix : ceux du turbo/certificat. Le levier est indicatif, il ne multiplie pas les montants.</div><div class="form-row"><div class="form-group"><label class="form-label">Sous-jacent *</label><input class="form-input" id="m-lev-underlying" placeholder="NVDA" value="'+_esc(m.underlying||'')+'"></div><div class="form-group"><label class="form-label">Sens</label><select class="form-input" id="m-lev-direction"><option value="long">Haussier / Call</option><option value="short"'+(m.direction==='short'?' selected':'')+'>Baissier / Put</option></select></div></div><div class="form-row"><div class="form-group"><label class="form-label">Levier à la transaction (optionnel)</label><input class="form-input" id="m-lev-factor" type="number" min="1" step="any" placeholder="3" value="'+(m.leverage==null?'':m.leverage)+'"></div><div class="form-group"><label class="form-label">Barrière, devise du sous-jacent (optionnel)</label><input class="form-input" id="m-lev-barrier" type="number" min="0" step="any" value="'+(m.barrier==null?'':m.barrier)+'"></div></div><div style="font-size:11px;color:var(--muted)">Cours du produit à actualiser depuis le portefeuille via « ✎ ». Une clôture à zéro est possible si le produit est désactivé. Pas de détection automatique de la barrière.</div></div>';
 }
-function onInstrumentChange(){var active=document.getElementById('m-asset').value==='turbo',el=document.getElementById('leverage-fields');if(el)el.style.display=active?'block':'none';}
+function onInstrumentChange(){var active=document.getElementById('m-asset').value==='turbo',el=document.getElementById('leverage-fields'),toggle=document.getElementById('m-use-leverage');if(el){el.hidden=!active;el.style.display=active?'block':'none';}if(toggle)toggle.checked=active;}
 function _txValidationError(d){
  if(d._error)return d._error;
  if(!d.ticker||!d.name||!d.transaction_date||!d.account_id)return 'Champs obligatoires manquants';
@@ -2726,7 +2748,7 @@ async function renderScreener(){
   pg.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:22px">'+
     '<div>'+
       '<h2 style="font-size:18px;font-weight:700">Screener</h2>'+
-      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V36 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
+      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V37 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
     '</div>'+
     '<button onclick="_toggleScrWatch()" style="padding:6px 14px;border:1px solid var(--border2);border-radius:20px;background:'+_wBg+';color:'+_wColor+';font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">'+
       '⭐ Watchlist — '+(_scrShowWatch?'<b>ON</b>':'OFF')+
@@ -9097,14 +9119,16 @@ function openAddAccount(){showModal(`<div class="modal-hd"><h2>Créer un compte<
     <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveAccount()">Créer</button></div>`);}
 async function saveAccount(){const name=document.getElementById('m-name').value.trim(),type=document.getElementById('m-type').value,currency=document.getElementById('m-curr').value;if(!name)return showToast('❌ Donne un nom');try{const d=await dbPost('accounts',{user_id:getUser().id,name,type,currency});S.accounts.push(d);closeModal();showToast('✅ Compte créé');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
 async function deleteAccount(id,name){if(!confirm(`Supprimer "${name}" et toutes ses transactions ?`))return;try{await dbDel('accounts','id=eq.'+id);S.accounts=S.accounts.filter(a=>a.id!==id);S.transactions=S.transactions.filter(t=>t.account_id!==id);showToast('✅ Supprimé');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
-function txForm(pre=null,tx=null){const ie=!!tx;window._editingTxId=tx&&tx.id||null;const instrument=_instrumentFromTx(tx);return`<div class="modal-hd"><h2>${ie?'Modifier':'Ajouter une transaction'}</h2><button class="modal-close" onclick="closeModal()">✕</button></div>
+function txForm(pre=null,tx=null){const ie=!!tx;window._editingTxId=tx&&tx.id||null;const instrument=_instrumentFromTx(tx);window._baseAssetBeforeLeverage=(!instrument&&tx&&tx.asset_type)||'stock';return`<div class="modal-hd"><h2>${ie?'Modifier':'Ajouter une transaction'}</h2><button class="modal-close" onclick="closeModal()">✕</button></div>
     <div class="form-group"><label class="form-label">Compte *</label><select id="m-acct" class="form-input" onchange="onAcctChange()">${S.accounts.map(a=>`<option value="${a.id}" ${a.id===(tx?.account_id||pre)?'selected':''}>${a.name} (${a.type})</option>`).join('')}</select></div>
     <div class="form-row"><div class="form-group"><label class="form-label">Ticker *</label><input type="text" id="m-ticker" class="form-input" placeholder="ex: NVDA" value="${_esc((tx?.ticker||'').replace(/^TURBO:/,''))}" oninput="this.value=this.value.toUpperCase()"></div><div class="form-group"><label class="form-label">Nom *</label><input type="text" id="m-aname" class="form-input" placeholder="ex: Nvidia" value="${tx?.name||''}"></div></div>
-    <div class="form-row"><div class="form-group"><label class="form-label">Type d'actif</label><select id="m-asset" class="form-input" onchange="onInstrumentChange()"><option value="stock" ${!instrument&&(tx?.asset_type==='stock'||!tx)?'selected':''}>Action</option><option value="etf" ${tx?.asset_type==='etf'?'selected':''}>ETF</option><option value="crypto" ${tx?.asset_type==='crypto'?'selected':''}>Crypto</option><option value="turbo" ${instrument?'selected':''}>Turbo / certificat à levier</option></select></div><div class="form-group"><label class="form-label">Transaction</label><select id="m-txtype" class="form-input"><option value="buy" ${tx?.transaction_type!=='sell'?'selected':''}>Achat ▲</option><option value="sell" ${tx?.transaction_type==='sell'?'selected':''}>Vente ▼</option></select></div></div>
+    <div class="form-row"><div class="form-group"><label class="form-label">Type d'actif</label><select id="m-asset" class="form-input" onchange="onInstrumentChange()"><option value="stock" ${!instrument&&(tx?.asset_type==='stock'||!tx)?'selected':''}>Action</option><option value="etf" ${tx?.asset_type==='etf'?'selected':''}>ETF</option><option value="crypto" ${tx?.asset_type==='crypto'?'selected':''}>Crypto</option><option value="turbo" hidden ${instrument?'selected':''}>Turbo / certificat à levier</option></select></div><div class="form-group"><label class="form-label">Transaction</label><select id="m-txtype" class="form-input"><option value="buy" ${tx?.transaction_type!=='sell'?'selected':''}>Achat ▲</option><option value="sell" ${tx?.transaction_type==='sell'?'selected':''}>Vente ▼</option></select></div></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin:6px 0 12px;cursor:pointer"><input type="checkbox" id="m-use-leverage" ${instrument?'checked':''} onchange="onLeverageToggle()"> Activer un produit à levier</label>
     ${_leverageForm(tx)}
     <div class="form-row"><div class="form-group"><label class="form-label">Quantité *</label><input type="number" id="m-qty" class="form-input" value="${tx?.quantity||''}" min="0.000001" step="any" oninput="updTotal()"></div><div class="form-group"><label class="form-label">Prix unitaire *</label><input type="number" id="m-price" class="form-input" value="${tx?.price||''}" min="0.000001" step="any" oninput="updTotal()"></div></div>
     <div class="form-row"><div class="form-group"><label class="form-label">Devise *</label><select id="m-currency" class="form-input" onchange="updTotal()"><option value="EUR" ${tx?.currency==='EUR'||!tx?'selected':''}>EUR €</option><option value="USD" ${tx?.currency==='USD'?'selected':''}>USD $</option><option value="GBP" ${tx?.currency==='GBP'?'selected':''}>GBP £</option><option value="JPY" ${tx?.currency==='JPY'?'selected':''}>JPY ¥</option><option value="HKD" ${tx?.currency==='HKD'?'selected':''}>HKD</option></select></div><div class="form-group"><label class="form-label">Frais</label><input type="number" id="m-fees" class="form-input" value="${tx?.fees||0}" min="0" step="any" oninput="updTotal()"></div></div>
-    <div class="form-group"><label class="form-label">Date *</label><input type="date" id="m-date" class="form-input" value="${tx?.transaction_date||new Date().toISOString().split('T')[0]}"></div>
+    <div class="form-row"><div class="form-group"><label class="form-label">Date *</label><input type="date" id="m-date" class="form-input" value="${tx?_rvDay(tx):new Date().toISOString().split('T')[0]}"></div><div class="form-group"><label class="form-label">Heure du relevé (facultative)</label><input type="time" step="1" id="m-time" class="form-input" value="${tx?_rvTime(tx):''}"></div></div>
+    <p style="font-size:11px;color:var(--muted);margin:-4px 0 12px">Laisse l’heure vide si tu ne la connais pas. Pour un même jour, utilise le même fuseau horaire que ton relevé.</p>
     <div class="form-group"><label class="form-label">Notes (optionnel)</label><input type="text" id="m-notes" class="form-input" placeholder="ex: DCA mensuel…" value="${_esc(_instrumentNotes(tx))}"></div>
     <div class="tx-total-box" id="tx-total">Remplis la quantité et le prix pour voir le total.</div>
     <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="${ie?`saveEditTx('${tx.id}')`:'saveTx()'}">${ie?'Modifier':'Enregistrer'}</button></div>`;}
