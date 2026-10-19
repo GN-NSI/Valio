@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Valio · V40</title>
+<title>Valio · V41</title>
 <!-- PWA : app installable sur mobile -->
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#0a0e1a">
@@ -505,7 +505,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
       </nav>
       <div class="sidebar-footer" onclick="logout()">
         <div class="avatar" id="sidebar-avatar">?</div>
-        <div class="sidebar-user"><div class="uname" id="sidebar-username">—</div><div class="logout">Se déconnecter · V40</div></div>
+        <div class="sidebar-user"><div class="uname" id="sidebar-username">—</div><div class="logout">Se déconnecter · V41</div></div>
       </div>
     </aside>
     <div id="main">
@@ -1864,7 +1864,7 @@ function _rvRender(){
   return '<details class="rv-company"><summary><div><b>'+_esc(xs[0].name)+'</b><span>'+_esc(ticker)+' · '+xs.length+' vente'+(xs.length>1?'s':'')+' · '+_esc(xs[xs.length-1].date.slice(0,10))+' → '+_esc(xs[0].date.slice(0,10))+'</span></div><div class="rv-company-pnl"><b style="color:'+_rvColor(su.net)+'">'+(su.missing===xs.length?'—':_rvSigned(su.net))+(su.missing||su.uncertain?' <small>provisoire</small>':'')+'</b><span>'+Object.keys(native).map(function(c){return native[c].missing?'Devise non comparable':_rvSigned(native[c].total,c);}).join(' · ')+'</span></div></summary><div class="rv-table-wrap"><table class="rv-table"><thead><tr><th>Date / compte</th><th>Quantité</th><th>Prix moyen<br>d’achat</th><th>Coût total<br>d’achat</th><th>Vente totale<br>nette de frais</th><th>PV / MV<br>en devise</th><th>PV / MV<br>en euros</th><th>Contrôle</th></tr></thead><tbody>'+xs.map(function(s){var idx=sales.indexOf(s),date=s.date.slice(0,10);return '<tr><td><b>'+_esc(date)+'</b><small>'+_esc(s.accountName)+'</small></td><td>'+fQ(s.qty)+'</td><td>'+(s.cost!=null&&s.qty>0?_rvFormatAverage(s.cost/s.qty)+' '+_esc(s.currency):'—')+'<small>'+(s.eurCost!=null&&s.qty>0?_rvFormatAverage(s.eurCost/s.qty)+' €':'—')+'</small></td><td>'+(s.cost!=null?fN(s.cost)+' '+_esc(s.currency):'—')+'<small>'+(s.eurCost!=null?fE(s.eurCost):'Change manquant')+'</small></td><td>'+fN(s.proceeds==null?s.qty*s.price-s.fees:s.proceeds)+' '+_esc(s.currency)+'<small>Frais vente : '+fN(s.fees)+' '+_esc(s.currency)+'</small></td><td style="color:'+_rvColor(s.nativePv)+'">'+_rvSigned(s.nativePv,s.currency)+'</td><td style="color:'+_rvColor(s.pv)+'">'+_rvSigned(s.pv)+'<small>'+(s.pct!=null?_rvSigned(s.pct,'').replace(' €','')+' % en devise':'')+'</small></td><td><span class="rv-status">'+_esc(s.error||s.status)+'</span><button class="btn btn-ghost btn-sm" onclick="_rvAudit('+idx+')">Détail / vérifier</button></td></tr>';}).join('')+'</tbody></table></div></details>';
  }).join('');
  var issueRows=ledger.issues.length?'<details class="rv-issues"><summary>Anomalies à corriger ('+ledger.issues.length+')</summary>'+ledger.issues.map(function(x){return '<p>'+_esc(x.tx.ticker||'Sans titre')+' · '+_esc(x.tx.transaction_date||'Sans date')+' : '+_esc(x.message)+'</p>';}).join('')+'</details>':'';
- modal.innerHTML='<div class="modal-hd"><div><h2>Plus-values réalisées <small style="font-size:12px;color:var(--muted)">V40</small></h2><p class="rv-subtitle">'+(fiscal?'Synthèse fiscale · '+_rvView.year:'Synthèse comptable · toutes les années')+'</p></div><button class="modal-close" onclick="closeModal()">✕</button></div>'+controls+cards+'<p class="rv-info">'+info+'</p>'+(notices.length?'<div class="rv-notice">'+notices.map(_esc).join('<br>')+'</div>':'')+'<div class="rv-groups">'+(rows||'<div class="rv-empty">Aucune vente dans cette sélection.</div>')+'</div>'+issueRows+'<p class="rv-info">Conversion automatique : cours journalier quand disponible ; sinon base de secours (1 € = '+_rvUsdBase()+' $). Aucune saisie de change par vente nécessaire. Prix moyen d’achat = coût total d’achat / quantité vendue, frais d’achat inclus. PV / MV = vente totale nette − coût total d’achat. Les conversions indicatives restent des estimations à vérifier avant déclaration.</p>';
+ modal.innerHTML='<div class="modal-hd"><div><h2>Plus-values réalisées <small style="font-size:12px;color:var(--muted)">V41</small></h2><p class="rv-subtitle">'+(fiscal?'Synthèse fiscale · '+_rvView.year:'Synthèse comptable · toutes les années')+'</p></div><button class="modal-close" onclick="closeModal()">✕</button></div>'+controls+cards+'<p class="rv-info">'+info+'</p>'+(notices.length?'<div class="rv-notice">'+notices.map(_esc).join('<br>')+'</div>':'')+'<div class="rv-groups">'+(rows||'<div class="rv-empty">Aucune vente dans cette sélection.</div>')+'</div>'+issueRows+'<p class="rv-info">Conversion automatique : cours journalier quand disponible ; sinon base de secours (1 € = '+_rvUsdBase()+' $). Aucune saisie de change par vente nécessaire. Prix moyen d’achat = coût total d’achat / quantité vendue, frais d’achat inclus. PV / MV = vente totale nette − coût total d’achat. Les conversions indicatives restent des estimations à vérifier avant déclaration.</p>';
 }
 function _rvAudit(index){
  var s=_rvDetailsRows[index];if(!s)return;_rvPanel='audit';var related=S.transactions.filter(function(t){return t.account_id===s.accountId&&t.ticker===s.ticker&&_rvDay(t)<=_rvDay(s.tx);});
@@ -2741,7 +2741,7 @@ async function renderScreener(){
   pg.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:22px">'+
     '<div>'+
       '<h2 style="font-size:18px;font-weight:700">Screener</h2>'+
-      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V40 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
+      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V41 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
     '</div>'+
     '<button onclick="_toggleScrWatch()" style="padding:6px 14px;border:1px solid var(--border2);border-radius:20px;background:'+_wBg+';color:'+_wColor+';font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">'+
       '⭐ Watchlist — '+(_scrShowWatch?'<b>ON</b>':'OFF')+
@@ -7079,8 +7079,10 @@ function computePositionsFromData(accounts, transactions){
   // Miroir exact de computePositions() : conversion via tx.currency + frais + CMP + PV réalisées
   (transactions||[]).slice().sort(function(a,b){return new Date(a.transaction_date)-new Date(b.transaction_date);}).forEach(function(tx){
     var k=tx.ticker; if(!k) return;
-    if(!map[k]) map[k]={ticker:k,quantity:0,totalCostEur:0,realizedPnlEur:0,buyCurrencies:[]};
+    if(!map[k]) map[k]={ticker:k,name:k,quantity:0,totalCostEur:0,realizedPnlEur:0,buyCurrencies:[]};
     var m=map[k];
+    var enteredName=typeof tx.name==='string'?tx.name.trim():'';
+    if(enteredName&&(enteredName!==k||!m.name||m.name===k))m.name=enteredName;
     var toE=function(v){return toEur(v,tx.currency);};
     var type=(tx.transaction_type||tx.type||'').toLowerCase();
     var q=tx.quantity||0;
@@ -7103,10 +7105,17 @@ function computePositionsFromData(accounts, transactions){
 }
 
 // ═══ PORTEFEUILLE AMI — tri colonnes + P&L € (Modif 1) ═══
+function _friendTitle(p){return p&&typeof p.name==='string'&&p.name.trim()?p.name.trim():p&&p.ticker||'';}
+function _friendDisplayKey(key){var p=_friendPos.find(function(x){return x.ticker===key;});return p?_friendTitle(p):key;}
+function _friendPositionChart(pos){
+ var data=groupByKey(pos,function(p){return p.ticker;},function(t,i){return tickerColor(t,i);});
+ return {...data,labels:data.labels.map(function(t){var p=pos.find(function(x){return x.ticker===t;});return _friendTitle(p)||t;}),clickable:false};
+}
+
 var _friendPos=[];
 var _friendSort={col:'value',dir:'desc'};
 var _FSORT={
-  titre:function(p){return p.ticker||'';},
+  titre:function(p){return _friendTitle(p);},
   qty:function(p){return p.quantity||0;},
   pru:function(p){return p.pruEur||0;},
   cours:function(p){return p.priceEur||0;},
@@ -7142,8 +7151,8 @@ function _friendRows(pos){
     var eColor=p.pnlEur!=null&&p.pnlEur>=0?'var(--green)':'var(--red)';
     return '<tr style="border-bottom:1px solid var(--border2)">'+
       '<td style="padding:10px 8px">'+
-        '<div style="font-weight:600;font-size:13px">'+(p.name||p.ticker)+'</div>'+
-        '<div style="font-size:11px;color:var(--muted)">'+p.ticker+(TICKER_SUBSECTOR[p.ticker]?' · '+TICKER_SUBSECTOR[p.ticker]:'')+'</div>'+
+        '<div style="font-weight:600;font-size:13px">'+_esc(_friendTitle(p))+'</div>'+
+        '<div style="font-size:11px;color:var(--muted)">'+_esc(p.ticker)+(TICKER_SUBSECTOR[p.ticker]?' · '+TICKER_SUBSECTOR[p.ticker]:'')+'</div>'+
       '</td>'+
       '<td style="padding:10px 8px;text-align:right" class="mono">'+fN(p.quantity,4)+'</td>'+
       '<td style="padding:10px 8px;text-align:right" class="mono">'+_fPx(p.pruNative!=null?p.pruNative:p.pruEur,p.curr)+'</td>'+
@@ -7168,7 +7177,7 @@ function _friendChartData(){
   var mode=_friendChartMode, drill=_friendChartDrill;
   if(!pos.length) return {labels:[],values:[],colors:[],clickable:false};
 
-  if(mode==='positions') return {...groupByKey(pos,function(p){return p.name||p.ticker;},function(l,i){var f=pos.find(function(x){return (x.name||x.ticker)===l;});return tickerColor((f&&f.ticker)||l,i);}),clickable:false};
+  if(mode==='positions') return _friendPositionChart(pos);
 
   if(mode==='type'){
     if(!drill.length){
@@ -7177,7 +7186,7 @@ function _friendChartData(){
       return {labels:ent.map(function(e){return e[0];}),values:ent.map(function(e){return e[1];}),colors:ent.map(function(_,i){return i===0?'#634BE4':'#22c55e';}),clickable:true};
     }
     var filt=pos.filter(function(p){return (isETF(p)?'ETF':'Stock picking')===drill[0];});
-    return {...groupByKey(filt,function(p){return p.ticker;},function(t,i){return tickerColor(t,i);}),clickable:false};
+    return _friendPositionChart(filt);
   }
 
   if(mode==='secteur'){
@@ -7191,7 +7200,7 @@ function _friendChartData(){
     var filt=exp.filter(function(ep){return getSect(ep)===drill[0];});
     var m2={};filt.forEach(function(ep){var k=ep._isEtfSlice?ep.name:ep.ticker;m2[k]=(m2[k]||0)+(ep.valueEur||0);});
     var ent2=Object.entries(m2).filter(function(e){return e[1]>0;}).sort(function(a,b){return b[1]-a[1];});
-    return {labels:ent2.map(function(e){return e[0];}),values:ent2.map(function(e){return e[1];}),colors:ent2.map(function(e,i){return tickerColor(e[0],i);}),clickable:false};
+    return {labels:ent2.map(function(e){return _friendDisplayKey(e[0]);}),values:ent2.map(function(e){return e[1];}),colors:ent2.map(function(e,i){return tickerColor(e[0],i);}),clickable:false};
   }
 
   if(mode==='region'){
@@ -7217,7 +7226,7 @@ function _friendChartData(){
       return{labels:entR2.map(function(e){return e[0];}),values:entR2.map(function(e){return e[1];}),colors:entR2.map(function(_,i){return PALETTE[i%PALETTE.length];}),clickable:true};
     }
     var filt3=pos.filter(function(p){return (CNAMES[getProfile(p.ticker).country||'XX']||p.ticker)===drill[1];});
-    return {...groupByKey(filt3,function(p){return p.name||p.ticker;},function(t,i){return tickerColor(t,i);}),clickable:false};
+    return _friendPositionChart(filt3);
   }
 
   if(mode==='pays'){
@@ -7230,7 +7239,7 @@ function _friendChartData(){
     var filt=exp.filter(function(ep){var k=ep._etfKey?(CNAMES[ep._etfKey]||ep._etfKey):(CNAMES[getProfile(ep.ticker).country||'XX']||'Autre');return k===drill[0];});
     var m2={};filt.forEach(function(ep){var k=ep._isEtfSlice?ep.name+' (expo.)':ep.ticker;m2[k]=(m2[k]||0)+(ep.valueEur||0);});
     var ent2=Object.entries(m2).filter(function(e){return e[1]>0;}).sort(function(a,b){return b[1]-a[1];});
-    return {labels:ent2.map(function(e){return e[0];}),values:ent2.map(function(e){return e[1];}),colors:ent2.map(function(e,i){return tickerColor(e[0].split(' ')[0],i);}),clickable:false};
+    return {labels:ent2.map(function(e){return _friendDisplayKey(e[0]);}),values:ent2.map(function(e){return e[1];}),colors:ent2.map(function(e,i){return tickerColor(e[0].split(' ')[0],i);}),clickable:false};
   }
 
   if(mode==='capi'){
@@ -7268,7 +7277,7 @@ function renderFriendChart(){
       var clk=d.clickable?(' onclick="_friendDrill(\''+String(l).replace(/'/g,"\\'")+'\')" style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px"'):(' style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px"');
       return '<div'+clk+'>'+
         '<div style="width:10px;height:10px;border-radius:50%;background:'+d.colors[i]+';flex-shrink:0"></div>'+
-        '<span style="font-weight:600">'+l+'</span>'+
+        '<span style="font-weight:600">'+_esc(l)+'</span>'+
         '<span style="color:var(--muted);margin-left:auto">'+pct+'%</span></div>';
     }).join('');
   }
