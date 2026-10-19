@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Valio · V41</title>
+<title>Valio · V42</title>
 <!-- PWA : app installable sur mobile -->
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#0a0e1a">
@@ -505,7 +505,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
       </nav>
       <div class="sidebar-footer" onclick="logout()">
         <div class="avatar" id="sidebar-avatar">?</div>
-        <div class="sidebar-user"><div class="uname" id="sidebar-username">—</div><div class="logout">Se déconnecter · V41</div></div>
+        <div class="sidebar-user"><div class="uname" id="sidebar-username">—</div><div class="logout">Se déconnecter · V42</div></div>
       </div>
     </aside>
     <div id="main">
@@ -1554,6 +1554,24 @@ async function renderPortfolio(){
 // ═══ SMART TABLE ROWS ═══
 // Utilise les données déjà chargées (S.prices/manualPrices + p.valueEur) si disponibles
 // Évite le bug "les prix disparaissent quand on re-render"
+// GDR quote unit is resolved in the page as well as the API. Never multiply holdings.
+async function _sgFetchQuote(ticker,signal){
+ var gdr=['SMSN.IL','US7960508882'].includes(ticker);
+ var r=await fetch(API+'?symbol='+encodeURIComponent(gdr?'005930.KS':ticker),{signal:signal});
+ if(r.ok===false)throw Error('Cours indisponible');
+ var d=await r.json();
+ if(!gdr)return d;
+ if(!d||d.error||!Number.isFinite(d.price)||d.price<=0||d.currency!=='KRW'||d.syntheticGdr)throw Error('Cours coréen non confirmé');
+ var q={...d,symbol:ticker,syntheticGdr:true,underlying:'005930.KS',underlyingPerGdr:25,isin:'US7960508882'};
+ ['price','prevClose','changeAbs'].forEach(function(k){if(Number.isFinite(q[k]))q[k]*=25;});
+ return q;
+}
+function _sgFix(){
+ _ovInstrumentForm('005930.KS');
+ document.getElementById('ov-ticker').value='SMSN.IL';
+ document.getElementById('ov-correct').textContent='Utiliser le GDR sur ce compte';
+}
+
 function posTblRows(pos){
   return pos.map(p=>{
     const d=manualPrices[p.ticker]||S.prices[p.ticker];
@@ -1579,7 +1597,7 @@ function posTblRows(pos){
     return`<tr>
       <td style="text-align:left;padding-left:20px"><div class="ticker-cell" onclick="openCompanyFromPos('${p.ticker}','${(p.name||p.ticker).replace(/'/g,"\\'")}')" style="cursor:pointer" title="Voir la fiche ${p.name||p.ticker}">
         <div class="ticker-logo"><img src="https://assets.parqet.com/logos/symbol/${p.ticker}?format=png" onload="this.style.display='block'" onerror="this.parentNode.innerHTML='<span>${p.ticker.slice(0,3)}</span>'" style="display:none"></div>
-        <div><div class="ticker-name" style="text-decoration-color:var(--blue)">${p.name}</div><div class="ticker-sym" style="color:var(--cyan)">${p.ticker}</div></div></div></td>
+        <div><div class="ticker-name" style="text-decoration-color:var(--blue)">${p.name}</div><div class="ticker-sym" style="color:var(--cyan)">${p.ticker}</div>${p.ticker==='005930.KS'?'<button class="btn btn-ghost btn-sm" style="margin-top:5px" onclick="event.stopPropagation();_sgFix()">Vous détenez le GDR ? Corriger ×25</button>':''}</div></div></td>
       <td class="mono">${fQ(p.quantity)}</td>
       <td class="mono">${fN(p.pruDisplay)} ${cS(p.pruCurrency)}</td>
       <td id="px-${p.ticker}">${priceHTML}</td>
@@ -1595,7 +1613,7 @@ function posTblRows(pos){
 
 function openCompanyFromPos(ticker, name){
   if(['6324.TYO','6324.TO'].includes(ticker)){_ovInstrumentForm(ticker);document.getElementById('ov-ticker').value='6324.T';return;}
-  if(ticker==='005930.KS'){_ovInstrumentForm(ticker);document.getElementById('ov-ticker').value='SMSN.IL';return;}
+  if(ticker==='005930.KS'){_sgFix();return;}
   if(_isLeveragedTicker(ticker))return setManualPrice(ticker);
   openCompanyDetail(ticker, name);
 }
@@ -1612,10 +1630,11 @@ async function fetchOneTicker(p){
   const $=id=>document.getElementById(id);
   try{
     let d=manualPrices[p.ticker]||S.prices[p.ticker];
+    if(['SMSN.IL','US7960508882'].includes(p.ticker)&&d&&!d.manual&&(!d.syntheticGdr||d.underlyingPerGdr!==25||d.currency!=='KRW'))d=null;
     if(_isLeveragedTicker(p.ticker)&&!d){d=_lastProductQuote(p.ticker);if(d)S.prices[p.ticker]=d;}
     if(!d||(!d.manual&&Date.now()-(d._t||0)>60000)){
       const ctrl=new AbortController();const tid=setTimeout(()=>ctrl.abort(),9000);
-      try{const r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker),{signal:ctrl.signal});d=await r.json();}
+      try{d=await _sgFetchQuote(p.ticker,ctrl.signal);}
       finally{clearTimeout(tid);}
       d._t=Date.now();S.prices[p.ticker]=d;
     }
@@ -1864,7 +1883,7 @@ function _rvRender(){
   return '<details class="rv-company"><summary><div><b>'+_esc(xs[0].name)+'</b><span>'+_esc(ticker)+' · '+xs.length+' vente'+(xs.length>1?'s':'')+' · '+_esc(xs[xs.length-1].date.slice(0,10))+' → '+_esc(xs[0].date.slice(0,10))+'</span></div><div class="rv-company-pnl"><b style="color:'+_rvColor(su.net)+'">'+(su.missing===xs.length?'—':_rvSigned(su.net))+(su.missing||su.uncertain?' <small>provisoire</small>':'')+'</b><span>'+Object.keys(native).map(function(c){return native[c].missing?'Devise non comparable':_rvSigned(native[c].total,c);}).join(' · ')+'</span></div></summary><div class="rv-table-wrap"><table class="rv-table"><thead><tr><th>Date / compte</th><th>Quantité</th><th>Prix moyen<br>d’achat</th><th>Coût total<br>d’achat</th><th>Vente totale<br>nette de frais</th><th>PV / MV<br>en devise</th><th>PV / MV<br>en euros</th><th>Contrôle</th></tr></thead><tbody>'+xs.map(function(s){var idx=sales.indexOf(s),date=s.date.slice(0,10);return '<tr><td><b>'+_esc(date)+'</b><small>'+_esc(s.accountName)+'</small></td><td>'+fQ(s.qty)+'</td><td>'+(s.cost!=null&&s.qty>0?_rvFormatAverage(s.cost/s.qty)+' '+_esc(s.currency):'—')+'<small>'+(s.eurCost!=null&&s.qty>0?_rvFormatAverage(s.eurCost/s.qty)+' €':'—')+'</small></td><td>'+(s.cost!=null?fN(s.cost)+' '+_esc(s.currency):'—')+'<small>'+(s.eurCost!=null?fE(s.eurCost):'Change manquant')+'</small></td><td>'+fN(s.proceeds==null?s.qty*s.price-s.fees:s.proceeds)+' '+_esc(s.currency)+'<small>Frais vente : '+fN(s.fees)+' '+_esc(s.currency)+'</small></td><td style="color:'+_rvColor(s.nativePv)+'">'+_rvSigned(s.nativePv,s.currency)+'</td><td style="color:'+_rvColor(s.pv)+'">'+_rvSigned(s.pv)+'<small>'+(s.pct!=null?_rvSigned(s.pct,'').replace(' €','')+' % en devise':'')+'</small></td><td><span class="rv-status">'+_esc(s.error||s.status)+'</span><button class="btn btn-ghost btn-sm" onclick="_rvAudit('+idx+')">Détail / vérifier</button></td></tr>';}).join('')+'</tbody></table></div></details>';
  }).join('');
  var issueRows=ledger.issues.length?'<details class="rv-issues"><summary>Anomalies à corriger ('+ledger.issues.length+')</summary>'+ledger.issues.map(function(x){return '<p>'+_esc(x.tx.ticker||'Sans titre')+' · '+_esc(x.tx.transaction_date||'Sans date')+' : '+_esc(x.message)+'</p>';}).join('')+'</details>':'';
- modal.innerHTML='<div class="modal-hd"><div><h2>Plus-values réalisées <small style="font-size:12px;color:var(--muted)">V41</small></h2><p class="rv-subtitle">'+(fiscal?'Synthèse fiscale · '+_rvView.year:'Synthèse comptable · toutes les années')+'</p></div><button class="modal-close" onclick="closeModal()">✕</button></div>'+controls+cards+'<p class="rv-info">'+info+'</p>'+(notices.length?'<div class="rv-notice">'+notices.map(_esc).join('<br>')+'</div>':'')+'<div class="rv-groups">'+(rows||'<div class="rv-empty">Aucune vente dans cette sélection.</div>')+'</div>'+issueRows+'<p class="rv-info">Conversion automatique : cours journalier quand disponible ; sinon base de secours (1 € = '+_rvUsdBase()+' $). Aucune saisie de change par vente nécessaire. Prix moyen d’achat = coût total d’achat / quantité vendue, frais d’achat inclus. PV / MV = vente totale nette − coût total d’achat. Les conversions indicatives restent des estimations à vérifier avant déclaration.</p>';
+ modal.innerHTML='<div class="modal-hd"><div><h2>Plus-values réalisées <small style="font-size:12px;color:var(--muted)">V42</small></h2><p class="rv-subtitle">'+(fiscal?'Synthèse fiscale · '+_rvView.year:'Synthèse comptable · toutes les années')+'</p></div><button class="modal-close" onclick="closeModal()">✕</button></div>'+controls+cards+'<p class="rv-info">'+info+'</p>'+(notices.length?'<div class="rv-notice">'+notices.map(_esc).join('<br>')+'</div>':'')+'<div class="rv-groups">'+(rows||'<div class="rv-empty">Aucune vente dans cette sélection.</div>')+'</div>'+issueRows+'<p class="rv-info">Conversion automatique : cours journalier quand disponible ; sinon base de secours (1 € = '+_rvUsdBase()+' $). Aucune saisie de change par vente nécessaire. Prix moyen d’achat = coût total d’achat / quantité vendue, frais d’achat inclus. PV / MV = vente totale nette − coût total d’achat. Les conversions indicatives restent des estimations à vérifier avant déclaration.</p>';
 }
 function _rvAudit(index){
  var s=_rvDetailsRows[index];if(!s)return;_rvPanel='audit';var related=S.transactions.filter(function(t){return t.account_id===s.accountId&&t.ticker===s.ticker&&_rvDay(t)<=_rvDay(s.tx);});
@@ -2741,7 +2760,7 @@ async function renderScreener(){
   pg.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:22px">'+
     '<div>'+
       '<h2 style="font-size:18px;font-weight:700">Screener</h2>'+
-      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V41 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
+      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V42 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
     '</div>'+
     '<button onclick="_toggleScrWatch()" style="padding:6px 14px;border:1px solid var(--border2);border-radius:20px;background:'+_wBg+';color:'+_wColor+';font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">'+
       '⭐ Watchlist — '+(_scrShowWatch?'<b>ON</b>':'OFF')+
@@ -2761,7 +2780,7 @@ async function renderScreener(){
 
   // Charger les prix manquants pour les items de la watchlist
   await Promise.all(allItems.filter(function(p){return p._isWatch && !S.prices[p.ticker];}).map(async function(p){
-    try{var r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker));var d=await r.json();if(d&&d.price)S.prices[p.ticker]=d;}catch(e){}
+    try{var d=await _sgFetchQuote(p.ticker);if(d&&d.price)S.prices[p.ticker]=d;}catch(e){}
   }));
   var _totalPf = S.enrichedPos.reduce(function(s,p){return s+(p.valueEur||0);},0);
   var rows=allItems.map(function(p){
@@ -9214,7 +9233,7 @@ async function _ovCorrect(oldTicker){
   // One server-side scoped PATCH; no partial loop over transactions.
   var saved=await rest('/rest/v1/transactions?account_id=eq.'+encodeURIComponent(account)+'&ticker=eq.'+encodeURIComponent(oldTicker),{method:'PATCH',headers:{Prefer:'return=representation'},body:JSON.stringify({ticker:newTicker})});
   if(!Array.isArray(saved)||saved.length!==rows.length){var latest=await dbGet('transactions','account_id=eq.'+encodeURIComponent(account)+'&select=*,accounts(name,type)');S.transactions=S.transactions.filter(function(t){return t.account_id!==account;}).concat(latest||[]);throw Error('Correction à vérifier : historique rechargé depuis la base');}
-  rows.forEach(function(t){t.ticker=newTicker;});delete manualPrices[oldTicker];delete S.prices[oldTicker];delete S.prices[newTicker];delete manualPrices[newTicker];_ovRestore();S.enrichedPos=[];S.portfolioRendered=false;closeModal();_rvApplyTotals();showToast('Ticker corrigé pour '+rows.length+' transaction(s)');if(S.page==='portfolio'){S.portfolioRendered=true;await renderPortfolio();}else renderAccounts();
+  rows.forEach(function(t){t.ticker=newTicker;});[oldTicker,newTicker].forEach(function(k){delete S.fundamentals[k];delete S.profiles[k];if(S.fundamentalsAttempted)S.fundamentalsAttempted.delete(k);});saveCache();delete manualPrices[oldTicker];delete S.prices[oldTicker];delete S.prices[newTicker];delete manualPrices[newTicker];_ovRestore();S.enrichedPos=[];S.portfolioRendered=false;closeModal();_rvApplyTotals();showToast('Ticker corrigé pour '+rows.length+' transaction(s)');if(S.page==='portfolio'){S.portfolioRendered=true;await renderPortfolio();}else renderAccounts();
  }catch(e){showToast('Correction non confirmée : '+e.message);if(btn)btn.disabled=false;}
 }
 
