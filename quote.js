@@ -80,6 +80,39 @@ module.exports = async (req, res) => {
   res.setHeader('X-Valio-Quote-Version', '13');
   const { symbol, type } = req.query;
   if (type === 'health') return res.json({ ok: true, quoteVersion: 13, engine: 'Valio V27' });
+  if(['6324.TYO','6324.TO'].includes(String(symbol||'').toUpperCase()))return module.exports({...req,query:{...req.query,symbol:'6324.T'}},res);
+  // Citi CUSIP 796050888 / ISIN US7960508882: voting unitary GDR, 25 ordinary shares.
+  // Reconstituted reference value, not the actual London/Trade Republic execution quote.
+  if (['SMSN.IL','US7960508882'].includes(String(symbol||'').toUpperCase()) && (!type || ['chart','fundamentals','financials','profile'].includes(type))) {
+    const original = symbol;
+    const proxy = {
+      setHeader: (k,v) => res.setHeader(k,v),
+      status(n) { res.status(n); return this; },
+      json(data) {
+        if (!data || data.error) return res.json(data);
+        const d = JSON.parse(JSON.stringify(data));
+        const multiply = (obj,key) => { if (obj && typeof obj[key] === 'number' && Number.isFinite(obj[key])) obj[key] *= 25; };
+        d.symbol=original;d.currency='KRW';d.financialCurrency='KRW';
+        d.syntheticGdr=true;d.underlying='005930.KS';d.underlyingPerGdr=25;d.isin='US7960508882';
+        d.label='GDR reconstitué · 25 actions ordinaires';
+        if (!type) {
+          ['price','prevClose','changeAbs'].forEach(k=>multiply(d,k));
+        }
+        if (Array.isArray(d.chartData)) d.chartData.forEach(p=>multiply(p,'c'));
+        if (type==='fundamentals') {
+          ['epsFY0','epsFY1','epsFY2','epsFY3','epsFY4','epsFY5','targetMeanPrice','targetHighPrice','targetLowPrice'].forEach(k=>multiply(d,k));
+          if (d.sharesOutstanding>0) d.sharesOutstanding/=25;
+          Object.values(d.analystEstimates||{}).forEach(a=>{
+            ['epsAvg','epsLow','epsHigh','epsTrendCurrent','epsTrend7d','epsTrend30d','epsTrend60d','epsTrend90d'].forEach(k=>multiply(a,k));
+          });
+        }
+        if (type==='financials' && Array.isArray(d.eps)) d.eps=d.eps.map(v=>typeof v==='number'&&Number.isFinite(v)?v*25:v);
+        return res.json(d);
+      }
+    };
+    return module.exports({...req,query:{...req.query,symbol:'005930.KS'}},proxy);
+  }
+
   // FX histories are indicative daily close rates, never presented as broker execution FX.
   if (type === 'fxhistory') {
     const currency = String(req.query.currency || '').toUpperCase();
