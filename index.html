@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Valio · V39</title>
+<title>Valio · V40</title>
 <!-- PWA : app installable sur mobile -->
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#0a0e1a">
@@ -505,7 +505,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
       </nav>
       <div class="sidebar-footer" onclick="logout()">
         <div class="avatar" id="sidebar-avatar">?</div>
-        <div class="sidebar-user"><div class="uname" id="sidebar-username">—</div><div class="logout">Se déconnecter · V39</div></div>
+        <div class="sidebar-user"><div class="uname" id="sidebar-username">—</div><div class="logout">Se déconnecter · V40</div></div>
       </div>
     </aside>
     <div id="main">
@@ -1232,7 +1232,7 @@ let ratiosSort={col:null,dir:'desc'};
 // ═══ CACHE LOCALSTORAGE — versionné et expirant ═══
 // IMPORTANT : les fondamentaux alimentent directement la valorisation. Un cache frontend
 // ancien ne doit jamais survivre à une correction du backend Yahoo.
-const VALIO_FUND_CACHE_V=29;
+const VALIO_FUND_CACHE_V=40;
 const VALIO_FUND_CACHE_TTL=6*60*60*1000; // 6 h
 function saveCache(){
   try{
@@ -1564,13 +1564,13 @@ function posTblRows(pos){
 
     const _cur=(d&&d.currency)||'USD'; const _dispP=d?((_cur==='USD'||_cur==='EUR')?d.price:toEur(d.price,_cur)):null; const _sym=_cur==='USD'?'$':'€';
     const priceHTML=priceLoaded
-      ?`<span class="mono">`+_sym+`${fN(_dispP)}</span>`+(true?`<button class="manual-btn" onclick="event.stopPropagation();setManualPrice('${p.ticker}')">✎</button><div style="font-size:9px;color:var(--muted)">${_esc(d.manual?(d.label||'Cours manuel'):'')}</div>`:'')
+      ?`<span class="mono">`+_sym+`${fN(_dispP)}</span>`+(d.syntheticGdr?'<div style="font-size:9px;color:var(--muted)">GDR reconstitué · ×25</div>':'')+(d.manual?`<button class="manual-btn" onclick="event.stopPropagation();setManualPrice('${p.ticker}')">✎</button><div style="font-size:9px;color:var(--muted)">${_esc(d.manual?(d.label||'Cours manuel'):'')}</div>`:'')
       :noPrice?`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix</button>`
       :`<div class="shimmer" style="width:55px;height:14px"></div>`;
 
     const djHTML=priceLoaded&&!d.manual
       ?(Math.abs(chg)>=0.01?`<span class="mono ${chg>=0?'c-green':'c-red'}">${chg>=0?'+':''}${chg.toFixed(2)}%</span>`:`<span style="color:var(--muted2);font-size:12px">—</span>`)
-      :noPrice?'—':`<div class="shimmer" style="width:45px;height:14px"></div>`;
+      :(noPrice||priceLoaded)?'—':`<div class="shimmer" style="width:45px;height:14px"></div>`;
 
     const valHTML=p.valueEur!=null?`<span class="mono">${fE(p.valueEur)}</span>`:'—';
     const pnlHTML=p.pnlEur!=null?`<span class="mono ${p.pnlEur>=0?'c-green':'c-red'}">${p.pnlEur>=0?'+':''}${fE(p.pnlEur)}</span>`:'—';
@@ -1594,12 +1594,20 @@ function posTblRows(pos){
 }
 
 function openCompanyFromPos(ticker, name){
+  if(['6324.TYO','6324.TO'].includes(ticker)){_ovInstrumentForm(ticker);document.getElementById('ov-ticker').value='6324.T';return;}
+  if(ticker==='005930.KS'){_ovInstrumentForm(ticker);document.getElementById('ov-ticker').value='SMSN.IL';return;}
   if(_isLeveragedTicker(ticker))return setManualPrice(ticker);
   openCompanyDetail(ticker, name);
 }
 function renderPosBody(sorted){const el=document.getElementById('pos-body');if(el)el.innerHTML=posTblRows(sorted);}
 
 // ═══ PRICE FETCHING (par lots — évite le rate-limit Yahoo) ═══
+function _positionPriceUnavailable(p){
+ var id=p.ticker;S.prices[id]={price:null,currency:p.pruCurrency||'EUR',unavailable:true,_t:Date.now()};
+ ['valueEur','pnlEur','pnlPct','priceEur','dayChgPct'].forEach(function(k){delete p[k];});
+ var px=document.getElementById('px-'+id);if(px)px.innerHTML='<button class="manual-btn" data-ticker="'+_esc(id)+'" onclick="setManualPrice(this.dataset.ticker)">Saisir prix ✎</button>';
+ ['dj-','vl-','pl-','pp-'].forEach(function(prefix){var e=document.getElementById(prefix+id);if(e)e.textContent='—';});
+}
 async function fetchOneTicker(p){
   const $=id=>document.getElementById(id);
   try{
@@ -1611,12 +1619,12 @@ async function fetchOneTicker(p){
       finally{clearTimeout(tid);}
       d._t=Date.now();S.prices[p.ticker]=d;
     }
-    if(d?.price==null){if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix ✎</button>`;return;}
+    if(d?.price==null||!Number.isFinite(Number(d.price))){_positionPriceUnavailable(p);return;}
     const _fc=d.currency||'USD'; const pe=toEur(d.price,_fc); const _fdp=(_fc==='USD'||_fc==='EUR')?d.price:pe; const _fs=_fc==='USD'?'$':'€';
     const ve=pe*p.quantity,pnl=ve-p.totalCostEur,pct=p.totalCostEur>0?(pnl/p.totalCostEur)*100:0,chg=d.changePct??0;
     p.priceEur=pe;p.valueEur=ve;p.pnlEur=pnl;p.pnlPct=pct;p.dayChgPct=chg;
     // Cellule Prix (cours uniquement, sans variation)
-    if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<span class="mono">${_fs}${fN(_fdp)}</span>`+(true?`<button class="manual-btn" onclick="event.stopPropagation();setManualPrice('${p.ticker}')">✎</button><div style="font-size:9px;color:var(--muted)">${_esc(d.manual?(d.label||'Cours manuel'):'')}</div>`:'');
+    if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<span class="mono">${_fs}${fN(_fdp)}</span>`+(d.syntheticGdr?'<div style="font-size:9px;color:var(--muted)">GDR reconstitué · ×25</div>':'')+(d.manual?`<button class="manual-btn" onclick="event.stopPropagation();setManualPrice('${p.ticker}')">✎</button><div style="font-size:9px;color:var(--muted)">${_esc(d.manual?(d.label||'Cours manuel'):'')}</div>`:'');
     // Cellule Var. Jour (colonne séparée, triable)
     const djEl=$('dj-'+p.ticker);
     if(djEl)djEl.innerHTML=Math.abs(chg)>=0.01
@@ -1626,8 +1634,7 @@ async function fetchOneTicker(p){
     if($('pl-'+p.ticker))$('pl-'+p.ticker).innerHTML=`<span class="mono ${pnl>=0?'c-green':'c-red'}">${pnl>=0?'+':''}${fE(pnl)}</span>`;
     if($('pp-'+p.ticker))$('pp-'+p.ticker).innerHTML=`<span class="mono ${pct>=0?'c-green':'c-red'}">${pct>=0?'+':''}${pct.toFixed(2)}%</span>`;
   }catch(err){
-    if(err?.name!=='AbortError'&&document.getElementById('px-'+p.ticker))
-      document.getElementById('px-'+p.ticker).innerHTML=`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix ✎</button>`;
+    _positionPriceUnavailable(p);
   }
 }
 
@@ -1857,7 +1864,7 @@ function _rvRender(){
   return '<details class="rv-company"><summary><div><b>'+_esc(xs[0].name)+'</b><span>'+_esc(ticker)+' · '+xs.length+' vente'+(xs.length>1?'s':'')+' · '+_esc(xs[xs.length-1].date.slice(0,10))+' → '+_esc(xs[0].date.slice(0,10))+'</span></div><div class="rv-company-pnl"><b style="color:'+_rvColor(su.net)+'">'+(su.missing===xs.length?'—':_rvSigned(su.net))+(su.missing||su.uncertain?' <small>provisoire</small>':'')+'</b><span>'+Object.keys(native).map(function(c){return native[c].missing?'Devise non comparable':_rvSigned(native[c].total,c);}).join(' · ')+'</span></div></summary><div class="rv-table-wrap"><table class="rv-table"><thead><tr><th>Date / compte</th><th>Quantité</th><th>Prix moyen<br>d’achat</th><th>Coût total<br>d’achat</th><th>Vente totale<br>nette de frais</th><th>PV / MV<br>en devise</th><th>PV / MV<br>en euros</th><th>Contrôle</th></tr></thead><tbody>'+xs.map(function(s){var idx=sales.indexOf(s),date=s.date.slice(0,10);return '<tr><td><b>'+_esc(date)+'</b><small>'+_esc(s.accountName)+'</small></td><td>'+fQ(s.qty)+'</td><td>'+(s.cost!=null&&s.qty>0?_rvFormatAverage(s.cost/s.qty)+' '+_esc(s.currency):'—')+'<small>'+(s.eurCost!=null&&s.qty>0?_rvFormatAverage(s.eurCost/s.qty)+' €':'—')+'</small></td><td>'+(s.cost!=null?fN(s.cost)+' '+_esc(s.currency):'—')+'<small>'+(s.eurCost!=null?fE(s.eurCost):'Change manquant')+'</small></td><td>'+fN(s.proceeds==null?s.qty*s.price-s.fees:s.proceeds)+' '+_esc(s.currency)+'<small>Frais vente : '+fN(s.fees)+' '+_esc(s.currency)+'</small></td><td style="color:'+_rvColor(s.nativePv)+'">'+_rvSigned(s.nativePv,s.currency)+'</td><td style="color:'+_rvColor(s.pv)+'">'+_rvSigned(s.pv)+'<small>'+(s.pct!=null?_rvSigned(s.pct,'').replace(' €','')+' % en devise':'')+'</small></td><td><span class="rv-status">'+_esc(s.error||s.status)+'</span><button class="btn btn-ghost btn-sm" onclick="_rvAudit('+idx+')">Détail / vérifier</button></td></tr>';}).join('')+'</tbody></table></div></details>';
  }).join('');
  var issueRows=ledger.issues.length?'<details class="rv-issues"><summary>Anomalies à corriger ('+ledger.issues.length+')</summary>'+ledger.issues.map(function(x){return '<p>'+_esc(x.tx.ticker||'Sans titre')+' · '+_esc(x.tx.transaction_date||'Sans date')+' : '+_esc(x.message)+'</p>';}).join('')+'</details>':'';
- modal.innerHTML='<div class="modal-hd"><div><h2>Plus-values réalisées <small style="font-size:12px;color:var(--muted)">V39</small></h2><p class="rv-subtitle">'+(fiscal?'Synthèse fiscale · '+_rvView.year:'Synthèse comptable · toutes les années')+'</p></div><button class="modal-close" onclick="closeModal()">✕</button></div>'+controls+cards+'<p class="rv-info">'+info+'</p>'+(notices.length?'<div class="rv-notice">'+notices.map(_esc).join('<br>')+'</div>':'')+'<div class="rv-groups">'+(rows||'<div class="rv-empty">Aucune vente dans cette sélection.</div>')+'</div>'+issueRows+'<p class="rv-info">Conversion automatique : cours journalier quand disponible ; sinon base de secours (1 € = '+_rvUsdBase()+' $). Aucune saisie de change par vente nécessaire. Prix moyen d’achat = coût total d’achat / quantité vendue, frais d’achat inclus. PV / MV = vente totale nette − coût total d’achat. Les conversions indicatives restent des estimations à vérifier avant déclaration.</p>';
+ modal.innerHTML='<div class="modal-hd"><div><h2>Plus-values réalisées <small style="font-size:12px;color:var(--muted)">V40</small></h2><p class="rv-subtitle">'+(fiscal?'Synthèse fiscale · '+_rvView.year:'Synthèse comptable · toutes les années')+'</p></div><button class="modal-close" onclick="closeModal()">✕</button></div>'+controls+cards+'<p class="rv-info">'+info+'</p>'+(notices.length?'<div class="rv-notice">'+notices.map(_esc).join('<br>')+'</div>':'')+'<div class="rv-groups">'+(rows||'<div class="rv-empty">Aucune vente dans cette sélection.</div>')+'</div>'+issueRows+'<p class="rv-info">Conversion automatique : cours journalier quand disponible ; sinon base de secours (1 € = '+_rvUsdBase()+' $). Aucune saisie de change par vente nécessaire. Prix moyen d’achat = coût total d’achat / quantité vendue, frais d’achat inclus. PV / MV = vente totale nette − coût total d’achat. Les conversions indicatives restent des estimations à vérifier avant déclaration.</p>';
 }
 function _rvAudit(index){
  var s=_rvDetailsRows[index];if(!s)return;_rvPanel='audit';var related=S.transactions.filter(function(t){return t.account_id===s.accountId&&t.ticker===s.ticker&&_rvDay(t)<=_rvDay(s.tx);});
@@ -2734,7 +2741,7 @@ async function renderScreener(){
   pg.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:22px">'+
     '<div>'+
       '<h2 style="font-size:18px;font-weight:700">Screener</h2>'+
-      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V39 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
+      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V40 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
     '</div>'+
     '<button onclick="_toggleScrWatch()" style="padding:6px 14px;border:1px solid var(--border2);border-radius:20px;background:'+_wBg+';color:'+_wColor+';font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">'+
       '⭐ Watchlist — '+(_scrShowWatch?'<b>ON</b>':'OFF')+
@@ -6462,6 +6469,7 @@ var _priceHistCache = {}; // {key: [{t,c}]}
 // Déduit la devise native d'un ticker depuis son suffixe de bourse
 // Filet de sécurité quand la devise n'a pas encore été chargée
 function _currencyFromSuffix(ticker){
+  if(['SMSN.IL','US7960508882'].includes(ticker))return 'KRW';
   if(!ticker) return 'USD';
   var suffix=(ticker.split('.')[1]||'').toUpperCase();
   var map={
@@ -9186,7 +9194,7 @@ async function _ovSaveFromForm(ticker){
 async function _ovReset(ticker){try{await _ovStore(ticker,{mode:'auto'});delete S.prices[ticker];delete manualPrices[ticker];closeModal();await _ovRefresh(ticker);showToast('Cours automatique rétabli');}catch(e){showToast('Modification non enregistrée : '+e.message);}}
 function _ovInstrumentForm(ticker){
  var rows=_ovTransactions(ticker),accounts=S.accounts.filter(function(a){return rows.some(function(t){return t.account_id===a.id;});});
- showModal('<div class="modal-hd"><h2>Corriger l’instrument</h2><button class="modal-close" onclick="closeModal()">✕</button></div><p class="rv-info">Cette correction remplace le ticker de toutes les transactions de ce titre sur le compte choisi. Elle conserve les quantités, prix, frais, dates et devises. Utilise le ticker du titre identifié par l’ISIN de ton relevé.</p><p>Ancien ticker : <b>'+_esc(ticker)+'</b></p><div class="form-group"><label class="form-label">Compte</label><select class="form-input" id="ov-account">'+accounts.map(function(a){return '<option value="'+_esc(a.id)+'">'+_esc(a.name)+'</option>';}).join('')+'</select></div><div class="form-group"><label class="form-label">Ticker exact du titre détenu</label><input class="form-input" id="ov-ticker" placeholder="Ex. ticker Yahoo du GDR, après vérification de son ISIN"></div><p class="rv-info">Samsung : 005930.KS = action ordinaire coréenne. Les GDR ordinaires et préférentiels sont distincts. Le prix d’un GDR ne doit pas être appliqué à une quantité d’actions coréennes, ni l’inverse.</p><p id="ov-count" style="color:var(--cyan)"></p><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" id="ov-correct">Appliquer à ce compte</button></div>');
+ showModal('<div class="modal-hd"><h2>Corriger l’instrument</h2><button class="modal-close" onclick="closeModal()">✕</button></div><p class="rv-info">Cette correction remplace le ticker de toutes les transactions de ce titre sur le compte choisi. Elle conserve les quantités, prix, frais, dates et devises. Utilise le ticker du titre identifié par l’ISIN de ton relevé.</p><p>Ancien ticker : <b>'+_esc(ticker)+'</b></p><div class="form-group"><label class="form-label">Compte</label><select class="form-input" id="ov-account">'+accounts.map(function(a){return '<option value="'+_esc(a.id)+'">'+_esc(a.name)+'</option>';}).join('')+'</select></div><div class="form-group"><label class="form-label">Ticker exact du titre détenu</label><input class="form-input" id="ov-ticker" placeholder="Ex. ticker Yahoo du GDR, après vérification de son ISIN"></div><p class="rv-info">Samsung confirmé : ISIN US7960508882 → SMSN.IL, GDR ordinaire représentant 25 actions 005930.KS. La V40 reconstitue son cours à partir de ces 25 actions, puis le convertit en euros. Ne pas multiplier les quantités détenues : elles restent en GDR.</p><p id="ov-count" style="color:var(--cyan)"></p><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" id="ov-correct">Appliquer à ce compte</button></div>');
  var update=function(){var id=document.getElementById('ov-account').value,n=rows.filter(function(t){return t.account_id===id;}).length;document.getElementById('ov-count').textContent=n+' transaction(s) à corriger';};document.getElementById('ov-account').onchange=update;document.getElementById('ov-correct').onclick=function(){_ovCorrect(ticker);};update();
 }
 async function _ovCorrect(oldTicker){
