@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Valio · V42</title>
+<title>Valio · V43</title>
 <!-- PWA : app installable sur mobile -->
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#0a0e1a">
@@ -505,7 +505,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
       </nav>
       <div class="sidebar-footer" onclick="logout()">
         <div class="avatar" id="sidebar-avatar">?</div>
-        <div class="sidebar-user"><div class="uname" id="sidebar-username">—</div><div class="logout">Se déconnecter · V42</div></div>
+        <div class="sidebar-user"><div class="uname" id="sidebar-username">—</div><div class="logout">Se déconnecter · V43</div></div>
       </div>
     </aside>
     <div id="main">
@@ -599,6 +599,11 @@ function _spreadAdjacentColors(labels, colors){
 // ═══ OVERRIDES MANUELS (pays/secteur pour tickers exotiques) ═══
 // FMP peut retourner le pays de la cotation (ex: SMSN.L → GB) au lieu du pays de l'entreprise (KR)
 const META_OVERRIDE={
+  'SMSN.IL':{country:'KR',sector:'Information Technology'},
+  'US7960508882':{country:'KR',sector:'Information Technology'},
+  'SMSN':{country:'KR',sector:'Information Technology'},
+  'AAOI':{country:'US',sector:'Information Technology'},
+  'AAOI.US':{country:'US',sector:'Information Technology'},
   'SMSN.L':{country:'KR',sector:'Information Technology'},
   'ATEYY'  :{country:'JP',sector:'Information Technology'},
   'BESI.AS':{country:'NL',sector:'Information Technology'},
@@ -617,6 +622,11 @@ const META_OVERRIDE={
 // ═══ PAYS HARDCODÉS (pas besoin de FMP pour la géo) ═══
 // US stocks — NYSE / NASDAQ
 const TICKER_COUNTRY={
+  'SMSN.IL':'KR',
+  'US7960508882':'KR',
+  'SMSN':'KR',
+  'AAOI':'US',
+  'AAOI.US':'US',
   NVDA:'US',GOOGL:'US',GOOG:'US',MSFT:'US',AMZN:'US',META:'US',AAPL:'US',
   TSLA:'US',COIN:'US',RDDT:'US',BKNG:'US',SPGI:'US',VRT:'US',UBER:'US',
   V:'US',MA:'US',LYFT:'US',NVTS:'US',JPM:'US',BAC:'US',HOOD:'US',APP:'US',FICO:'US',AXT:'US',
@@ -636,6 +646,11 @@ const TICKER_COUNTRY={
 
 // ═══ SECTEURS HARDCODÉS (pas besoin de FMP pour les secteurs) ═══
 const TICKER_SECTOR={
+  'SMSN.IL':'Information Technology',
+  'US7960508882':'Information Technology',
+  'SMSN':'Information Technology',
+  'AAOI':'Information Technology',
+  'AAOI.US':'Information Technology',
   // Communication Services
   GOOGL:'Communication Services',GOOG:'Communication Services',
   META:'Communication Services',RDDT:'Communication Services',APP:'Communication Services',
@@ -1004,6 +1019,11 @@ function explodeForMode(positions, mode){
 
 // ═══ SOUS-SECTEURS PAR TICKER ═══
 const TICKER_SUBSECTOR={
+  'SMSN.IL':'Mémoires (DRAM/NAND)',
+  'US7960508882':'Mémoires (DRAM/NAND)',
+  'SMSN':'Mémoires (DRAM/NAND)',
+  'AAOI':'Photonique & Lasers (IA)',
+  'AAOI.US':'Photonique & Lasers (IA)',
   // Ajouts : photonique, mémoire, streaming, cloud
   LITE:'Photonique & Lasers (IA)','LITE.US':'Photonique & Lasers (IA)',
   LUMENTUM:'Photonique & Lasers (IA)',
@@ -1883,7 +1903,7 @@ function _rvRender(){
   return '<details class="rv-company"><summary><div><b>'+_esc(xs[0].name)+'</b><span>'+_esc(ticker)+' · '+xs.length+' vente'+(xs.length>1?'s':'')+' · '+_esc(xs[xs.length-1].date.slice(0,10))+' → '+_esc(xs[0].date.slice(0,10))+'</span></div><div class="rv-company-pnl"><b style="color:'+_rvColor(su.net)+'">'+(su.missing===xs.length?'—':_rvSigned(su.net))+(su.missing||su.uncertain?' <small>provisoire</small>':'')+'</b><span>'+Object.keys(native).map(function(c){return native[c].missing?'Devise non comparable':_rvSigned(native[c].total,c);}).join(' · ')+'</span></div></summary><div class="rv-table-wrap"><table class="rv-table"><thead><tr><th>Date / compte</th><th>Quantité</th><th>Prix moyen<br>d’achat</th><th>Coût total<br>d’achat</th><th>Vente totale<br>nette de frais</th><th>PV / MV<br>en devise</th><th>PV / MV<br>en euros</th><th>Contrôle</th></tr></thead><tbody>'+xs.map(function(s){var idx=sales.indexOf(s),date=s.date.slice(0,10);return '<tr><td><b>'+_esc(date)+'</b><small>'+_esc(s.accountName)+'</small></td><td>'+fQ(s.qty)+'</td><td>'+(s.cost!=null&&s.qty>0?_rvFormatAverage(s.cost/s.qty)+' '+_esc(s.currency):'—')+'<small>'+(s.eurCost!=null&&s.qty>0?_rvFormatAverage(s.eurCost/s.qty)+' €':'—')+'</small></td><td>'+(s.cost!=null?fN(s.cost)+' '+_esc(s.currency):'—')+'<small>'+(s.eurCost!=null?fE(s.eurCost):'Change manquant')+'</small></td><td>'+fN(s.proceeds==null?s.qty*s.price-s.fees:s.proceeds)+' '+_esc(s.currency)+'<small>Frais vente : '+fN(s.fees)+' '+_esc(s.currency)+'</small></td><td style="color:'+_rvColor(s.nativePv)+'">'+_rvSigned(s.nativePv,s.currency)+'</td><td style="color:'+_rvColor(s.pv)+'">'+_rvSigned(s.pv)+'<small>'+(s.pct!=null?_rvSigned(s.pct,'').replace(' €','')+' % en devise':'')+'</small></td><td><span class="rv-status">'+_esc(s.error||s.status)+'</span><button class="btn btn-ghost btn-sm" onclick="_rvAudit('+idx+')">Détail / vérifier</button></td></tr>';}).join('')+'</tbody></table></div></details>';
  }).join('');
  var issueRows=ledger.issues.length?'<details class="rv-issues"><summary>Anomalies à corriger ('+ledger.issues.length+')</summary>'+ledger.issues.map(function(x){return '<p>'+_esc(x.tx.ticker||'Sans titre')+' · '+_esc(x.tx.transaction_date||'Sans date')+' : '+_esc(x.message)+'</p>';}).join('')+'</details>':'';
- modal.innerHTML='<div class="modal-hd"><div><h2>Plus-values réalisées <small style="font-size:12px;color:var(--muted)">V42</small></h2><p class="rv-subtitle">'+(fiscal?'Synthèse fiscale · '+_rvView.year:'Synthèse comptable · toutes les années')+'</p></div><button class="modal-close" onclick="closeModal()">✕</button></div>'+controls+cards+'<p class="rv-info">'+info+'</p>'+(notices.length?'<div class="rv-notice">'+notices.map(_esc).join('<br>')+'</div>':'')+'<div class="rv-groups">'+(rows||'<div class="rv-empty">Aucune vente dans cette sélection.</div>')+'</div>'+issueRows+'<p class="rv-info">Conversion automatique : cours journalier quand disponible ; sinon base de secours (1 € = '+_rvUsdBase()+' $). Aucune saisie de change par vente nécessaire. Prix moyen d’achat = coût total d’achat / quantité vendue, frais d’achat inclus. PV / MV = vente totale nette − coût total d’achat. Les conversions indicatives restent des estimations à vérifier avant déclaration.</p>';
+ modal.innerHTML='<div class="modal-hd"><div><h2>Plus-values réalisées <small style="font-size:12px;color:var(--muted)">V43</small></h2><p class="rv-subtitle">'+(fiscal?'Synthèse fiscale · '+_rvView.year:'Synthèse comptable · toutes les années')+'</p></div><button class="modal-close" onclick="closeModal()">✕</button></div>'+controls+cards+'<p class="rv-info">'+info+'</p>'+(notices.length?'<div class="rv-notice">'+notices.map(_esc).join('<br>')+'</div>':'')+'<div class="rv-groups">'+(rows||'<div class="rv-empty">Aucune vente dans cette sélection.</div>')+'</div>'+issueRows+'<p class="rv-info">Conversion automatique : cours journalier quand disponible ; sinon base de secours (1 € = '+_rvUsdBase()+' $). Aucune saisie de change par vente nécessaire. Prix moyen d’achat = coût total d’achat / quantité vendue, frais d’achat inclus. PV / MV = vente totale nette − coût total d’achat. Les conversions indicatives restent des estimations à vérifier avant déclaration.</p>';
 }
 function _rvAudit(index){
  var s=_rvDetailsRows[index];if(!s)return;_rvPanel='audit';var related=S.transactions.filter(function(t){return t.account_id===s.accountId&&t.ticker===s.ticker&&_rvDay(t)<=_rvDay(s.tx);});
@@ -2760,7 +2780,7 @@ async function renderScreener(){
   pg.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:22px">'+
     '<div>'+
       '<h2 style="font-size:18px;font-weight:700">Screener</h2>'+
-      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V42 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
+      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V43 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
     '</div>'+
     '<button onclick="_toggleScrWatch()" style="padding:6px 14px;border:1px solid var(--border2);border-radius:20px;background:'+_wBg+';color:'+_wColor+';font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">'+
       '⭐ Watchlist — '+(_scrShowWatch?'<b>ON</b>':'OFF')+
