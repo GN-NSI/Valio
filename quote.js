@@ -80,6 +80,8 @@ module.exports = async (req, res) => {
   res.setHeader('X-Valio-Quote-Version', '13');
   const { symbol, type } = req.query;
   if (type === 'health') return res.json({ ok: true, quoteVersion: 13, engine: 'Valio V27' });
+  const gdrAlias={HY9H:'HY9H.F',US78392B1070:'HY9H.F',SSU:'SSU.F'}[String(symbol||'').toUpperCase()];
+  if(typeof gdrAlias==='string')return module.exports({...req,query:{...req.query,symbol:gdrAlias}},res);
   if(['6324.TYO','6324.TO'].includes(String(symbol||'').toUpperCase()))return module.exports({...req,query:{...req.query,symbol:'6324.T'}},res);
   // Citi CUSIP 796050888 / ISIN US7960508882: voting unitary GDR, 25 ordinary shares.
   // Reconstituted reference value, not the actual London/Trade Republic execution quote.
@@ -141,6 +143,36 @@ module.exports = async (req, res) => {
 
   if (!symbol) return res.status(400).json({ error: 'symbol requis' });
   const sym = encodeURIComponent(symbol); // Disponible pour tous les endpoints
+
+  // Daily closing prices for portfolio valuation; preserve the quoted currency
+  // and return split events so historical quantities use the same share units.
+  if (type === 'valuationhistory') {
+    const {start='',end=''}=req.query;
+    const parse=s=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)?Date.parse(s+'T00:00:00Z'):NaN;
+    const from=parse(start),to=parse(end),day=86400000;
+    if(!Number.isFinite(from)||!Number.isFinite(to)||to<from||to-from>40*366*day||to>Date.now()+day)
+      return res.status(400).json({error:'Période historique invalide'});
+    try {
+      const p1=Math.floor((from-8*day)/1000),p2=Math.floor((to+day)/1000);
+      const r=await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?period1=${p1}&period2=${p2}&interval=1d&events=splits&includePrePost=false`,{headers:{'User-Agent':UA},signal:AbortSignal.timeout(12000)});
+      if(!r.ok)throw Error('Cours historique indisponible');
+      const chart=(await r.json())?.chart?.result?.[0],currency=chart?.meta?.currency,zone=chart?.meta?.exchangeTimezoneName;
+      if(!chart||typeof currency!=='string'||!currency||!zone)throw Error('Devise ou fuseau du cours indisponible');
+      const formatter=new Intl.DateTimeFormat('sv-SE',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit'});
+      const date=t=>formatter.format(new Date(t*1000));
+      const closes=chart.indicators?.quote?.[0]?.close||[];
+      const byDate=new Map();
+      (chart.timestamp||[]).forEach((t,i)=>{if(Number.isFinite(t)&&Number.isFinite(closes[i])&&closes[i]>0){const d=date(t);if(d<=end)byDate.set(d,{date:d,close:closes[i]});}});
+      const points=[...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date));
+      const splits=Object.values(chart.events?.splits||{}).map(e=>{
+        const ratio=Number(e.numerator)/Number(e.denominator);
+        if(!Number.isFinite(e.date)||!Number.isFinite(ratio)||ratio<=0)throw Error('Ratio de split invalide');
+        return {date:date(e.date),ratio};
+      }).filter(x=>x.date<=end).sort((a,b)=>a.date.localeCompare(b.date));
+      if(!points.length)return res.status(404).json({error:'Aucune clôture disponible'});
+      return res.json({valuationVersion:1,symbol,currency,points,splits});
+    }catch(e){return res.status(502).json({error:e.message});}
+  }
 
   // ── PROFILE (secteur / pays pour les camemberts) ──────────────────────
   if (type === 'profile') {
