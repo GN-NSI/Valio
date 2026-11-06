@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Valio · V44</title>
+<title>Valio · V45</title>
 <!-- PWA : app installable sur mobile -->
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#0a0e1a">
@@ -505,7 +505,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
       </nav>
       <div class="sidebar-footer" onclick="logout()">
         <div class="avatar" id="sidebar-avatar">?</div>
-        <div class="sidebar-user"><div class="uname" id="sidebar-username">—</div><div class="logout">Se déconnecter · V44</div></div>
+        <div class="sidebar-user"><div class="uname" id="sidebar-username">—</div><div class="logout">Se déconnecter · V45</div></div>
       </div>
     </aside>
     <div id="main">
@@ -1969,7 +1969,7 @@ function _rvRender(){
   return '<details class="rv-company"><summary><div><b>'+_esc(xs[0].name)+'</b><span>'+_esc(ticker)+' · '+xs.length+' vente'+(xs.length>1?'s':'')+' · '+_esc(xs[xs.length-1].date.slice(0,10))+' → '+_esc(xs[0].date.slice(0,10))+'</span></div><div class="rv-company-pnl"><b style="color:'+_rvColor(su.net)+'">'+(su.missing===xs.length?'—':_rvSigned(su.net))+(su.missing||su.uncertain?' <small>provisoire</small>':'')+'</b><span>'+Object.keys(native).map(function(c){return native[c].missing?'Devise non comparable':_rvSigned(native[c].total,c);}).join(' · ')+'</span></div></summary><div class="rv-table-wrap"><table class="rv-table"><thead><tr><th>Date / compte</th><th>Quantité</th><th>Prix moyen<br>d’achat</th><th>Coût total<br>d’achat</th><th>Vente totale<br>nette de frais</th><th>PV / MV<br>en devise</th><th>PV / MV<br>en euros</th><th>Contrôle</th></tr></thead><tbody>'+xs.map(function(s){var idx=sales.indexOf(s),date=s.date.slice(0,10);return '<tr><td><b>'+_esc(date)+'</b><small>'+_esc(s.accountName)+'</small></td><td>'+fQ(s.qty)+'</td><td>'+(s.cost!=null&&s.qty>0?_rvFormatAverage(s.cost/s.qty)+' '+_esc(s.currency):'—')+'<small>'+(s.eurCost!=null&&s.qty>0?_rvFormatAverage(s.eurCost/s.qty)+' €':'—')+'</small></td><td>'+(s.cost!=null?fN(s.cost)+' '+_esc(s.currency):'—')+'<small>'+(s.eurCost!=null?fE(s.eurCost):'Change manquant')+'</small></td><td>'+fN(s.proceeds==null?s.qty*s.price-s.fees:s.proceeds)+' '+_esc(s.currency)+'<small>Frais vente : '+fN(s.fees)+' '+_esc(s.currency)+'</small></td><td style="color:'+_rvColor(s.nativePv)+'">'+_rvSigned(s.nativePv,s.currency)+'</td><td style="color:'+_rvColor(s.pv)+'">'+_rvSigned(s.pv)+'<small>'+(s.pct!=null?_rvSigned(s.pct,'').replace(' €','')+' % en devise':'')+'</small></td><td><span class="rv-status">'+_esc(s.error||s.status)+'</span><button class="btn btn-ghost btn-sm" onclick="_rvAudit('+idx+')">Détail / vérifier</button></td></tr>';}).join('')+'</tbody></table></div></details>';
  }).join('');
  var issueRows=ledger.issues.length?'<details class="rv-issues"><summary>Anomalies à corriger ('+ledger.issues.length+')</summary>'+ledger.issues.map(function(x){return '<p>'+_esc(x.tx.ticker||'Sans titre')+' · '+_esc(x.tx.transaction_date||'Sans date')+' : '+_esc(x.message)+'</p>';}).join('')+'</details>':'';
- modal.innerHTML='<div class="modal-hd"><div><h2>Plus-values réalisées <small style="font-size:12px;color:var(--muted)">V44</small></h2><p class="rv-subtitle">'+(fiscal?'Synthèse fiscale · '+_rvView.year:'Synthèse comptable · toutes les années')+'</p></div><button class="modal-close" onclick="closeModal()">✕</button></div>'+controls+cards+'<p class="rv-info">'+info+'</p>'+(notices.length?'<div class="rv-notice">'+notices.map(_esc).join('<br>')+'</div>':'')+'<div class="rv-groups">'+(rows||'<div class="rv-empty">Aucune vente dans cette sélection.</div>')+'</div>'+issueRows+'<p class="rv-info">Conversion automatique : cours journalier quand disponible ; sinon base de secours (1 € = '+_rvUsdBase()+' $). Aucune saisie de change par vente nécessaire. Prix moyen d’achat = coût total d’achat / quantité vendue, frais d’achat inclus. PV / MV = vente totale nette − coût total d’achat. Les conversions indicatives restent des estimations à vérifier avant déclaration.</p>';
+ modal.innerHTML='<div class="modal-hd"><div><h2>Plus-values réalisées <small style="font-size:12px;color:var(--muted)">V45</small></h2><p class="rv-subtitle">'+(fiscal?'Synthèse fiscale · '+_rvView.year:'Synthèse comptable · toutes les années')+'</p></div><button class="modal-close" onclick="closeModal()">✕</button></div>'+controls+cards+'<p class="rv-info">'+info+'</p>'+(notices.length?'<div class="rv-notice">'+notices.map(_esc).join('<br>')+'</div>':'')+'<div class="rv-groups">'+(rows||'<div class="rv-empty">Aucune vente dans cette sélection.</div>')+'</div>'+issueRows+'<p class="rv-info">Conversion automatique : cours journalier quand disponible ; sinon base de secours (1 € = '+_rvUsdBase()+' $). Aucune saisie de change par vente nécessaire. Prix moyen d’achat = coût total d’achat / quantité vendue, frais d’achat inclus. PV / MV = vente totale nette − coût total d’achat. Les conversions indicatives restent des estimations à vérifier avant déclaration.</p>';
 }
 function _rvAudit(index){
  var s=_rvDetailsRows[index];if(!s)return;_rvPanel='audit';var related=S.transactions.filter(function(t){return t.account_id===s.accountId&&t.ticker===s.ticker&&_rvDay(t)<=_rvDay(s.tx);});
@@ -2836,7 +2836,7 @@ async function renderScreener(){
   pg.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:22px">'+
     '<div>'+
       '<h2 style="font-size:18px;font-weight:700">Screener</h2>'+
-      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V44 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
+      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V45 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
     '</div>'+
     '<button onclick="_toggleScrWatch()" style="padding:6px 14px;border:1px solid var(--border2);border-radius:20px;background:'+_wBg+';color:'+_wColor+';font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">'+
       '⭐ Watchlist — '+(_scrShowWatch?'<b>ON</b>':'OFF')+
@@ -6668,7 +6668,9 @@ var _depFilter=null; // filtre compte (null = tous)
 var _depChartRange='max'; // 1m | ytd | 1y | max
 
 function _depPill(label,active,onclick){return '<button onclick="'+onclick+'" style="padding:4px 10px;font-size:11px;border-radius:999px;border:1px solid '+(active?'rgba(99,75,228,.45)':'var(--border2)')+';background:'+(active?'rgba(99,75,228,.14)':'transparent')+';color:'+(active?'#c4b5fd':'var(--muted)')+';cursor:pointer;white-space:nowrap">'+label+'</button>'; }
+let _depRenderId=0;
 async function renderDeposits(){
+  const renderId=++_depRenderId;
   var pg=document.getElementById('page');
   pg.innerHTML='<div style="text-align:center;padding:60px"><div class="spinner"></div></div>';
   // Flux + liquidités sur la même page.
@@ -6682,7 +6684,7 @@ async function renderDeposits(){
     deposits=(res[0].status==='fulfilled'&&res[0].value)||[];
     cashRows=(res[1].status==='fulfilled'&&res[1].value)||[];
   }
-  _renderDepositsUI(deposits,cashRows);
+  if(renderId===_depRenderId&&S.page==='deposits')_renderDepositsUI(deposits,cashRows);
 }
 
 function _renderDepositsUI(deposits,cashRows){
@@ -6696,10 +6698,10 @@ function _renderDepositsUI(deposits,cashRows){
   var cashPct=totalAccountValue>0?totalCash/totalAccountValue*100:0;
 
   // Comptes distincts pour le filtre
-  var acctNames=[...new Set(deposits.map(function(d){return d.accounts&&d.accounts.name;}).filter(Boolean))];
+  var acctNames=[...new Set((S.accounts||[]).map(a=>a.name).filter(Boolean))];
 
   // Calcul total déposé (somme algébrique : dépôts - retraits)
-  var totalDeposited=deposits.reduce(function(s,d){return s+d.amount;},0);
+  var totalDeposited=deposits.reduce(function(s,d){return s+(Number(d.amount)||0);},0);
 
   // Filtre par compte
   var filtered=_depFilter?deposits.filter(function(d){return d.accounts&&d.accounts.name===_depFilter;}):deposits;
@@ -6718,7 +6720,7 @@ function _renderDepositsUI(deposits,cashRows){
   var sortedByDate=deposits.slice().sort(function(a,b){return a.deposit_date<b.deposit_date?-1:1;});
   var cumMap={};
   var cum=0;
-  sortedByDate.forEach(function(d){cum+=d.amount; cumMap[d.id]=cum;});
+  sortedByDate.forEach(function(d){cum+=Number(d.amount)||0; cumMap[d.id]=cum;});
 
   var thStyle='padding:8px;text-align:left;font-size:11px;color:var(--muted);cursor:pointer;user-select:none;white-space:nowrap';
   var thR='padding:8px;text-align:right;font-size:11px;color:var(--muted);cursor:pointer;user-select:none';
@@ -6753,7 +6755,7 @@ function _renderDepositsUI(deposits,cashRows){
     '</div>'+
     '<div class="card" style="margin-bottom:14px">'+
       '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:8px">'+
-        '<div><div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase">Évolution du solde vs dépôts cumulés</div><div style="font-size:11px;color:var(--muted);margin-top:4px">Filtre la période et l\'enveloppe affichées sur le graphique.</div></div>'+
+        '<div><div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase">Valeur historique des positions vs dépôts cumulés</div><div style="font-size:11px;color:var(--muted);margin-top:4px" id="dep-chart-status" role="status">Chargement des cours historiques…</div></div>'+
         '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;max-width:100%">'+
           '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">'+
             [_depPill('1M',_depChartRange==='1m','setDepositChartRange(\'1m\')'),_depPill('YTD',_depChartRange==='ytd','setDepositChartRange(\'ytd\')'),_depPill('1A',_depChartRange==='1y','setDepositChartRange(\'1y\')'),_depPill('MAX',_depChartRange==='max','setDepositChartRange(\'max\')')].join('')+
@@ -6763,7 +6765,7 @@ function _renderDepositsUI(deposits,cashRows){
           '</div>'+
         '</div>'+
       '</div>'+
-      '<div style="position:relative;height:285px"><canvas id="deposit-chart"></canvas></div>'+
+      '<button type="button" class="btn btn-ghost btn-sm" id="dep-chart-peak" style="margin:0 0 6px" hidden>Vérifier le maximum affiché</button><div style="position:relative;height:285px"><canvas id="deposit-chart"></canvas></div>'+
     '</div>'+
     '<div class="card" style="margin-bottom:14px">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em">💰 Liquidités par compte</div><div style="font-size:10px;color:var(--muted2)">Clique sur ✏️ pour mettre à jour le solde</div></div>'+ 
@@ -6803,125 +6805,143 @@ function _renderDepositsUI(deposits,cashRows){
       '</tbody></table></div>';
 
   // Graphique : portfolio value historique via buildPortfolioLine
-  _drawDepositChart(deposits, totalVal);
+  _drawDepositChart(deposits);
 }
 
-var _depHistCache={}; // cache historiques 5y par ticker (évite de re-fetch à chaque clic de filtre)
-function _holdingsValueLive(txns){
-  var holdings={};
-  txns.forEach(function(tx){
-    if(!tx.ticker) return;
-    var t=(tx.transaction_type||'').toLowerCase();
-    holdings[tx.ticker]=(holdings[tx.ticker]||0)+(t==='buy'?1:t==='sell'?-1:0)*(tx.quantity||0);
-  });
-  return Object.keys(holdings).reduce(function(sum,tk){
-    var q=holdings[tk]; if(q<=0.0001) return sum;
-    var d=manualPrices[tk]||S.prices[tk];
-    if(!d||d.price==null) return sum;
-    return sum+q*toEur(d.price,d.currency||'USD');
-  },0);
+const _depHistoryCache=new Map();
+const _depDayMs=86400000;
+function _depDate(ms){return new Date(ms).toISOString().slice(0,10);}
+function _depTimestamp(day){return Date.parse(day+'T00:00:00Z');}
+function _depDateLabel(ms){return new Date(ms).toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'});}
+function _depAt(rows,day){
+ let lo=0,hi=rows.length;
+ while(lo<hi){const m=(lo+hi)>>1;if(rows[m].date<=day)lo=m+1;else hi=m;}
+ const row=rows[lo-1];
+ return row&&_depTimestamp(day)-_depTimestamp(row.date)<=7*_depDayMs?row:null;
 }
-
-async function _drawDepositChart(allDeposits, totalVal){
-  var cv=document.getElementById('deposit-chart'); if(!cv) return;
-
-  // ── Filtre compte (Modif 3) : dépôts ET valeur du portefeuille du seul courtier sélectionné ──
-  var acctId=null;
-  if(_depFilter){
-    var a=(S.accounts||[]).find(function(x){return x.name===_depFilter;});
-    acctId=a?a.id:null;
+function _depCurrency(currency){
+ return currency==='GBp'||currency==='GBX'?{code:'GBP',scale:.01}:{code:currency,scale:1};
+}
+function _depPortfolioSeries(days,txns,deposits,hists,fx){
+ const trades=txns.filter(t=>t.ticker&&['buy','sell'].includes(t.transaction_type)&&Number(t.quantity)>0&&Number.isFinite(Number(t.quantity)))
+   .slice().sort((a,b)=>_rvDay(a).localeCompare(_rvDay(b)));
+ const flows=deposits.filter(d=>d.deposit_date&&Number.isFinite(Number(d.amount))).slice()
+   .sort((a,b)=>String(a.deposit_date).localeCompare(String(b.deposit_date)));
+ const holdings=new Map();
+ let ti=0,di=0,cumulative=0;
+ return days.map(day=>{
+  while(ti<trades.length&&_rvDay(trades[ti])<=day){
+   const tx=trades[ti++],tk=tx.ticker,k=tx.account_id+'|'+tk,h=hists[tk];
+   const row=holdings.get(k)||{ticker:tk,name:tk,accountId:tx.account_id,quantity:0};
+   const name=String(tx.name||'').trim();if(name&&name.toUpperCase()!==tk.toUpperCase())row.name=name;
+   // Yahoo close is split-adjusted; put the recorded trade in the same share units.
+   const factor=(h?.splits||[]).reduce((f,x)=>x.date>_rvDay(tx)?f*x.ratio:f,1);
+   row.quantity+=Number(tx.quantity)*factor*(tx.transaction_type==='buy'?1:-1);
+   holdings.set(k,row);
   }
-  var deposits=_depFilter
-    ? allDeposits.filter(function(d){return d.accounts&&d.accounts.name===_depFilter;})
-    : allDeposits;
-
-  // ── Dépôts cumulés (du compte filtré, ou global) ──
-  var sorted=deposits.slice().sort(function(a,b){return a.deposit_date<b.deposit_date?-1:1;});
-  var depLabels=[], depSeries=[], cum=0;
-  sorted.forEach(function(d){
-    cum+=d.amount;
-    depLabels.push(new Date(d.deposit_date).toLocaleDateString('fr-FR',{month:'short',year:'2-digit'}));
-    depSeries.push(cum);
-  });
-  depLabels.push('Auj.'); depSeries.push(cum);
-
-  // ── Reconstruction du solde à chaque date (transactions filtrées par compte si besoin) ──
-  var ptfSeries=depSeries.map(function(){return null;});
-  try{
-    var txns=(S.transactions||[]).slice().sort(function(a,b){
-      return new Date(a.transaction_date)-new Date(b.transaction_date);
-    });
-    if(acctId) txns=txns.filter(function(t){return t.account_id===acctId;});
-    var allTickers=[...new Set(txns.map(function(t){return t.ticker;}).filter(Boolean))];
-
-    // Fetch 5y d'historique (avec cache) pour les tickers manquants — batch de 4
-    var need=allTickers.filter(function(tk){return !_depHistCache[tk];});
-    for(var bi=0;bi<need.length;bi+=4){
-      await Promise.all(need.slice(bi,bi+4).map(async function(tk){
-        _depHistCache[tk]=await fetchPriceHistory(tk,'5y');
-      }));
-      if(bi+4<need.length) await new Promise(function(r){setTimeout(r,350);});
-    }
-    var hists=_depHistCache;
-
-    var allDates=sorted.map(function(d){return d.deposit_date;});
-    allDates.push(new Date().toISOString().slice(0,10)); // aujourd'hui
-
-    ptfSeries=allDates.map(function(date,idx){
-      // Dernier point = valeur exacte actuelle (globale = totalVal ; filtrée = live du compte)
-      if(idx===allDates.length-1) return _depFilter ? _holdingsValueLive(txns) : totalVal;
-      var ts=new Date(date).getTime()/1000;
-      var holdings={};
-      txns.forEach(function(tx){
-        if(!tx.ticker||new Date(tx.transaction_date)>new Date(date)) return;
-        if(!holdings[tx.ticker]) holdings[tx.ticker]=0;
-        var txType=(tx.transaction_type||'').toLowerCase();
-        holdings[tx.ticker]+=(txType==='buy'?1:txType==='sell'?-1:0)*(tx.quantity||0);
-      });
-      return Object.keys(holdings).reduce(function(sum,ticker){
-        var qty=holdings[ticker]; if(qty<=0.0001) return sum;
-        var pts=(hists[ticker]||[]).filter(function(p){return p.t<=ts;});
-        if(!pts.length) return sum;
-        var price=pts[pts.length-1].c;
-        // Devise NATIVE du titre : priorité au chart, puis S.prices, sinon on déduit
-        // du suffixe de bourse (.KS=KRW, .ST=SEK, .TW=TWD, .PA/.AS/.DE=EUR, .L=GBP)
-        var px_cur=_histCurrency[ticker]||(S.prices[ticker]&&S.prices[ticker].currency)||_currencyFromSuffix(ticker);
-        return sum+qty*toEur(price,px_cur);
-      },0);
-    });
-  }catch(e){console.warn('_drawDepositChart error:',e);}
-
-  // ── Filtre de période du graphique ──
-  var pointDates=sorted.map(function(d){return new Date(d.deposit_date);});
-  pointDates.push(new Date());
-  var startMs=null, nowMs=Date.now();
-  if(_depChartRange==='1m') startMs=nowMs-30*86400*1000;
-  else if(_depChartRange==='1y') startMs=nowMs-365*86400*1000;
-  else if(_depChartRange==='ytd') startMs=new Date(new Date().getFullYear(),0,1).getTime();
-  if(startMs!=null){
-    var keepFrom=0;
-    for(var i=0;i<pointDates.length;i++){
-      if(pointDates[i].getTime()>=startMs){ keepFrom=Math.max(0,i-1); break; }
-      keepFrom=i;
-    }
-    depLabels=depLabels.slice(keepFrom);
-    depSeries=depSeries.slice(keepFrom);
-    ptfSeries=ptfSeries.slice(keepFrom);
+  while(di<flows.length&&String(flows[di].deposit_date).slice(0,10)<=day)cumulative+=Number(flows[di++].amount);
+  const rows=[],missing=[];
+  let total=0;
+  for(const holding of holdings.values()){
+   if(holding.quantity < -1e-6){missing.push(holding.name+' : historique de transactions incomplet');continue;}
+   if(holding.quantity<=1e-6)continue;
+   const h=hists[holding.ticker],px=_depAt(h?.points||[],day);
+   const {code,scale}=_depCurrency(h?.currency);
+   const rate=code==='EUR'?{date:day,rate:1}:_depAt(fx[code]||[],day);
+   if(!px||!code||!rate){missing.push(holding.name+(!px||!code?' : cours ou devise manquant':' : change '+code+' → EUR manquant'));continue;}
+   const laterSplits=(h.splits||[]).reduce((f,x)=>x.date>day?f*x.ratio:f,1);
+   const qty=holding.quantity/laterSplits,price=px.close*laterSplits*scale,value=qty*price*rate.rate;
+   if(!Number.isFinite(value)){missing.push(holding.name+' : valeur indisponible');continue;}
+   rows.push({...holding,quantity:qty,price,priceDate:px.date,currency:code,fxDate:rate.date,rate:rate.rate,value});
+   total+=value;
   }
-
-  var sfx=_depFilter?(' · '+_depFilter):'';
-  if(window._depChart){try{window._depChart.destroy();}catch(e){}}
-  window._depChart=new Chart(cv,{type:'line',
-    data:{labels:depLabels,datasets:[
-      {label:'Valeur portefeuille'+sfx,data:ptfSeries,borderColor:'#634BE4',backgroundColor:'rgba(99,75,228,0.08)',fill:true,tension:0.3,pointRadius:3,borderWidth:2.5},
-      {label:'Dépôts cumulés'+sfx,data:depSeries,borderColor:'#26C5DE',backgroundColor:'transparent',fill:false,stepped:true,pointRadius:3,borderWidth:2,borderDash:[5,4]},
-    ]},
-    options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{labels:{color:'#6b7280',font:{size:11}}},
-        tooltip:{mode:'index',intersect:false,callbacks:{label:function(ctx){return ctx.dataset.label+': '+(ctx.raw!=null?fE(ctx.raw):'—');}}}},
-      scales:{x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',maxTicksLimit:12}},
-        y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#6b7280',callback:function(v){return fE(v);}},position:'right'}}}
-  });
+  return {day,cumulative,value:missing.length?null:total,rows:rows.sort((a,b)=>b.value-a.value),missing};
+ });
+}
+async function _depMarketJson(query){
+ const response=await fetch(API+'?'+new URLSearchParams(query),{signal:AbortSignal.timeout(18000)});
+ if(!response.ok)throw Error('Historique indisponible');
+ return response.json();
+}
+async function _depHistFor(ticker,start,end){
+ if(_isLeveragedTicker(ticker)||_ovNeedsReview(ticker))return null;
+ const symbol=_gdrSpec(ticker)?.symbol||ticker,key=symbol+'|'+start+'|'+end;
+ const cached=_depHistoryCache.get(key);
+ if(cached&&Date.now()-cached.at<300000)return cached.data;
+ try{
+  const data=await _depMarketJson({type:'valuationhistory',symbol,start,end});
+  if(data.valuationVersion!==1||!data.currency||!Array.isArray(data.points)||!data.points.length||!Array.isArray(data.splits))return null;
+  _depHistoryCache.set(key,{at:Date.now(),data});
+  if(_depHistoryCache.size>160)_depHistoryCache.delete(_depHistoryCache.keys().next().value);
+  return data;
+ }catch(e){return null;}
+}
+function _depShowPoint(point){
+ const rowHtml=point.rows.map(r=>'<tr><td style="text-align:left">'+_esc(r.name)+'<small style="display:block;color:var(--muted)">'+_esc(r.ticker)+' · '+_esc(S.accounts.find(a=>a.id===r.accountId)?.name||'Compte')+'</small></td><td>'+fQ(r.quantity)+'</td><td>'+fN(r.price)+' '+_esc(r.currency)+'<small style="display:block;color:var(--muted)">'+_depDateLabel(_depTimestamp(r.priceDate))+(r.currency!=='EUR'?'<br>1 '+_esc(r.currency)+' = '+r.rate.toLocaleString('fr-FR',{maximumFractionDigits:8})+' € · '+_depDateLabel(_depTimestamp(r.fxDate)):'')+'</small></td><td>'+fE(r.value)+'</td></tr>').join('');
+ showModal('<div class="modal-hd"><h2>Solde du '+_depDateLabel(_depTimestamp(point.day))+'</h2><button class="modal-close" onclick="closeModal()">✕</button></div>'+
+  '<p class="rv-info">Positions hors cash : <b>'+(point.value===null?'incomplètes':fE(point.value))+'</b> · Dépôts nets : <b>'+fE(point.cumulative)+'</b></p>'+
+  (point.missing.length?'<p class="rv-notice">'+point.missing.map(_esc).join('<br>')+'</p>':'')+
+  '<div class="rv-table-wrap"><table class="rv-table"><thead><tr><th>Titre</th><th>Quantité</th><th>Cours utilisé</th><th>Valeur en €</th></tr></thead><tbody>'+rowHtml+'</tbody></table></div>');
+}
+async function _drawDepositChart(allDeposits){
+ const cv=document.getElementById('deposit-chart'),status=document.getElementById('dep-chart-status');
+ if(!cv)return;
+ const filter=_depFilter,range=_depChartRange;
+ const acct=filter?(S.accounts||[]).find(a=>a.name===filter):null;
+ const belongs=r=>!filter||!!acct&&r.account_id===acct.id;
+ const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Paris',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+ const now=_depTimestamp(today);
+ const txns=(S.transactions||[]).filter(t=>belongs(t)&&/^\d{4}-\d{2}-\d{2}$/.test(_rvDay(t))&&_rvDay(t)<=today);
+ const deps=allDeposits.filter(d=>belongs(d)&&/^\d{4}-\d{2}-\d{2}$/.test(String(d.deposit_date).slice(0,10))&&String(d.deposit_date).slice(0,10)<=today);
+ const first=[...txns.map(_rvDay),...deps.map(d=>String(d.deposit_date).slice(0,10))].sort()[0];
+ const bounds={ '1m':now-30*_depDayMs,'1y':now-365*_depDayMs,ytd:_depTimestamp(today.slice(0,4)+'-01-01'),max:now-5*365*_depDayMs };
+ const start=Math.max(_depTimestamp(first||today),bounds[range]??bounds.max);
+ const startDay=_depDate(start),days=[];
+ for(let ms=start;ms<=now;ms+=_depDayMs)days.push(_depDate(ms));
+ const hists=Object.create(null),fx=Object.create(null);
+ const firstTrade=new Map();
+ for(const t of txns){
+  if(t.ticker&&(!firstTrade.has(t.ticker)||_rvDay(t)<firstTrade.get(t.ticker)))firstTrade.set(t.ticker,_rvDay(t));
+ }
+ const tickers=[...firstTrade.keys()];
+ for(let i=0;i<tickers.length;i+=4){
+  await Promise.all(tickers.slice(i,i+4).map(async t=>{hists[t]=await _depHistFor(t,firstTrade.get(t)<startDay?firstTrade.get(t):startDay,today);}));
+  if(document.getElementById('deposit-chart')!==cv)return;
+ }
+ const currencies=[...new Set(Object.values(hists).filter(Boolean).map(h=>_depCurrency(h.currency).code))].filter(c=>c&&c!=='EUR');
+ await Promise.all(currencies.map(async currency=>{
+  try{const d=await _depMarketJson({type:'fxhistory',currency,start:startDay,end:today});fx[currency]=d.rates||[];}catch(e){}
+ }));
+ if(document.getElementById('deposit-chart')!==cv)return;
+ const points=_depPortfolioSeries(days,txns,deps,hists,fx);
+ const gaps=points.filter(p=>p.value===null).length;
+ const peak=points.reduce((max,p)=>p.value!==null&&(!max||p.value>max.value)?p:max,null);
+ const peakButton=document.getElementById('dep-chart-peak');
+ if(peakButton&&peak&&peak.value>0){
+  peakButton.hidden=false;
+  peakButton.textContent='Vérifier le maximum affiché : '+fE(peak.value)+' · '+_depDateLabel(_depTimestamp(peak.day));
+  peakButton.onclick=()=>_depShowPoint(peak);
+ }
+ if(status)status.textContent=(first?'Cours et change du jour · hors liquidités. Clique sur un point pour voir le calcul.':'Aucun mouvement enregistré.')+
+   (gaps?' '+gaps+' jour(s) sans valorisation complète.':'')+
+   (range==='max'&&first&&first<startDay?' Historique affiché sur 5 ans maximum.':'');
+ if(window._depChart)window._depChart.destroy();
+ const series=key=>points.map(p=>({x:_depTimestamp(p.day),y:p[key]}));
+ window._depChart=new Chart(cv,{type:'line',
+  data:{datasets:[
+   {label:'Positions estimées (hors cash)',data:series('value'),borderColor:'#634BE4',backgroundColor:'rgba(99,75,228,0.08)',fill:true,tension:0,pointRadius:0,pointHitRadius:8,borderWidth:2,spanGaps:false},
+   {label:'Dépôts nets cumulés',data:series('cumulative'),borderColor:'#26C5DE',fill:false,stepped:'before',pointRadius:0,borderWidth:2,borderDash:[5,4]}
+  ]},
+  options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',axis:'x',intersect:false},
+   onClick:(_,items)=>{if(items.length)_depShowPoint(points[items[0].index]);},
+   plugins:{legend:{labels:{color:'#6b7280',font:{size:11}}},tooltip:{callbacks:{
+    title:items=>items.length?_depDateLabel(items[0].parsed.x):'',
+    label:ctx=>ctx.dataset.label+' : '+fE(ctx.parsed.y),
+    footer:items=>items.length&&points[items[0].dataIndex].missing.length?'Valeur indisponible · clique pour vérifier':''
+   }}},
+   scales:{x:{type:'linear',ticks:{color:'#6b7280',maxTicksLimit:8,callback:v=>_depDateLabel(v)}},
+    y:{position:'right',ticks:{color:'#6b7280',callback:v=>fE(v)}}}}
+ });
 }
 
 window.sortDeposits=function(col){
