@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Valio · V43</title>
+<title>Valio · V44</title>
 <!-- PWA : app installable sur mobile -->
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#0a0e1a">
@@ -505,7 +505,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
       </nav>
       <div class="sidebar-footer" onclick="logout()">
         <div class="avatar" id="sidebar-avatar">?</div>
-        <div class="sidebar-user"><div class="uname" id="sidebar-username">—</div><div class="logout">Se déconnecter · V43</div></div>
+        <div class="sidebar-user"><div class="uname" id="sidebar-username">—</div><div class="logout">Se déconnecter · V44</div></div>
       </div>
     </aside>
     <div id="main">
@@ -599,6 +599,11 @@ function _spreadAdjacentColors(labels, colors){
 // ═══ OVERRIDES MANUELS (pays/secteur pour tickers exotiques) ═══
 // FMP peut retourner le pays de la cotation (ex: SMSN.L → GB) au lieu du pays de l'entreprise (KR)
 const META_OVERRIDE={
+  'HY9H.F':{country:'KR',sector:'Information Technology'},
+  'HY9H':{country:'KR',sector:'Information Technology'},
+  'US78392B1070':{country:'KR',sector:'Information Technology'},
+  'SSU.F':{country:'KR',sector:'Information Technology'},
+  'SSU':{country:'KR',sector:'Information Technology'},
   'SMSN.IL':{country:'KR',sector:'Information Technology'},
   'US7960508882':{country:'KR',sector:'Information Technology'},
   'SMSN':{country:'KR',sector:'Information Technology'},
@@ -1019,6 +1024,11 @@ function explodeForMode(positions, mode){
 
 // ═══ SOUS-SECTEURS PAR TICKER ═══
 const TICKER_SUBSECTOR={
+  'HY9H.F':'Mémoires (HBM / DRAM)',
+  'HY9H':'Mémoires (HBM / DRAM)',
+  'US78392B1070':'Mémoires (HBM / DRAM)',
+  'SSU.F':'Mémoires (DRAM/NAND)',
+  'SSU':'Mémoires (DRAM/NAND)',
   'SMSN.IL':'Mémoires (DRAM/NAND)',
   'US7960508882':'Mémoires (DRAM/NAND)',
   'SMSN':'Mémoires (DRAM/NAND)',
@@ -1388,7 +1398,7 @@ async function handleAuth(){
 }
 function showErr(m){const e=document.getElementById('auth-error');e.textContent=m;e.style.display='block';}
 function xlErr(m){if(m.includes('Invalid login'))return 'Email ou mot de passe incorrect';if(m.includes('Email not confirmed'))return 'Confirme ton email';if(m.includes('already registered'))return 'Email déjà utilisé';return m;}
-async function logout(){try{await fetch(SU+'/auth/v1/logout',{method:'POST',headers:hdrs()});}catch{}saveSess(null);S.accounts=[];S.transactions=[];S.enrichedPos=[];showAuth();}
+async function logout(){try{await fetch(SU+'/auth/v1/logout',{method:'POST',headers:hdrs()});}catch{}saveSess(null);S.accounts=[];S.transactions=[];S.enrichedPos=[];_accountSearch='';_accountSearchFold.clear();showAuth();}
 
 // ═══ NAV ═══
 function navigate(page){
@@ -1423,12 +1433,13 @@ function navigate(page){
 // ═══ POSITION MATH (CMP) ═══
 function computePositions(){
   const map={};
+  const openAccounts=computeByAccount();
   var _totalRealized=0; // Cumul des PV/MV réalisées (toutes ventes)
   [...S.transactions].sort((a,b)=>new Date(a.transaction_date)-new Date(b.transaction_date)).forEach(tx=>{
     const k=tx.ticker;
     if(!map[k])map[k]={ticker:tx.ticker,name:tx.name,asset_type:tx.asset_type,quantity:0,totalCostEur:0,realizedPnlEur:0,totalSoldEur:0,accounts:[],buyCurrencies:[]};
     const p=map[k];const toE=v=>toEur(v,tx.currency);
-    const an=tx.accounts?.name||'—';if(!p.accounts.includes(an))p.accounts.push(an);
+    const name=String(tx.name||'').trim();if(name&&name.toUpperCase()!==k.toUpperCase())p.name=name;
     if(tx.transaction_type==='buy'){
       p.totalCostEur+=tx.quantity*toE(tx.price)+toE(tx.fees||0);
       p.quantity+=tx.quantity;
@@ -1448,20 +1459,45 @@ function computePositions(){
   });
   _rvApplyTotals(); // V35: ledger par compte, ordre intrajournalier et change historique
   return Object.values(map).filter(p=>p.quantity>0.000001).map(p=>{
+    const accountLots=openAccounts.filter(a=>a.ticker===p.ticker);
     const pruEur=p.totalCostEur/p.quantity;
     const pc=p.buyCurrencies.length===1&&p.buyCurrencies[0]!=='EUR'?p.buyCurrencies[0]:'EUR';
-    return{...p,pruEur,pruDisplay:pc==='USD'?pruEur*S.eurUsd:pruEur,pruCurrency:pc};
+    return{...p,accountLots,accounts:accountLots.map(a=>a.accountName),pruEur,pruDisplay:pc==='USD'?pruEur*S.eurUsd:pruEur,pruCurrency:pc};
   });
 }
 
 function computeByAccount(){
-  const map={};
-  [...S.transactions].sort((a,b)=>new Date(a.transaction_date)-new Date(b.transaction_date)).forEach(tx=>{
+  const accounts=new Map(S.accounts.map(a=>[a.id,a.name])), rows=new Map();
+  const txs=[...S.transactions].sort((a,b)=>String(a.transaction_date||'').localeCompare(String(b.transaction_date||'')));
+  for(const tx of txs){
+    const q=Number(tx.quantity);
+    if(!tx.ticker||!tx.account_id||!Number.isFinite(q)||q<=0||!['buy','sell'].includes(tx.transaction_type))continue;
     const k=tx.account_id+'|'+tx.ticker;
-    if(!map[k])map[k]={account_id:tx.account_id,accountName:tx.accounts?.name||'—',ticker:tx.ticker,quantity:0};
-    const p=map[k];if(tx.transaction_type==='buy')p.quantity+=tx.quantity;else p.quantity-=tx.quantity;
+    if(!rows.has(k))rows.set(k,{account_id:tx.account_id,accountName:accounts.get(tx.account_id)||tx.accounts?.name||'Compte',ticker:tx.ticker,name:tx.ticker,quantity:0});
+    const row=rows.get(k),name=String(tx.name||'').trim();
+    if(name&&name.toUpperCase()!==tx.ticker.toUpperCase())row.name=name;
+    row.quantity+=tx.transaction_type==='buy'?q:-q;
+  }
+  return [...rows.values()].filter(row=>row.quantity>0.000001);
+}
+
+function _positionDisplayName(p){return String(p?.name||'').trim()||p?.ticker||'';}
+function _chartPositionNames(rows){
+  const grouped=groupByKey(rows,p=>p.ticker,(t,i)=>tickerColor(t,i));
+  const names=new Map(rows.map(p=>[p.ticker,_positionDisplayName(p)]));
+  return {...grouped,keys:grouped.labels,labels:grouped.labels.map(t=>names.get(t)||t),clickable:false};
+}
+function _accountAllocation(drill){
+  const unitPrices=new Map(S.enrichedPos.filter(p=>Number.isFinite(p.priceEur)).map(p=>[p.ticker,p.priceEur]));
+  const rows=computeByAccount().map(p=>{
+    const q=manualPrices[p.ticker]||S.prices[p.ticker];
+    const price=unitPrices.get(p.ticker)??(q?.price!=null?toEur(q.price,q.currency||'USD'):null);
+    return {...p,valueEur:Number.isFinite(price)&&price>0?price*p.quantity:0};
   });
-  return Object.values(map).filter(p=>p.quantity>0.000001);
+  if(drill.length)return _chartPositionNames(rows.filter(p=>p.account_id===drill[0]));
+  const grouped=groupByKey(rows,p=>p.account_id,id=>acctColor(rows.find(p=>p.account_id===id)?.accountName).color);
+  const labels=new Map(rows.map(p=>[p.account_id,p.accountName]));
+  return {...grouped,keys:grouped.labels,labels:grouped.labels.map(id=>labels.get(id)||id),clickable:true};
 }
 
 // ═══ SORT ═══
@@ -1575,20 +1611,50 @@ async function renderPortfolio(){
 // Utilise les données déjà chargées (S.prices/manualPrices + p.valueEur) si disponibles
 // Évite le bug "les prix disparaissent quand on re-render"
 // GDR quote unit is resolved in the page as well as the API. Never multiply holdings.
+const _EURO_GDRS={
+ samsung:{aliases:['SMSN.IL','US7960508882','SSU','SSU.F'],symbol:'SSU.F',isin:'US7960508882'},
+ hynix:{aliases:['HY9H','HY9H.F','US78392B1070'],symbol:'HY9H.F',isin:'US78392B1070'}
+};
+function _gdrSpec(ticker){return Object.values(_EURO_GDRS).find(g=>g.aliases.includes(String(ticker||'').toUpperCase()));}
+function _gdrSearchAliases(ticker){return (_gdrSpec(ticker)||(ticker==='000660.KS'?_EURO_GDRS.hynix:ticker==='005930.KS'?_EURO_GDRS.samsung:null))?.aliases||[];}
 async function _sgFetchQuote(ticker,signal){
- var gdr=['SMSN.IL','US7960508882'].includes(ticker);
- var r=await fetch(API+'?symbol='+encodeURIComponent(gdr?'005930.KS':ticker),{signal:signal});
- if(r.ok===false)throw Error('Cours indisponible');
- var d=await r.json();
- if(!gdr)return d;
+ const get=async(sym,sg)=>{
+  const r=await fetch(API+'?symbol='+encodeURIComponent(sym),{signal:sg});
+  if(r.ok===false)throw Error('Cours indisponible');
+  return r.json();
+ };
+ const gdr=_gdrSpec(ticker);
+ if(!gdr)return get(ticker,signal);
+ const ctrl=new AbortController(),abort=()=>ctrl.abort();
+ if(signal?.aborted)abort();else signal?.addEventListener('abort',abort,{once:true});
+ const timer=setTimeout(abort,4000);
+ try{
+  const d=await get(gdr.symbol,ctrl.signal);
+  if(d?.currency==='EUR'&&Number.isFinite(d.price)&&d.price>0&&!d.syntheticGdr)
+   return {...d,symbol:ticker,gdrQuote:true,isin:gdr.isin,label:'GDR · Francfort (EUR)'};
+ }catch(e){if(signal?.aborted)throw e;}
+ finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);}
+ if(gdr!==_EURO_GDRS.samsung)throw Error('Cotation EUR du GDR indisponible');
+ const d=await get('005930.KS',signal);
  if(!d||d.error||!Number.isFinite(d.price)||d.price<=0||d.currency!=='KRW'||d.syntheticGdr)throw Error('Cours coréen non confirmé');
- var q={...d,symbol:ticker,syntheticGdr:true,underlying:'005930.KS',underlyingPerGdr:25,isin:'US7960508882'};
- ['price','prevClose','changeAbs'].forEach(function(k){if(Number.isFinite(q[k]))q[k]*=25;});
+ const q={...d,symbol:ticker,syntheticGdr:true,underlying:'005930.KS',underlyingPerGdr:25,isin:gdr.isin};
+ ['price','prevClose','changeAbs'].forEach(k=>{if(Number.isFinite(q[k]))q[k]*=25;});
  return q;
 }
-function _sgFix(){
- _ovInstrumentForm('005930.KS');
- document.getElementById('ov-ticker').value='SMSN.IL';
+function _gdrQuoteCaption(d){
+ if(d?.gdrQuote)return '<div style="font-size:9px;color:var(--muted)">GDR · Francfort (EUR)</div>';
+ if(d?.syntheticGdr)return '<div style="font-size:9px;color:var(--muted)">GDR reconstitué · ×25</div>';
+ return '';
+}
+function _sgFix(ticker='005930.KS'){
+ _ovInstrumentForm(ticker);
+ const hynix=ticker==='000660.KS';
+ document.getElementById('ov-ticker').value=hynix?'HY9H.F':'SMSN.IL';
+ if(hynix){
+  const account=S.accounts.find(a=>/trade\s*republic|trade\s*république/i.test(a.name||'')&&_ovTransactions(ticker).some(t=>t.account_id===a.id));
+  const select=document.getElementById('ov-account');
+  if(account){select.value=account.id;select.onchange();}
+ }
  document.getElementById('ov-correct').textContent='Utiliser le GDR sur ce compte';
 }
 
@@ -1602,7 +1668,7 @@ function posTblRows(pos){
 
     const _cur=(d&&d.currency)||'USD'; const _dispP=d?((_cur==='USD'||_cur==='EUR')?d.price:toEur(d.price,_cur)):null; const _sym=_cur==='USD'?'$':'€';
     const priceHTML=priceLoaded
-      ?`<span class="mono">`+_sym+`${fN(_dispP)}</span>`+(d.syntheticGdr?'<div style="font-size:9px;color:var(--muted)">GDR reconstitué · ×25</div>':'')+(d.manual?`<button class="manual-btn" onclick="event.stopPropagation();setManualPrice('${p.ticker}')">✎</button><div style="font-size:9px;color:var(--muted)">${_esc(d.manual?(d.label||'Cours manuel'):'')}</div>`:'')
+      ?`<span class="mono">`+_sym+`${fN(_dispP)}</span>`+_gdrQuoteCaption(d)+(d.manual?`<button class="manual-btn" onclick="event.stopPropagation();setManualPrice('${p.ticker}')">✎</button><div style="font-size:9px;color:var(--muted)">${_esc(d.manual?(d.label||'Cours manuel'):'')}</div>`:'')
       :noPrice?`<button class="manual-btn" onclick="setManualPrice('${p.ticker}')">Saisir prix</button>`
       :`<div class="shimmer" style="width:55px;height:14px"></div>`;
 
@@ -1617,7 +1683,7 @@ function posTblRows(pos){
     return`<tr>
       <td style="text-align:left;padding-left:20px"><div class="ticker-cell" onclick="openCompanyFromPos('${p.ticker}','${(p.name||p.ticker).replace(/'/g,"\\'")}')" style="cursor:pointer" title="Voir la fiche ${p.name||p.ticker}">
         <div class="ticker-logo"><img src="https://assets.parqet.com/logos/symbol/${p.ticker}?format=png" onload="this.style.display='block'" onerror="this.parentNode.innerHTML='<span>${p.ticker.slice(0,3)}</span>'" style="display:none"></div>
-        <div><div class="ticker-name" style="text-decoration-color:var(--blue)">${p.name}</div><div class="ticker-sym" style="color:var(--cyan)">${p.ticker}</div>${p.ticker==='005930.KS'?'<button class="btn btn-ghost btn-sm" style="margin-top:5px" onclick="event.stopPropagation();_sgFix()">Vous détenez le GDR ? Corriger ×25</button>':''}</div></div></td>
+        <div><div class="ticker-name" style="text-decoration-color:var(--blue)">${p.name}</div><div class="ticker-sym" style="color:var(--cyan)">${p.ticker}</div>${['005930.KS','000660.KS'].includes(p.ticker)?'<button class="btn btn-ghost btn-sm" style="margin-top:5px" data-ticker="'+_esc(p.ticker)+'" onclick="event.stopPropagation();_sgFix(this.dataset.ticker)">Vous détenez le GDR ? Corriger</button>':''}</div></div></td>
       <td class="mono">${fQ(p.quantity)}</td>
       <td class="mono">${fN(p.pruDisplay)} ${cS(p.pruCurrency)}</td>
       <td id="px-${p.ticker}">${priceHTML}</td>
@@ -1626,14 +1692,14 @@ function posTblRows(pos){
       <td id="pl-${p.ticker}">${pnlHTML}</td>
       <td id="pp-${p.ticker}">${pctHTML}</td>
       <td style="text-align:center" onclick="event.stopPropagation()">${_coreSatSelector(p.ticker)}</td>
-      <td>${p.accounts.map(a=>acctTag(a)).join('')}</td>
+      <td>${(p.accountLots||[]).map(a=>acctTag(a.accountName,a.quantity)).join(' ')}</td>
     </tr>`;
   }).join('');
 }
 
 function openCompanyFromPos(ticker, name){
   if(['6324.TYO','6324.TO'].includes(ticker)){_ovInstrumentForm(ticker);document.getElementById('ov-ticker').value='6324.T';return;}
-  if(ticker==='005930.KS'){_sgFix();return;}
+  if(['005930.KS','000660.KS'].includes(ticker)){_sgFix(ticker);return;}
   if(_isLeveragedTicker(ticker))return setManualPrice(ticker);
   openCompanyDetail(ticker, name);
 }
@@ -1650,7 +1716,7 @@ async function fetchOneTicker(p){
   const $=id=>document.getElementById(id);
   try{
     let d=manualPrices[p.ticker]||S.prices[p.ticker];
-    if(['SMSN.IL','US7960508882'].includes(p.ticker)&&d&&!d.manual&&(!d.syntheticGdr||d.underlyingPerGdr!==25||d.currency!=='KRW'))d=null;
+    if(_gdrSpec(p.ticker)&&d&&!d.manual&&!d.gdrQuote&&!d.syntheticGdr&&!d.unavailable)d=null;
     if(_isLeveragedTicker(p.ticker)&&!d){d=_lastProductQuote(p.ticker);if(d)S.prices[p.ticker]=d;}
     if(!d||(!d.manual&&Date.now()-(d._t||0)>60000)){
       const ctrl=new AbortController();const tid=setTimeout(()=>ctrl.abort(),9000);
@@ -1663,7 +1729,7 @@ async function fetchOneTicker(p){
     const ve=pe*p.quantity,pnl=ve-p.totalCostEur,pct=p.totalCostEur>0?(pnl/p.totalCostEur)*100:0,chg=d.changePct??0;
     p.priceEur=pe;p.valueEur=ve;p.pnlEur=pnl;p.pnlPct=pct;p.dayChgPct=chg;
     // Cellule Prix (cours uniquement, sans variation)
-    if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<span class="mono">${_fs}${fN(_fdp)}</span>`+(d.syntheticGdr?'<div style="font-size:9px;color:var(--muted)">GDR reconstitué · ×25</div>':'')+(d.manual?`<button class="manual-btn" onclick="event.stopPropagation();setManualPrice('${p.ticker}')">✎</button><div style="font-size:9px;color:var(--muted)">${_esc(d.manual?(d.label||'Cours manuel'):'')}</div>`:'');
+    if($('px-'+p.ticker))$('px-'+p.ticker).innerHTML=`<span class="mono">${_fs}${fN(_fdp)}</span>`+_gdrQuoteCaption(d)+(d.manual?`<button class="manual-btn" onclick="event.stopPropagation();setManualPrice('${p.ticker}')">✎</button><div style="font-size:9px;color:var(--muted)">${_esc(d.manual?(d.label||'Cours manuel'):'')}</div>`:'');
     // Cellule Var. Jour (colonne séparée, triable)
     const djEl=$('dj-'+p.ticker);
     if(djEl)djEl.innerHTML=Math.abs(chg)>=0.01
@@ -1903,7 +1969,7 @@ function _rvRender(){
   return '<details class="rv-company"><summary><div><b>'+_esc(xs[0].name)+'</b><span>'+_esc(ticker)+' · '+xs.length+' vente'+(xs.length>1?'s':'')+' · '+_esc(xs[xs.length-1].date.slice(0,10))+' → '+_esc(xs[0].date.slice(0,10))+'</span></div><div class="rv-company-pnl"><b style="color:'+_rvColor(su.net)+'">'+(su.missing===xs.length?'—':_rvSigned(su.net))+(su.missing||su.uncertain?' <small>provisoire</small>':'')+'</b><span>'+Object.keys(native).map(function(c){return native[c].missing?'Devise non comparable':_rvSigned(native[c].total,c);}).join(' · ')+'</span></div></summary><div class="rv-table-wrap"><table class="rv-table"><thead><tr><th>Date / compte</th><th>Quantité</th><th>Prix moyen<br>d’achat</th><th>Coût total<br>d’achat</th><th>Vente totale<br>nette de frais</th><th>PV / MV<br>en devise</th><th>PV / MV<br>en euros</th><th>Contrôle</th></tr></thead><tbody>'+xs.map(function(s){var idx=sales.indexOf(s),date=s.date.slice(0,10);return '<tr><td><b>'+_esc(date)+'</b><small>'+_esc(s.accountName)+'</small></td><td>'+fQ(s.qty)+'</td><td>'+(s.cost!=null&&s.qty>0?_rvFormatAverage(s.cost/s.qty)+' '+_esc(s.currency):'—')+'<small>'+(s.eurCost!=null&&s.qty>0?_rvFormatAverage(s.eurCost/s.qty)+' €':'—')+'</small></td><td>'+(s.cost!=null?fN(s.cost)+' '+_esc(s.currency):'—')+'<small>'+(s.eurCost!=null?fE(s.eurCost):'Change manquant')+'</small></td><td>'+fN(s.proceeds==null?s.qty*s.price-s.fees:s.proceeds)+' '+_esc(s.currency)+'<small>Frais vente : '+fN(s.fees)+' '+_esc(s.currency)+'</small></td><td style="color:'+_rvColor(s.nativePv)+'">'+_rvSigned(s.nativePv,s.currency)+'</td><td style="color:'+_rvColor(s.pv)+'">'+_rvSigned(s.pv)+'<small>'+(s.pct!=null?_rvSigned(s.pct,'').replace(' €','')+' % en devise':'')+'</small></td><td><span class="rv-status">'+_esc(s.error||s.status)+'</span><button class="btn btn-ghost btn-sm" onclick="_rvAudit('+idx+')">Détail / vérifier</button></td></tr>';}).join('')+'</tbody></table></div></details>';
  }).join('');
  var issueRows=ledger.issues.length?'<details class="rv-issues"><summary>Anomalies à corriger ('+ledger.issues.length+')</summary>'+ledger.issues.map(function(x){return '<p>'+_esc(x.tx.ticker||'Sans titre')+' · '+_esc(x.tx.transaction_date||'Sans date')+' : '+_esc(x.message)+'</p>';}).join('')+'</details>':'';
- modal.innerHTML='<div class="modal-hd"><div><h2>Plus-values réalisées <small style="font-size:12px;color:var(--muted)">V43</small></h2><p class="rv-subtitle">'+(fiscal?'Synthèse fiscale · '+_rvView.year:'Synthèse comptable · toutes les années')+'</p></div><button class="modal-close" onclick="closeModal()">✕</button></div>'+controls+cards+'<p class="rv-info">'+info+'</p>'+(notices.length?'<div class="rv-notice">'+notices.map(_esc).join('<br>')+'</div>':'')+'<div class="rv-groups">'+(rows||'<div class="rv-empty">Aucune vente dans cette sélection.</div>')+'</div>'+issueRows+'<p class="rv-info">Conversion automatique : cours journalier quand disponible ; sinon base de secours (1 € = '+_rvUsdBase()+' $). Aucune saisie de change par vente nécessaire. Prix moyen d’achat = coût total d’achat / quantité vendue, frais d’achat inclus. PV / MV = vente totale nette − coût total d’achat. Les conversions indicatives restent des estimations à vérifier avant déclaration.</p>';
+ modal.innerHTML='<div class="modal-hd"><div><h2>Plus-values réalisées <small style="font-size:12px;color:var(--muted)">V44</small></h2><p class="rv-subtitle">'+(fiscal?'Synthèse fiscale · '+_rvView.year:'Synthèse comptable · toutes les années')+'</p></div><button class="modal-close" onclick="closeModal()">✕</button></div>'+controls+cards+'<p class="rv-info">'+info+'</p>'+(notices.length?'<div class="rv-notice">'+notices.map(_esc).join('<br>')+'</div>':'')+'<div class="rv-groups">'+(rows||'<div class="rv-empty">Aucune vente dans cette sélection.</div>')+'</div>'+issueRows+'<p class="rv-info">Conversion automatique : cours journalier quand disponible ; sinon base de secours (1 € = '+_rvUsdBase()+' $). Aucune saisie de change par vente nécessaire. Prix moyen d’achat = coût total d’achat / quantité vendue, frais d’achat inclus. PV / MV = vente totale nette − coût total d’achat. Les conversions indicatives restent des estimations à vérifier avant déclaration.</p>';
 }
 function _rvAudit(index){
  var s=_rvDetailsRows[index];if(!s)return;_rvPanel='audit';var related=S.transactions.filter(function(t){return t.account_id===s.accountId&&t.ticker===s.ticker&&_rvDay(t)<=_rvDay(s.tx);});
@@ -1939,17 +2005,10 @@ function groupByKey(pos,keyFn,colorFn){
 function buildChartData(){
   const pos=S.enrichedPos.filter(p=>(p.valueEur||0)>0);
   const drill=chartDrill;
-  if(!pos.length)return{labels:[],values:[],colors:[],clickable:false};
+  if(!pos.length&&chartMode!=='enveloppe')return{labels:[],values:[],colors:[],clickable:false};
 
-  if(chartMode==='positions')return groupByKey(pos,p=>p.name||p.ticker,(l,i)=>{const tk=(pos.find(x=>(x.name||x.ticker)===l)||{}).ticker;return tickerColor(tk||l,i);});
-
-  if(chartMode==='enveloppe'){
-    if(!drill.length){
-      const m={};computeByAccount().forEach(p=>{const d=S.prices[p.ticker];if(!d?.price)return;const pe=toEur(d.price,d.currency||'USD');const ve=pe*p.quantity;if(ve>0)m[p.accountName]=(m[p.accountName]||0)+ve;});
-      const entries=Object.entries(m).sort((a,b)=>b[1]-a[1]);
-      return{labels:entries.map(e=>e[0]),values:entries.map(e=>e[1]),colors:entries.map(e=>acctColor(e[0]).color),clickable:true};
-    }else{const filt=pos.filter(p=>p.accounts.includes(drill[0]));return{...groupByKey(filt,p=>p.ticker,(t,i)=>tickerColor(t,i)),clickable:false};}
-  }
+  if(chartMode==='positions')return _chartPositionNames(pos);
+  if(chartMode==='enveloppe')return _accountAllocation(drill);
 
   if(chartMode==='type'){
     const allPos=S.enrichedPos.filter(p=>(p.valueEur||p.totalCostEur||0)>0);
@@ -1961,7 +2020,7 @@ function buildChartData(){
     }
     const sel=drill[0];
     const filt=allPos.filter(p=>(isETF(p)?'ETF':'Stock picking')===sel);
-    return{...groupByKey(filt,p=>p.ticker,(t,i)=>tickerColor(t,i)),clickable:false};
+    return _chartPositionNames(filt);
   }
 
   if(chartMode==='secteur'){
@@ -1987,9 +2046,7 @@ function buildChartData(){
     const [selSect,selSub]=drill;
     const exp=explodeForMode(pos,'secteur');
     const filt=exp.filter(ep=>getSect(ep)===selSect&&getSubSect(ep)===selSub);
-    const m={};filt.forEach(ep=>{const k=ep._isEtfSlice?ep.name:ep.ticker;m[k]=(m[k]||0)+(ep.valueEur||0);});
-    const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
-    return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((e,i)=>tickerColor(e[0],i)),clickable:false};
+    return _chartPositionNames(filt);
   }
 
   if(chartMode==='activite'){
@@ -2069,7 +2126,7 @@ function buildChartData(){
       return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((_,i)=>PALETTE[i%PALETTE.length]),clickable:true};
     }
     const filt=pos.filter(p=>(CNAMES[getProfile(p.ticker).country||'XX']||p.ticker)===drill[1]);
-    return{...groupByKey(filt,p=>p.name||p.ticker,(t,i)=>tickerColor(t,i)),clickable:false};
+    return _chartPositionNames(filt);
   }
 
   if(chartMode==='pays'){
@@ -2085,9 +2142,7 @@ function buildChartData(){
       const sel=drill[0];
       const exp=explodeForMode(pos,'pays');
       const filt=exp.filter(ep=>{const k=ep._etfKey?(CNAMES[ep._etfKey]||ep._etfKey):(CNAMES[getProfile(ep.ticker).country||'XX']||'Autre');return k===sel;});
-      const m={};filt.forEach(ep=>{const k=ep._isEtfSlice?ep.name+' (expo.)':ep.ticker;m[k]=(m[k]||0)+(ep.valueEur||0);});
-      const ent=Object.entries(m).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
-      return{labels:ent.map(e=>e[0]),values:ent.map(e=>e[1]),colors:ent.map((e,i)=>tickerColor(e[0].split(' ')[0],i)),clickable:false};
+      return _chartPositionNames(filt.map(ep=>ep._isEtfSlice?{...ep,name:ep.name+' (expo.)'}:ep));
     }
   }
 
@@ -2117,13 +2172,13 @@ function buildChartData(){
 
 function renderDonut(){
   const cv=document.getElementById('donut-chart');if(!cv)return;
-  const {labels,values,colors,clickable}=buildChartData();
-  const total=values.reduce((s,v)=>s+v,0);if(!total)return;
+  const {labels,values,colors,clickable,keys=labels}=buildChartData();
+  const total=values.reduce((s,v)=>s+v,0);if(!total){if(S.chart){S.chart.destroy();S.chart=null;}renderLegend();renderBreadcrumb();return;}
   const adjustedColors=_spreadAdjacentColors(labels,colors);
   if(S.chart){S.chart.destroy();S.chart=null;}
   S.chart=new Chart(cv,{type:'doughnut',
     data:{labels,datasets:[{data:values,backgroundColor:adjustedColors,borderColor:'rgba(0,0,0,.12)',borderWidth:1,hoverOffset:8}]},
-    options:{cutout:'68%',onClick:(_,els)=>{if(els.length)handleDrill(labels[els[0].index]);},
+    options:{cutout:'68%',onClick:(_,els)=>{if(els.length)handleDrill(keys[els[0].index]);},
       plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const pct=((ctx.raw/total)*100).toFixed(1);return ctx.label+': '+fN(ctx.raw)+'\u00a0€ ('+pct+'%)';},title:ctx=>ctx[0]?.label||''}}},
     }});
   cv.style.cursor = clickable ? 'pointer' : 'default';
@@ -2133,16 +2188,16 @@ function renderDonut(){
 
 function renderLegend(){
   const el=document.getElementById('chart-legend');if(!el)return;
-  const {labels,values,colors,clickable}=buildChartData();
+  const {labels,values,colors,clickable,keys=labels}=buildChartData();
   const total=values.reduce((s,v)=>s+v,0);if(!total){el.innerHTML='';return;}
   const adjustedColors=_spreadAdjacentColors(labels,colors);
   const items=labels.map((l,i)=>{
     const pct=((values[i]/total)*100).toFixed(1);
     const cls=clickable?'legend-clickable':'';
-    const click=clickable?`onclick="handleDrill('${l.replace(/'/g,"\'")}')"` :'';
+    const click=clickable?`data-key="${_esc(keys[i])}" onclick="handleDrill(this.dataset.key)"`:'';
     return`<div class="${cls}" ${click} style="display:flex;align-items:flex-start;gap:8px;padding:2px 4px">
       <div style="width:9px;height:9px;border-radius:50%;background:${adjustedColors[i]};flex-shrink:0;margin-top:4px"></div>
-      <div style="min-width:0"><div style="font-size:12px;white-space:normal;overflow-wrap:anywhere;line-height:1.25">${l}</div><div style="font-size:11px;color:var(--muted)">${pct}%</div></div>
+      <div style="min-width:0"><div style="font-size:12px;white-space:normal;overflow-wrap:anywhere;line-height:1.25">${_esc(l)}</div><div style="font-size:11px;color:var(--muted)">${pct}%</div></div>
     </div>`;
   }).join('');
 
@@ -2165,7 +2220,8 @@ function renderBreadcrumb(){
   const el=document.getElementById('chart-bc');if(!el)return;
   if(!chartDrill.length){el.innerHTML='';return;}
   let html=`<span class="bc-link" onclick="chartDrill=[];renderDonut()">Tout</span>`;
-  chartDrill.forEach((d,i)=>{
+  chartDrill.forEach((key,i)=>{
+    const d=_esc(chartMode==='enveloppe'?(S.accounts.find(a=>a.id===key)?.name||'Compte'):key);
     html+=`<span class="bc-sep"> › </span>`;
     if(i<chartDrill.length-1)html+=`<span class="bc-link" onclick="chartDrill=chartDrill.slice(0,${i+1});renderDonut()">${d}</span>`;
     else html+=`<span>${d}</span>`;
@@ -2180,7 +2236,7 @@ function handleDrill(label){
     // Labels = noms ou tickers → retrouve la position par nom OU ticker
     const pos=(S.enrichedPos.length?S.enrichedPos:computePositions());
     const p=pos.find(x=>x.ticker===label)||pos.find(x=>(x.name||'')===label);
-    if(p) openCompanyDetail(p.ticker, p.name||p.ticker);
+    if(p) openCompanyFromPos(p.ticker, p.name||p.ticker);
     else if(label.match(/^[A-Z0-9.]{1,7}$/)) openCompanyDetail(label, label);
   }
 }
@@ -2560,7 +2616,7 @@ async function loadWatchlist(){
     renderWatchlistTable();
     await Promise.all(watchlistItems.map(async function(w){
       if(S.prices[w.ticker]) return;
-      try { var r=await fetch(API+'?symbol='+encodeURIComponent(w.ticker)); var d=await r.json(); if(d && d.price) S.prices[w.ticker]=d; } catch(e){}
+      try { var d=await _sgFetchQuote(w.ticker); if(d && d.price) S.prices[w.ticker]=d; } catch(e){}
     }));
     renderWatchlistTable();
   } catch(e) {
@@ -2780,7 +2836,7 @@ async function renderScreener(){
   pg.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:22px">'+
     '<div>'+
       '<h2 style="font-size:18px;font-weight:700">Screener</h2>'+
-      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V43 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
+      '<p style="color:var(--muted);font-size:13px;margin-top:3px">Moteur valorisation V44 · moteur unifié Matrice/DCF · Portefeuille '+(S.enrichedPos.length?'· '+(S.enrichedPos.filter(function(p){return !isETF(p)&&!_isLeveragedTicker(p.ticker);}).length)+' titres':'')+(_scrShowWatch?' + Watchlist · '+watchlistItems.length+' cibles':'')+'</p>'+
     '</div>'+
     '<button onclick="_toggleScrWatch()" style="padding:6px 14px;border:1px solid var(--border2);border-radius:20px;background:'+_wBg+';color:'+_wColor+';font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">'+
       '⭐ Watchlist — '+(_scrShowWatch?'<b>ON</b>':'OFF')+
@@ -3438,8 +3494,7 @@ async function renderCompanyDetail(ticker, name) {
 
   // Toujours re-fetcher le prix pour avoir les données graphique fraîches
   try {
-    var rp = await fetch(API+'?symbol='+encodeURIComponent(ticker));
-    var dp = await rp.json();
+    var dp = await _sgFetchQuote(ticker);
     if (dp && dp.price) { S.prices[ticker] = dp; }
   } catch(e) {}
   var price = S.prices[ticker];
@@ -3486,8 +3541,7 @@ async function renderCompanyDetail(ticker, name) {
   // Fetch fresh price data for chart if not available
   if (!price || !price.chartData) {
     try {
-      var r2 = await fetch(API+'?symbol='+encodeURIComponent(ticker));
-      var d2 = await r2.json();
+      var d2 = await _sgFetchQuote(ticker);
       if (d2 && d2.price) { S.prices[ticker] = d2; price = d2; }
     } catch(e) {}
   }
@@ -6509,6 +6563,7 @@ var _priceHistCache = {}; // {key: [{t,c}]}
 // Filet de sécurité quand la devise n'a pas encore été chargée
 function _currencyFromSuffix(ticker){
   if(['SMSN.IL','US7960508882'].includes(ticker))return 'KRW';
+  if(_gdrSpec(ticker))return 'EUR';
   if(!ticker) return 'USD';
   var suffix=(ticker.split('.')[1]||'').toUpperCase();
   var map={
@@ -7412,7 +7467,7 @@ async function renderFriendPortfolio(friendId, friendName, friendVis){
     // ── Fetch prices pour tous les tickers de l'ami ──
     await Promise.all(pos.map(async function(p){
       if(S.prices[p.ticker]||manualPrices[p.ticker]) return;
-      try{var r=await fetch(API+'?symbol='+encodeURIComponent(p.ticker));var d=await r.json();if(d&&d.price)S.prices[p.ticker]=d;}catch(e){}
+      try{var d=await _sgFetchQuote(p.ticker);if(d&&d.price)S.prices[p.ticker]=d;}catch(e){}
     }));
     // Appliquer les prix manuels (depuis Supabase, partagés) pour les tickers sans données Yahoo
     pos.forEach(function(p){
@@ -9079,16 +9134,31 @@ window.deleteJournal=async function(id){
 };
 
 // ═══ ACCOUNTS PAGE ═══
+let _accountSearch='',_accountSearchFold=new Map();
+function _accountSearchText(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();}
+function _accountTxMatches(t){
+ const key=_accountSearchText([t.name,t.ticker,..._gdrSearchAliases(t.ticker)].filter(Boolean).join(' '));
+ return _accountSearchText(_accountSearch).split(/\s+/).every(word=>key.includes(word));
+}
+function _renderAccountSearchResults(){
+ const el=document.getElementById('account-search-results');if(!el)return;
+ const searching=!!_accountSearch.trim(),matches=S.transactions.filter(_accountTxMatches);
+ const accounts=searching?S.accounts.filter(a=>matches.some(t=>t.account_id===a.id)):S.accounts;
+ const count=document.getElementById('account-search-count');
+ if(count)count.textContent=searching?matches.length+' résultat(s)':'';
+ el.innerHTML=accounts.length?accounts.map(renderAcctCard).join(''):'<div class="empty-state"><h3>Aucune transaction correspondante</h3><p>Essaie le ticker ou le nom saisi.</p></div>';
+}
+function _setAccountSearch(value){_accountSearch=value;_accountSearchFold.clear();_renderAccountSearchResults();}
 var ACCOUNT_TX_SORT_COLUMNS=['title','date','type','quantity','price','fees','total'];
 function _accountPrefsKey(){var u=getUser();return 'valio_account_view_v34_'+(u&&u.id||'local');}
 function _accountPrefs(){try{var p=JSON.parse(localStorage.getItem(_accountPrefsKey())||'{}');return p&&typeof p==='object'&&!Array.isArray(p)?p:{};}catch(e){return {};}}
 function _accountView(id){var p=_accountPrefs()[id]||{},sort=p.sort||{};return {collapsed:p.collapsed===true,sort:{col:ACCOUNT_TX_SORT_COLUMNS.includes(sort.col)?sort.col:'date',dir:sort.dir==='asc'?'asc':'desc'}};}
 function _saveAccountView(id,state){var p=_accountPrefs();p[id]=state;try{localStorage.setItem(_accountPrefsKey(),JSON.stringify(p));}catch(e){}}
-function toggleAccountEnvelope(id){var v=_accountView(id);v.collapsed=!v.collapsed;_saveAccountView(id,v);renderAccounts();var b=document.getElementById('account-toggle-'+id);if(b)b.focus();}
+function toggleAccountEnvelope(id){if(_accountSearch.trim())_accountSearchFold.set(id,!_accountSearchFold.get(id));else{var v=_accountView(id);v.collapsed=!v.collapsed;_saveAccountView(id,v);}_renderAccountSearchResults();var b=document.getElementById('account-toggle-'+id);if(b)b.focus();}
 function sortAccountTransactions(id,col){
  if(!ACCOUNT_TX_SORT_COLUMNS.includes(col))return;
  var v=_accountView(id);v.sort=v.sort.col===col?{col:col,dir:v.sort.dir==='desc'?'asc':'desc'}:{col:col,dir:col==='title'||col==='type'?'asc':'desc'};
- _saveAccountView(id,v);renderAccounts();var b=document.getElementById('account-sort-'+id+'-'+col);if(b)b.focus();
+ _saveAccountView(id,v);_renderAccountSearchResults();var b=document.getElementById('account-sort-'+id+'-'+col);if(b)b.focus();
 }
 function _accountTxSortValue(t,col){
  if(col==='title')return String(t.name||t.ticker||'');
@@ -9100,7 +9170,7 @@ function _accountTxSortValue(t,col){
 }
 function _accountSortedTransactions(id){
  var sort=_accountView(id).sort;
- return S.transactions.filter(function(t){return t.account_id===id;}).map(function(t,i){return {tx:t,index:i};}).sort(function(a,b){
+ return S.transactions.filter(function(t){return t.account_id===id&&_accountTxMatches(t);}).map(function(t,i){return {tx:t,index:i};}).sort(function(a,b){
   var av=_accountTxSortValue(a.tx,sort.col),bv=_accountTxSortValue(b.tx,sort.col);
   if(av==null&&bv!=null)return 1;if(bv==null&&av!=null)return -1;
   var diff=av==null&&bv==null?0:typeof av==='string'?av.localeCompare(bv,'fr',{numeric:true,sensitivity:'base'}):av-bv;
@@ -9119,11 +9189,16 @@ function renderAccounts(){
   pg.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;flex-wrap:wrap;gap:10px">
     <div><h2 style="font-size:18px;font-weight:700">Mes comptes</h2><p style="color:var(--muted);font-size:13px;margin-top:3px">${S.accounts.length} compte${S.accounts.length>1?'s':''} · ${S.transactions.length} transaction${S.transactions.length!==1?'s':''}</p></div>
     <div style="display:flex;gap:10px"><button class="btn btn-ghost" onclick="openAddTransaction()">+ Transaction</button><button class="btn btn-primary" onclick="openAddAccount()">+ Compte</button></div>
-  </div>${S.accounts.map(a=>renderAcctCard(a)).join('')}`;
+  </div><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+    <div style="width:min(100%,420px)"><label class="form-label" for="account-search">Rechercher une transaction</label>
+    <input type="search" id="account-search" class="form-input" placeholder="Nom ou ticker : Nvidia, NVDA…" value="${_esc(_accountSearch)}" oninput="_setAccountSearch(this.value)"></div>
+    <span id="account-search-count" role="status" style="color:var(--muted);font-size:12px"></span>
+  </div><div id="account-search-results"></div>`;
+  _renderAccountSearchResults();
 }
 
 function renderAcctCard(a){
-  const txs=_accountSortedTransactions(a.id);const view=_accountView(a.id);
+  const txs=_accountSortedTransactions(a.id);const view=_accountView(a.id);if(_accountSearch.trim())view.collapsed=!!_accountSearchFold.get(a.id);
   const ic={PEA:'🏦',CTO:'💼',PER:'🔒',AV:'📋',AUTRE:'💳'};const c=acctColor(a.name);
   return`<div class="account-card">
     <div class="account-header">
@@ -9139,7 +9214,7 @@ function renderAcctCard(a){
     `<div class="tbl-wrap"><table>
       <thead><tr>${_accountSortHeader(a.id,'Titre','title')}${_accountSortHeader(a.id,'Date','date')}${_accountSortHeader(a.id,'Type','type')}${_accountSortHeader(a.id,'Qté','quantity')}${_accountSortHeader(a.id,'Prix unit.','price')}${_accountSortHeader(a.id,'Frais','fees')}${_accountSortHeader(a.id,'Total','total')}<th>Actions</th></tr></thead>
       <tbody>${txs.map(tx=>`<tr>
-        <td style="text-align:left"><div class="ticker-name">${tx.name}</div><div class="ticker-sym">${_esc(tx.ticker)}${_instrumentCaption(tx.ticker)}</div></td>
+        <td style="text-align:left"><div class="ticker-name">${_esc(tx.name||tx.ticker)}</div><div class="ticker-sym">${_esc(tx.ticker)}${_instrumentCaption(tx.ticker)}</div></td>
         <td class="mono c-muted" style="font-size:12px">${fD(tx.transaction_date)}</td>
         <td><span class="badge ${tx.transaction_type==='buy'?'badge-green':'badge-red'}">${tx.transaction_type==='buy'?'▲ Achat':'▼ Vente'}</span></td>
         <td class="mono">${fQ(tx.quantity)}</td><td class="mono">${fN(tx.price)} ${cS(tx.currency)}</td>
@@ -9162,7 +9237,7 @@ function openAddAccount(){showModal(`<div class="modal-hd"><h2>Créer un compte<
     <div class="form-group"><label class="form-label">Devise</label><select id="m-curr" class="form-input"><option value="EUR">EUR €</option><option value="USD">USD $</option></select></div></div>
     <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" onclick="saveAccount()">Créer</button></div>`);}
 async function saveAccount(){const name=document.getElementById('m-name').value.trim(),type=document.getElementById('m-type').value,currency=document.getElementById('m-curr').value;if(!name)return showToast('❌ Donne un nom');try{const d=await dbPost('accounts',{user_id:getUser().id,name,type,currency});S.accounts.push(d);closeModal();showToast('✅ Compte créé');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
-async function deleteAccount(id,name){if(!confirm(`Supprimer "${name}" et toutes ses transactions ?`))return;try{await dbDel('accounts','id=eq.'+id);S.accounts=S.accounts.filter(a=>a.id!==id);S.transactions=S.transactions.filter(t=>t.account_id!==id);showToast('✅ Supprimé');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
+async function deleteAccount(id,name){if(!confirm(`Supprimer "${name}" et toutes ses transactions ?`))return;try{await dbDel('accounts','id=eq.'+id);S.accounts=S.accounts.filter(a=>a.id!==id);S.transactions=S.transactions.filter(t=>t.account_id!==id);S.portfolioRendered=false;showToast('✅ Supprimé');renderAccounts();}catch(e){showToast('❌ '+e.message);}}
 function txForm(pre=null,tx=null){const ie=!!tx;window._editingTxId=tx&&tx.id||null;const instrument=_instrumentFromTx(tx);window._baseAssetBeforeLeverage=(!instrument&&tx&&tx.asset_type)||'stock';return`<div class="modal-hd"><h2>${ie?'Modifier':'Ajouter une transaction'}</h2><button class="modal-close" onclick="closeModal()">✕</button></div>
     <div class="form-group"><label class="form-label">Compte *</label><select id="m-acct" class="form-input" onchange="onAcctChange()">${S.accounts.map(a=>`<option value="${a.id}" ${a.id===(tx?.account_id||pre)?'selected':''}>${a.name} (${a.type})</option>`).join('')}</select></div>
     <div class="form-row"><div class="form-group"><label class="form-label">Ticker *</label><input type="text" id="m-ticker" class="form-input" placeholder="ex: NVDA" value="${_esc((tx?.ticker||'').replace(/^TURBO:/,''))}" oninput="this.value=this.value.toUpperCase()"></div><div class="form-group"><label class="form-label">Nom *</label><input type="text" id="m-aname" class="form-input" placeholder="ex: Nvidia" value="${tx?.name||''}"></div></div>
@@ -9180,13 +9255,14 @@ function openAddTransaction(pre=null){if(!S.accounts.length)return showToast("�
 function openEditTx(id){const tx=S.transactions.find(t=>t.id===id);if(!tx)return showToast('❌ Introuvable');showModal(txForm(null,tx));}
 function onAcctChange(){const id=document.getElementById('m-acct')?.value;const a=S.accounts.find(x=>x.id===id);if(!a)return;const el=document.getElementById('m-currency');if(!el)return;const n=a.name.toLowerCase();if(n.includes('ibkr')||n.includes('interactive')||a.currency==='USD')el.value='USD';else el.value='EUR';}
 function updTotal(){const q=parseFloat(document.getElementById('m-qty')?.value)||0,p=parseFloat(document.getElementById('m-price')?.value)||0,f=parseFloat(document.getElementById('m-fees')?.value)||0,c=document.getElementById('m-currency')?.value||'EUR';const el=document.getElementById('tx-total');if(el&&q>0&&p>0)el.innerHTML=`<strong>Total : ${fN(q*p+f)} ${cS(c)}</strong> · ${fQ(q)} × ${fN(p)} + ${fN(f)} frais`;}
-function readForm(){return _rvPreserveMeta(_finalizeInstrumentForm({account_id:document.getElementById('m-acct').value,ticker:document.getElementById('m-ticker').value.trim().toUpperCase(),name:document.getElementById('m-aname').value.trim(),asset_type:document.getElementById('m-asset').value,transaction_type:document.getElementById('m-txtype').value,quantity:parseFloat(document.getElementById('m-qty').value),price:parseFloat(document.getElementById('m-price').value),fees:parseFloat(document.getElementById('m-fees').value)||0,currency:document.getElementById('m-currency').value,transaction_date:document.getElementById('m-date').value,notes:document.getElementById('m-notes').value.trim()||null}));}
-async function saveTx(){const d=readForm();const invalid=_txValidationError(d);if(invalid)return showToast('❌ '+invalid);try{const ins=await dbPost('transactions',d);const full=await dbGet('transactions','id=eq.'+ins.id+'&select=*,accounts(name,type)');S.transactions.unshift(full?.[0]||ins);closeModal();showToast('✅ Transaction enregistrée');_rvApplyTotals();_rvLoadFx(false);renderAccounts();
+function _normalizeGdrInput(input){const t=String(input||'').trim().toUpperCase();return ['HY9H','US78392B1070'].includes(t)?'HY9H.F':['SSU','SSU.F','US7960508882'].includes(t)?'SMSN.IL':t;}
+function readForm(){return _rvPreserveMeta(_finalizeInstrumentForm({account_id:document.getElementById('m-acct').value,ticker:_normalizeGdrInput(document.getElementById('m-ticker').value),name:document.getElementById('m-aname').value.trim(),asset_type:document.getElementById('m-asset').value,transaction_type:document.getElementById('m-txtype').value,quantity:parseFloat(document.getElementById('m-qty').value),price:parseFloat(document.getElementById('m-price').value),fees:parseFloat(document.getElementById('m-fees').value)||0,currency:document.getElementById('m-currency').value,transaction_date:document.getElementById('m-date').value,notes:document.getElementById('m-notes').value.trim()||null}));}
+async function saveTx(){const d=readForm();const invalid=_txValidationError(d);if(invalid)return showToast('❌ '+invalid);try{const ins=await dbPost('transactions',d);const full=await dbGet('transactions','id=eq.'+ins.id+'&select=*,accounts(name,type)');S.transactions.unshift(full?.[0]||ins);S.portfolioRendered=false;closeModal();showToast('✅ Transaction enregistrée');_rvApplyTotals();_rvLoadFx(false);renderAccounts();
   // Journal de décisions : proposer une note pré-remplie (bouton "Passer" pour ignorer)
   setTimeout(function(){ try{ openJournalModal({ticker:d.ticker,type:(d.transaction_type||'buy'),date:d.transaction_date,price:d.price,currency:d.currency}); }catch(e){} },350);
 }catch(e){showToast('❌ '+e.message);}}
-async function saveEditTx(id){const d=readForm();const invalid=_txValidationError(d);if(invalid)return showToast('❌ '+invalid);try{await dbPatch('transactions','id=eq.'+id,d);const i=S.transactions.findIndex(t=>t.id===id);if(i>=0){const a=S.accounts.find(x=>x.id===d.account_id);S.transactions[i]={...S.transactions[i],...d,accounts:{name:a?.name,type:a?.type}};}closeModal();showToast('✅ Modifié');_rvApplyTotals();_rvLoadFx(false);renderAccounts();}catch(e){showToast('❌ '+e.message);}}
-async function deleteTx(id){if(!confirm('Supprimer cette transaction ?'))return;try{await dbDel('transactions','id=eq.'+id);S.transactions=S.transactions.filter(t=>t.id!==id);showToast('✅ Supprimée');_rvApplyTotals();renderAccounts();}catch(e){showToast('❌ '+e.message);}}
+async function saveEditTx(id){const d=readForm();const invalid=_txValidationError(d);if(invalid)return showToast('❌ '+invalid);try{await dbPatch('transactions','id=eq.'+id,d);const i=S.transactions.findIndex(t=>t.id===id);if(i>=0){const a=S.accounts.find(x=>x.id===d.account_id);S.transactions[i]={...S.transactions[i],...d,accounts:{name:a?.name,type:a?.type}};}S.portfolioRendered=false;closeModal();showToast('✅ Modifié');_rvApplyTotals();_rvLoadFx(false);renderAccounts();}catch(e){showToast('❌ '+e.message);}}
+async function deleteTx(id){if(!confirm('Supprimer cette transaction ?'))return;try{await dbDel('transactions','id=eq.'+id);S.transactions=S.transactions.filter(t=>t.id!==id);S.portfolioRendered=false;showToast('✅ Supprimée');_rvApplyTotals();renderAccounts();}catch(e){showToast('❌ '+e.message);}}
 
 // ═══ HELPERS ═══
 
@@ -9242,7 +9318,7 @@ async function _ovSaveFromForm(ticker){
 async function _ovReset(ticker){try{await _ovStore(ticker,{mode:'auto'});delete S.prices[ticker];delete manualPrices[ticker];closeModal();await _ovRefresh(ticker);showToast('Cours automatique rétabli');}catch(e){showToast('Modification non enregistrée : '+e.message);}}
 function _ovInstrumentForm(ticker){
  var rows=_ovTransactions(ticker),accounts=S.accounts.filter(function(a){return rows.some(function(t){return t.account_id===a.id;});});
- showModal('<div class="modal-hd"><h2>Corriger l’instrument</h2><button class="modal-close" onclick="closeModal()">✕</button></div><p class="rv-info">Cette correction remplace le ticker de toutes les transactions de ce titre sur le compte choisi. Elle conserve les quantités, prix, frais, dates et devises. Utilise le ticker du titre identifié par l’ISIN de ton relevé.</p><p>Ancien ticker : <b>'+_esc(ticker)+'</b></p><div class="form-group"><label class="form-label">Compte</label><select class="form-input" id="ov-account">'+accounts.map(function(a){return '<option value="'+_esc(a.id)+'">'+_esc(a.name)+'</option>';}).join('')+'</select></div><div class="form-group"><label class="form-label">Ticker exact du titre détenu</label><input class="form-input" id="ov-ticker" placeholder="Ex. ticker Yahoo du GDR, après vérification de son ISIN"></div><p class="rv-info">Samsung confirmé : ISIN US7960508882 → SMSN.IL, GDR ordinaire représentant 25 actions 005930.KS. La V40 reconstitue son cours à partir de ces 25 actions, puis le convertit en euros. Ne pas multiplier les quantités détenues : elles restent en GDR.</p><p id="ov-count" style="color:var(--cyan)"></p><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" id="ov-correct">Appliquer à ce compte</button></div>');
+ showModal('<div class="modal-hd"><h2>Corriger l’instrument</h2><button class="modal-close" onclick="closeModal()">✕</button></div><p class="rv-info">Cette correction remplace le ticker de toutes les transactions de ce titre sur le compte choisi. Elle conserve les quantités, prix, frais, dates et devises. Utilise le ticker du titre identifié par l’ISIN de ton relevé.</p><p>Ancien ticker : <b>'+_esc(ticker)+'</b></p><div class="form-group"><label class="form-label">Compte</label><select class="form-input" id="ov-account">'+accounts.map(function(a){return '<option value="'+_esc(a.id)+'">'+_esc(a.name)+'</option>';}).join('')+'</select></div><div class="form-group"><label class="form-label">Ticker exact du titre détenu</label><input class="form-input" id="ov-ticker" placeholder="Ex. ticker Yahoo du GDR, après vérification de son ISIN"></div><p class="rv-info">'+(ticker==='000660.KS'?'SK Hynix : si ton relevé indique HY9H (ISIN US78392B1070), choisis HY9H.F sur le compte concerné. Garde 000660.KS pour de vraies actions de Séoul.':'Samsung : SSU (ISIN US7960508882) correspond au GDR ordinaire. SMSN.IL utilise la cotation EUR lorsqu’elle est disponible.')+'</p><p id="ov-count" style="color:var(--cyan)"></p><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Annuler</button><button class="btn btn-primary" id="ov-correct">Appliquer à ce compte</button></div>');
  var update=function(){var id=document.getElementById('ov-account').value,n=rows.filter(function(t){return t.account_id===id;}).length;document.getElementById('ov-count').textContent=n+' transaction(s) à corriger';};document.getElementById('ov-account').onchange=update;document.getElementById('ov-correct').onclick=function(){_ovCorrect(ticker);};update();
 }
 async function _ovCorrect(oldTicker){
@@ -9258,7 +9334,7 @@ async function _ovCorrect(oldTicker){
 }
 
 function acctColor(n){const s=(n||'').toLowerCase();if(s.includes('ibkr')||s.includes('interactive'))return{bg:'rgba(239,68,68,.18)',color:'#f87171'};if(s.includes('bourso'))return{bg:'rgba(99,75,228,.2)',color:'#7b9ef7'};if(s.includes('trade')||s.includes('republic'))return{bg:'rgba(220,220,220,.1)',color:'#d0d0e0'};return{bg:'rgba(99,75,228,.12)',color:'#634BE4'};}
-function acctTag(n){const c=acctColor(n);const w=n.split(' ');const s=w.length<=1?n:w[0]+' '+w.slice(1).map(x=>x[0]).join('');return`<span class="acct-tag" style="background:${c.bg};color:${c.color}">${s}</span>`;}
+function acctTag(n,q){const c=acctColor(n);const w=n.split(' ');const s=w.length<=1?n:w[0]+' '+w.slice(1).map(x=>x[0]).join('');return`<span class="acct-tag" title="${_esc(n)}" style="background:${c.bg};color:${c.color}">${_esc(s)}${Number.isFinite(q)?" · "+fQ(q):""}</span>`;}
 function fE(v){if(v==null||isNaN(v))return '—';return v.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';}
 function fN(v){if(v==null||isNaN(v))return '—';return v.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function fQ(v){if(v==null)return '—';return Number.isInteger(v)?String(v):v.toLocaleString('fr-FR',{maximumFractionDigits:6});}
